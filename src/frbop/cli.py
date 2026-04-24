@@ -1,50 +1,27 @@
 import argparse
-import os
 import runpy
 import sys
-from pathlib import Path
 from typing import Sequence
 
 
 COMMANDS = {
-    "dm": ("DM optimization", "src/frbop/dmop/dm_optimisation.py"),
-    "rm": ("RM fitting", "src/frbop/rmop/rm_fitting.py"),
-    "sc-fit": ("Scintillation fit", "src/frbop/scop/fit_frb_scintillation.py"),
-    "sc-pipeline": ("Scintillation pipeline", "src/frbop/scop/Scintillation_pipeline.py"),
-    "sn": ("S/N optimization", "src/frbop/snop/snop_cli.py"),
+    "dm": ("DM optimization", "frbop.dmop.dm_optimisation"),
+    "rm": ("RM fitting", "frbop.rmop.rm_fitting"),
+    "sc-fit": ("Scintillation fit", "frbop.scop.fit_frb_scintillation"),
+    "sc-pipeline": ("Scintillation pipeline", "frbop.scop.Scintillation_pipeline"),
+    "sn": ("S/N optimization", "frbop.snop.snop_cli"),
 }
 
 
-def _find_repo_root(start: Path) -> Path:
-    env_root = os.environ.get("FRBOP_ROOT")
-    if env_root:
-        candidate = Path(env_root).expanduser().resolve()
-        if (candidate / "src" / "frbop").exists():
-            return candidate
-
-    current = start.resolve()
-    for candidate in [current, *current.parents]:
-        if (candidate / "src" / "frbop").exists():
-            return candidate
-    raise RuntimeError(
-        "Could not locate FRBop repository root. Run from inside the repository or use editable install."
-    )
-
-
-def _run_script(script_path: Path, forwarded_args: Sequence[str]) -> int:
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found: {script_path}")
-
+def _run_module(module_name: str, forwarded_args: Sequence[str]) -> int:
     old_argv = sys.argv[:]
-    old_path = sys.path[:]
     try:
-        sys.argv = [str(script_path), *forwarded_args]
-        sys.path.insert(0, str(script_path.parent))
-        runpy.run_path(str(script_path), run_name="__main__")
+        sys.argv = [module_name, *forwarded_args]
+        runpy.run_module(module_name, run_name="__main__")
         return 0
     except ModuleNotFoundError as exc:
         print(
-            f"Missing dependency while running {script_path.name}: {exc}. "
+            f"Missing dependency while running {module_name}: {exc}. "
             "Install the required extras, e.g. pip install -e '.[all]'"
         )
         return 2
@@ -58,7 +35,6 @@ def _run_script(script_path: Path, forwarded_args: Sequence[str]) -> int:
         return 1
     finally:
         sys.argv = old_argv
-        sys.path = old_path
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -95,7 +71,5 @@ def main() -> int:
     if remaining and remaining[0] == "--":
         remaining = remaining[1:]
 
-    repo_root = _find_repo_root(Path.cwd())
-    script_rel_path = COMMANDS[command][1]
-    script_path = repo_root / script_rel_path
-    return _run_script(script_path, remaining)
+    module_name = COMMANDS[command][1]
+    return _run_module(module_name, remaining)
