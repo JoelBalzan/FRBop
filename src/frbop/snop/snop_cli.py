@@ -13,13 +13,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def _patch_scipy_bilby_compat(logger=None):
+    """Patch known bilby/scipy symbol mismatch for older bilby releases."""
+    try:
+        import scipy.special._ufuncs as _ufuncs
+    except Exception:
+        return
+
+    if hasattr(_ufuncs, "btdtri"):
+        return
+    if hasattr(_ufuncs, "bdtri"):
+        _ufuncs.btdtri = _ufuncs.bdtri
+        if logger:
+            logger.warning(
+                "Applied scipy compatibility shim: scipy.special._ufuncs.btdtri -> bdtri"
+            )
+
+
 def _import_frb_class(logger=None):
     """Import ILEX FRB, with a headless fallback for Tk backend failures."""
+    _patch_scipy_bilby_compat(logger=logger)
     try:
         from ilex.frb import FRB
         return FRB
     except ImportError as exc:
         msg = str(exc)
+        if "btdtri" in msg and "scipy.special._ufuncs" in msg:
+            _patch_scipy_bilby_compat(logger=logger)
+            sys.modules.pop("ilex.frb", None)
+            sys.modules.pop("ilex.pyfit", None)
+            from ilex.frb import FRB
+            return FRB
+
         if "Tcl_SetVar" not in msg and "backend_tkagg" not in msg:
             raise
 
