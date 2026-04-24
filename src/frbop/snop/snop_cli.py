@@ -273,6 +273,23 @@ def main():
         help="Skip RM fitting (use RM=0 and skip second pass)"
     )
     parser.add_argument(
+        "--rm-range",
+        "--rm-prior",
+        nargs=2,
+        type=float,
+        default=[-1000.0, 1000.0],
+        metavar=("MIN", "MAX"),
+        help="RM search prior range passed to ILEX fit_RM (default: -1000 1000)"
+    )
+    parser.add_argument(
+        "--rm-stepsize",
+        "--rm-step",
+        dest="rm_stepsize",
+        type=float,
+        default=None,
+        help="RM trial step size passed via fit_params to ILEX fit_RM"
+    )
+    parser.add_argument(
         "--nFFT",
         type=int,
         default=336,
@@ -334,6 +351,10 @@ def main():
         raise ValueError("--tN must be >= 1")
     if args.time_res_ms is not None and args.tN is not None:
         raise ValueError("Specify only one of --tN or --time-res-ms")
+    if args.rm_range[1] <= args.rm_range[0]:
+        raise ValueError("--rm-range/--rm-prior requires MAX > MIN")
+    if args.rm_stepsize is not None and args.rm_stepsize <= 0:
+        raise ValueError("--rm-stepsize/--rm-step must be > 0")
 
     if args.time_res_ms is not None:
         effective_tN = max(1, int(round(args.time_res_ms / postfft_dt)))
@@ -539,7 +560,32 @@ def main():
     # Fit RM (unless skipped)
     if not args.skip_rm:
         try:
-            _, rmDict = frb.fit_RM(method="RMsynth", show_plots=False, tN=int(analysis_tN))
+            rm_fit_params = None
+            if args.rm_stepsize is not None:
+                # Keep both key spellings for compatibility across ILEX versions.
+                rm_fit_params = {
+                    "dRM": float(args.rm_stepsize),
+                    "rm_step": float(args.rm_stepsize),
+                }
+
+            logger.info(
+                "Running RM fit with rm_prior=[%.3f, %.3f]%s",
+                float(args.rm_range[0]),
+                float(args.rm_range[1]),
+                (
+                    f", rm_stepsize={float(args.rm_stepsize):.6f}"
+                    if args.rm_stepsize is not None
+                    else ""
+                ),
+            )
+
+            _, rmDict = frb.fit_RM(
+                method="RMsynth",
+                rm_prior=[float(args.rm_range[0]), float(args.rm_range[1])],
+                fit_params=rm_fit_params,
+                show_plots=False,
+                tN=int(analysis_tN),
+            )
             if rmDict is not None:
                 logger.info("Found RM = %.2f rad/m^2", rmDict['rm'])
                 
