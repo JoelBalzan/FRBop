@@ -1,0 +1,29 @@
+par:
+  name: 250607
+  cfreq: 919.5           # [MHz]
+  bw: 336.0              # [MHz]
+  DM: 335.87             # required for voltages mode
+  t_ref:                 # [ms], optional; if blank the script auto-selects peak time
+
+data:
+  # mode can be: voltages or stokes
+  mode: stokes
+
+  # voltages mode:
+  # dsI should point into the same product tree used to derive X/Y files
+  dsI:
+
+  # stokes mode:
+  # stokes_i: path to npy with shape [time,freq] by default
+  # time_file: optional path to 1D npy time array aligned to stokes time axis
+  # time_unit: unit of time_file values: ms or s (default ms)
+  # dt_ms: optional fallback, used only when time_file is not provided
+  # time_axis: axis index of time after selecting I (default 0)
+  stokes_i: FRB_250607_htr_dsI.npy
+  time_file: FRB_250607_htr_time.npy
+  time_unit: ms
+  dt_ms:
+  time_axis: 0
+
+# Optional RFI mask in MHz, examples: "850:860,900:905" or [850, 900]
+zapchan: []
