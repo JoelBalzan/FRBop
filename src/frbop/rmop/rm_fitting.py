@@ -10,7 +10,6 @@ Date: 2 February 2026
 """
 
 import argparse
-import contextlib
 import os
 import warnings
 from typing import Dict, List, Optional, Tuple
@@ -21,6 +20,8 @@ from RMtools_1D.do_RMclean_1D import run_rmclean
 from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.constants import c
 from scipy.optimize import curve_fit
+
+from frbop.plotting import publication_plot_style, savefig_rasterized
 
 warnings.filterwarnings('ignore')
 
@@ -33,36 +34,6 @@ def _pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[f
     """Return a publication-friendly figure size for a two-column layout."""
     height = max(min_height, TWO_COLUMN_WIDTH_IN * height_ratio)
     return TWO_COLUMN_WIDTH_IN, height
-
-
-def _savefig_rasterized(save_path: str,
-                        dpi: int = 300,
-                        bbox_inches: str = 'tight') -> None:
-    """
-    Save the current figure with rasterized artists.
-
-    This keeps output consistent for vector formats while avoiding
-    heavy vector objects in dense plots.
-    """
-    fig = plt.gcf()
-    for ax in fig.axes:
-        for artist in ax.get_children():
-            if hasattr(artist, 'set_rasterized'):
-                with contextlib.suppress(Exception):
-                    artist.set_rasterized(True)
-    fig.savefig(save_path, dpi=dpi, bbox_inches=bbox_inches)
-
-
-def _plot_style() -> Dict[str, float]:
-    """Shared publication-style plotting sizes for consistent figure typography."""
-    return {
-        'title': 11,
-        'label': 10,
-        'tick': 8,
-        'legend': 8,
-        'annotation': 7,
-        'line': 1.4,
-    }
 
 
 def _summarize_posterior(posterior_values: np.ndarray,
@@ -1669,7 +1640,7 @@ def plot_poincare_sphere(
         q_filt, u_filt, v_filt, sigma_q, sigma_u, sigma_v
     )
 
-    style = _plot_style()
+    style = publication_plot_style()
 
     # ------------------------------------------------------------------
     # Figure setup
@@ -1799,7 +1770,7 @@ def plot_poincare_sphere(
     if interactive:
         # present an interactive window before saving
         plt.show()
-    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré sphere plot saved to {output_file}")
     plt.close()
 
@@ -1872,7 +1843,7 @@ def plot_poincare_projections(
         (x, y, z) unit vector used as the projection centre for all four
         projections.  Defaults to the mean Stokes vector of the data.
     """
-    style = _plot_style()
+    style = publication_plot_style()
 
     # ------------------------------------------------------------------
     # 1.  Collect & filter Stokes points  (same logic as plot_poincare_sphere)
@@ -2190,7 +2161,7 @@ def plot_poincare_projections(
     #    f'(Q={cx:.3f}, U={cy:.3f}, V={cz:.3f})',
     #    fontsize=12, y=0.97)
 
-    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré projection panel saved to {output_file}")
     plt.close()
 
@@ -2238,7 +2209,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         Fraction of Stokes I samples used when estimating noise for lower-panel
         uncertainty & signal masking (default: 0.1)
     """
-    style = _plot_style()
+    style = publication_plot_style()
 
     # Identify peak regions if requested
     if separate_peaks and time_profile is not None:
@@ -2782,7 +2753,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
     
     plt.tight_layout()
     
-    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Time series plot saved to {output_file}")
     plt.close()
 
@@ -2824,7 +2795,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     invoke :func:`plot_poincare_sphere` explicitly with the appropriate
     ``time_series_data``.
     """
-    style = _plot_style()
+    style = publication_plot_style()
     n_rows = 3 if show_frac_panel else 2
     fig_height = 12 if show_frac_panel else 8
     fig_height = 7.4 if show_frac_panel else 5.2
@@ -3033,7 +3004,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     
     plt.tight_layout()
     
-    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Plot saved to {output_file}")
     plt.close()
 
@@ -3055,7 +3026,7 @@ def plot_burns_law_fits(fitter: RMFitter,
     - P_const(λ)      = P_i
     where P is the linear polarisation fraction (L/I).
     """
-    style = _plot_style()
+    style = publication_plot_style()
 
     lambda_sq = np.asarray(fitter.lambda_sq, dtype=float)
     freq_hz = np.asarray(fitter.freq_hz, dtype=float)
@@ -3637,7 +3608,7 @@ def plot_burns_law_fits(fitter: RMFitter,
     ax.tick_params(axis='both', labelsize=style['tick'])
 
     plt.tight_layout()
-    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Burn-law fit plot saved to {output_file}")
     plt.close()
     

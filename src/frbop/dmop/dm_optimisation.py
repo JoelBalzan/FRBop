@@ -32,6 +32,8 @@ from scipy.fftpack import dct
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
+from frbop.plotting import savefig_rasterized
+
 try:
 	from numba import njit
 	_NUMBA_AVAILABLE = True
@@ -40,22 +42,6 @@ except Exception:
 	_NUMBA_AVAILABLE = False
 
 warnings.filterwarnings('ignore')
-
-
-def _savefig_rasterized(save_path, dpi: int = 300, bbox_inches: str = 'tight') -> None:
-	"""
-	Save the current figure with rasterized artists.
-
-	This keeps output consistent for vector formats (e.g. PDF) while avoiding
-	heavy vector objects in dense plots.
-	"""
-	fig = plt.gcf()
-	for ax in fig.axes:
-		for artist in ax.get_children():
-			if hasattr(artist, 'set_rasterized'):
-				with contextlib.suppress(Exception):
-					artist.set_rasterized(True)
-	fig.savefig(save_path, dpi=dpi, bbox_inches=bbox_inches)
 
 _SHRINE_PATH = Path(__file__).resolve().parent / "SHRINE" / "python"
 sys.path.insert(0, str(_SHRINE_PATH))
@@ -558,7 +544,7 @@ class DMOptimiser:
 		plt.grid(True, alpha=0.3)
 		plt.legend(loc='best')
 		plt.tight_layout()
-		_savefig_rasterized(run_dir / f"{run_prefix}_{metric_name}_v_DM.png", dpi=150, bbox_inches='tight')
+		savefig_rasterized(run_dir / f"{run_prefix}_{metric_name}_v_DM.png", dpi=150, bbox_inches='tight')
 		plt.close()
 
 		# I profile at best DM
@@ -570,7 +556,7 @@ class DMOptimiser:
 		plt.title(f"{method_label}: I at best DM")
 		plt.grid(True, alpha=0.3)
 		plt.tight_layout()
-		_savefig_rasterized(run_dir / f"{run_prefix}_I_at_max.png", dpi=150, bbox_inches='tight')
+		savefig_rasterized(run_dir / f"{run_prefix}_I_at_max.png", dpi=150, bbox_inches='tight')
 		plt.close()
 
 		with open(run_dir / f"{run_prefix}_summaryfile.txt", "w") as summary_file:
@@ -2099,7 +2085,7 @@ class DMOptimiser:
 			plt.grid(True, alpha=0.3)
 			plt.legend()
 			plt.tight_layout()
-			_savefig_rasterized(diagnostics_path, dpi=150, bbox_inches='tight')
+			savefig_rasterized(diagnostics_path, dpi=150, bbox_inches='tight')
 			plt.close()
 		
 		if len(peaks) == 0:
@@ -2940,7 +2926,7 @@ class DMOptimiser:
 		fig.subplots_adjust(wspace=0.04, hspace=0.5)
 		
 		if save_path:
-			_savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
 			print(f"\nFigure saved to: {save_path}")
 		else:
 			plt.show()
@@ -3106,7 +3092,7 @@ class DMOptimiser:
 		plt.tight_layout()
 		
 		if save_path:
-			_savefig_rasterized(save_path, dpi=150, bbox_inches='tight')
+			savefig_rasterized(save_path, dpi=150, bbox_inches='tight')
 			print(f"DM scan plot saved to: {save_path}")
 		else:
 			plt.show()
@@ -3230,7 +3216,7 @@ class DMOptimiser:
 
 		plt.tight_layout(rect=[0.0, 0.0, 1.0, 0.93])
 		if save_path:
-			_savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
 			print(f"Component DM diagnostics saved to: {save_path}")
 		else:
 			plt.show()
@@ -3477,7 +3463,7 @@ class DMOptimiser:
 
 		plt.tight_layout()
 		if save_path:
-			_savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
 			print(f"Component dn_e diagnostics saved to: {save_path}")
 		else:
 			plt.show()
