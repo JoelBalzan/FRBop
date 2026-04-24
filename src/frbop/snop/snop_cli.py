@@ -684,6 +684,7 @@ def main():
                 # Keep both key spellings for compatibility across ILEX versions.
                 rm_fit_params = {
                     "nSamples": float(args.rm_stepsize),
+                    "showPlots": True
                 }
 
             logger.info(
