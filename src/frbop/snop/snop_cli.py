@@ -14,64 +14,111 @@ import numpy as np
 
 
 def _patch_scipy_bilby_compat(logger=None):
-    """Patch known bilby/scipy symbol mismatch for older bilby releases."""
+    """Patch known bilby/scipy symbol mismatches for older bilby releases."""
     try:
         import scipy.special._ufuncs as _ufuncs
     except Exception:
         return
 
-    if hasattr(_ufuncs, "btdtri"):
-        return
-    if hasattr(_ufuncs, "bdtri"):
-        _ufuncs.btdtri = _ufuncs.bdtri
-        if logger:
-            logger.warning(
-                "Applied scipy compatibility shim: scipy.special._ufuncs.btdtri -> bdtri"
-            )
+    alias_map = {
+        "btdtr": "bdtr",
+        "btdtri": "bdtri",
+        "btdtria": "bdtria",
+    }
+    for missing_name, fallback_name in alias_map.items():
+        if hasattr(_ufuncs, missing_name):
+            continue
+        if hasattr(_ufuncs, fallback_name):
+            setattr(_ufuncs, missing_name, getattr(_ufuncs, fallback_name))
+            if logger:
+                logger.warning(
+                    "Applied scipy compatibility shim: scipy.special._ufuncs.%s -> %s",
+                    missing_name,
+                    fallback_name,
+                )
+
+
+def _patch_scipy_missing_symbol(missing_name: str, logger=None) -> bool:
+    """Patch a single missing scipy.special._ufuncs symbol if a safe alias exists."""
+    try:
+        import scipy.special._ufuncs as _ufuncs
+    except Exception:
+        return False
+
+    if hasattr(_ufuncs, missing_name):
+        return True
+
+    candidates = []
+    if missing_name.startswith("btd"):
+        # bilby expects older beta-CDF names that map to binomial-CDF symbols
+        candidates.append("bd" + missing_name[3:])
+    if missing_name.startswith("std"):
+        candidates.append("sd" + missing_name[3:])
+
+    for cand in candidates:
+        if hasattr(_ufuncs, cand):
+            setattr(_ufuncs, missing_name, getattr(_ufuncs, cand))
+            if logger:
+                logger.warning(
+                    "Applied scipy compatibility shim: scipy.special._ufuncs.%s -> %s",
+                    missing_name,
+                    cand,
+                )
+            return True
+    return False
 
 
 def _import_frb_class(logger=None):
     """Import ILEX FRB, with a headless fallback for Tk backend failures."""
     _patch_scipy_bilby_compat(logger=logger)
-    try:
-        from ilex.frb import FRB
-        return FRB
-    except ImportError as exc:
-        msg = str(exc)
-        if "btdtri" in msg and "scipy.special._ufuncs" in msg:
-            _patch_scipy_bilby_compat(logger=logger)
-            sys.modules.pop("ilex.frb", None)
-            sys.modules.pop("ilex.pyfit", None)
+
+    for _ in range(4):
+        try:
             from ilex.frb import FRB
             return FRB
+        except ImportError as exc:
+            msg = str(exc)
 
-        if "Tcl_SetVar" not in msg and "backend_tkagg" not in msg:
+            match = re.search(
+                r"cannot import name '([^']+)' from 'scipy\.special\._ufuncs'",
+                msg,
+            )
+            if match:
+                missing = match.group(1)
+                patched = _patch_scipy_missing_symbol(missing, logger=logger)
+                if patched:
+                    sys.modules.pop("ilex.frb", None)
+                    sys.modules.pop("ilex.pyfit", None)
+                    sys.modules.pop("bilby", None)
+                    continue
+
+            if "Tcl_SetVar" in msg or "backend_tkagg" in msg:
+                # RM-Tools imports NavigationToolbar2Tk even for non-interactive runs.
+                # Provide a minimal stub so headless execution can proceed.
+                os.environ.setdefault("rmsy_mpl_backend", "Agg")
+                tkagg_stub = types.ModuleType("matplotlib.backends.backend_tkagg")
+
+                class _DummyToolbar:
+                    def __init__(self, *args, **kwargs):
+                        pass
+
+                tkagg_stub.NavigationToolbar2Tk = _DummyToolbar
+                sys.modules["matplotlib.backends.backend_tkagg"] = tkagg_stub
+
+                # Clear partially imported modules from the failed first attempt.
+                sys.modules.pop("ilex.frb", None)
+                sys.modules.pop("ilex.fitting", None)
+                sys.modules.pop("RMutils.util_plotTk", None)
+
+                if logger:
+                    logger.warning(
+                        "Tk backend unavailable; using headless fallback for RM-Tools plotting imports."
+                    )
+                continue
+
             raise
 
-        # RM-Tools imports NavigationToolbar2Tk even for non-interactive runs.
-        # Provide a minimal stub so headless execution can proceed.
-        os.environ.setdefault("rmsy_mpl_backend", "Agg")
-        tkagg_stub = types.ModuleType("matplotlib.backends.backend_tkagg")
-
-        class _DummyToolbar:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        tkagg_stub.NavigationToolbar2Tk = _DummyToolbar
-        sys.modules["matplotlib.backends.backend_tkagg"] = tkagg_stub
-
-        # Clear partially imported modules from the failed first attempt.
-        sys.modules.pop("ilex.frb", None)
-        sys.modules.pop("ilex.fitting", None)
-        sys.modules.pop("RMutils.util_plotTk", None)
-
-        if logger:
-            logger.warning(
-                "Tk backend unavailable; using headless fallback for RM-Tools plotting imports."
-            )
-
-        from ilex.frb import FRB
-        return FRB
+    raise ImportError("Unable to import ilex.frb.FRB after applying compatibility fallbacks")
 
 
 def auto_set_pa0_main(frb, Ldebias_threshold: float = 2.0, logger=None, **kwargs):
