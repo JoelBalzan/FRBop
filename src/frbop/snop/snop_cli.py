@@ -404,6 +404,12 @@ def main():
         help="nFFT value to pass to make_dynspec.py (default: 336)"
     )
     parser.add_argument(
+        "--guard",
+        type=int,
+        default=200,
+        help="Guard ms passed to make_dynspec.py (default: 200 ms)"
+    )
+    parser.add_argument(
         "--show-plots",
         action="store_true",
         help="Show interactive plots during processing"
@@ -457,6 +463,8 @@ def main():
         raise ValueError("--time-res-ms must be > 0")
     if args.tN is not None and args.tN < 1:
         raise ValueError("--tN must be >= 1")
+    if args.guard < 0:
+        raise ValueError("--guard must be >= 0")
     if args.time_res_ms is not None and args.tN is not None:
         raise ValueError("Specify only one of --tN or --time-res-ms")
     if args.rm_range[1] <= args.rm_range[0]:
@@ -559,7 +567,9 @@ def main():
             "--nFFT",
             str(args.nFFT),
             "--tN",
-            str(effective_tN)
+            str(effective_tN),
+            "--guard",
+            str(args.guard)
         ]
         returncode = _run_command(cmd, logger)
         if returncode != 0:
@@ -673,8 +683,7 @@ def main():
             if args.rm_stepsize is not None:
                 # Keep both key spellings for compatibility across ILEX versions.
                 rm_fit_params = {
-                    "dRM": float(args.rm_stepsize),
-                    "rm_step": float(args.rm_stepsize),
+                    "nSamples": float(args.rm_stepsize),
                 }
 
             logger.info(
