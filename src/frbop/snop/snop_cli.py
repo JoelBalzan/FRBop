@@ -5,12 +5,48 @@ import os
 import re
 import subprocess
 import sys
+import types
 from datetime import datetime
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from ilex.frb import FRB
+
+
+def _import_frb_class(logger=None):
+    """Import ILEX FRB, with a headless fallback for Tk backend failures."""
+    try:
+        from ilex.frb import FRB
+        return FRB
+    except ImportError as exc:
+        msg = str(exc)
+        if "Tcl_SetVar" not in msg and "backend_tkagg" not in msg:
+            raise
+
+        # RM-Tools imports NavigationToolbar2Tk even for non-interactive runs.
+        # Provide a minimal stub so headless execution can proceed.
+        os.environ.setdefault("rmsy_mpl_backend", "Agg")
+        tkagg_stub = types.ModuleType("matplotlib.backends.backend_tkagg")
+
+        class _DummyToolbar:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        tkagg_stub.NavigationToolbar2Tk = _DummyToolbar
+        sys.modules["matplotlib.backends.backend_tkagg"] = tkagg_stub
+
+        # Clear partially imported modules from the failed first attempt.
+        sys.modules.pop("ilex.frb", None)
+        sys.modules.pop("ilex.fitting", None)
+        sys.modules.pop("RMutils.util_plotTk", None)
+
+        if logger:
+            logger.warning(
+                "Tk backend unavailable; using headless fallback for RM-Tools plotting imports."
+            )
+
+        from ilex.frb import FRB
+        return FRB
 
 
 def auto_set_pa0_main(frb, Ldebias_threshold: float = 2.0, logger=None, **kwargs):
@@ -412,6 +448,7 @@ def main():
     plot_ds_final = plot_config.get('plot_ds_final', False)
 
     logger, log_path = _setup_logging(args.outdir, label)
+    FRB = _import_frb_class(logger=logger)
     logger.info("Logging to %s", log_path)
     logger.info(
         "Using find_frb config section: %s (dt_from_peak_sigma=%s, padding=%s)",
