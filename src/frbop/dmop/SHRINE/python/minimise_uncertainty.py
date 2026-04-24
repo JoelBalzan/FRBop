@@ -1,6 +1,4 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from pathlib import Path
-import sys
 
 import numpy as np
 import matplotlib as mpl
@@ -8,14 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.fftpack import dct, idct #https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
 from scipy import linalg #https://docs.scipy.org/doc/scipy/reference/linalg.html
 
-from dm_processing import get_kc, uncertainty_calc, get_ranges_above_max
-
-try:
-    from frbop.plotting import apply_cm_math_style
-except ModuleNotFoundError:
-    # Allow direct script execution from SHRINE/python without installation.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-    from frbop.plotting import apply_cm_math_style
+from .dm_processing import get_kc, uncertainty_calc, get_ranges_above_max
 
 def _main():
 
@@ -93,7 +84,9 @@ def _main():
         results.append(DM_data[max_index])
 
     if args.save_all:
-        apply_cm_math_style(font_size=14)
+        plt.rcParams['font.family'] = 'cm'
+        plt.rcParams['mathtext.fontset'] = 'cm'
+        plt.rcParams['font.size'] = 14
         plt.plot(kc_set, results, color='black', label='Structure Maximising\nDelta DM')
         plt.plot(kc_set, uncertainty_lower, '--', color='black', label='Uncertainty Bounds')
         plt.plot(kc_set, uncertainty_upper, '--', color='black')

@@ -3,7 +3,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy as np
-from dm_processing import get_kc
+from .dm_processing import get_kc
 from scipy.fftpack import (  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
     dct, idct)
 

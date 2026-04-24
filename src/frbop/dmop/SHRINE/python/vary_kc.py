@@ -1,6 +1,4 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from pathlib import Path
-import sys
 
 import numpy as np
 import matplotlib as mpl
@@ -8,14 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.fftpack import dct, idct #https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
 from scipy import linalg #https://docs.scipy.org/doc/scipy/reference/linalg.html
 
-from dm_processing import get_kc
-
-try:
-    from frbop.plotting import apply_dark_background
-except ModuleNotFoundError:
-    # Allow direct script execution from SHRINE/python without installation.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-    from frbop.plotting import apply_dark_background
+from .dm_processing import get_kc
 
 
 def _main():
@@ -67,7 +58,7 @@ def _main():
         results.append(DM_data[max_DM_index])
 
     #single plot
-    apply_dark_background()
+    plt.style.use('dark_background')
     cmap = mpl.cm.get_cmap('bwr')
     kc_norm = mpl.colors.TwoSlopeNorm(vmin=np.min(kc_set),vmax=np.max(kc_set),vcenter=real_kc)
     lines = []

@@ -2,7 +2,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy as np
-from dm_processing import get_kc, get_ranges_above_max, uncertainty_calc
+from .dm_processing import get_kc, get_ranges_above_max, uncertainty_calc
 from scipy import \
     linalg  # https://docs.scipy.org/doc/scipy/reference/linalg.html
 from scipy.fftpack import (  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
