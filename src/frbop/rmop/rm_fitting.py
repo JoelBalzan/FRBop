@@ -36,6 +36,18 @@ def _pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[f
     return TWO_COLUMN_WIDTH_IN, height
 
 
+def _plot_style() -> Dict[str, float]:
+    """Compatibility wrapper for plotting style used by RM plotting functions."""
+    return publication_plot_style()
+
+
+def _savefig_rasterized(save_path: str,
+                        dpi: int = 300,
+                        bbox_inches: str = 'tight') -> None:
+    """Compatibility wrapper for rasterized plot saving used in RM plotting."""
+    savefig_rasterized(save_path, dpi=dpi, bbox_inches=bbox_inches)
+
+
 def _summarize_posterior(posterior_values: np.ndarray,
                          low_percentile: float = 16.0,
                          high_percentile: float = 84.0) -> Tuple[float, float, float]:
@@ -1142,7 +1154,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                       rmnest_free_alpha: bool = False, rmnest_outdir: Optional[str] = None,
                       rmnest_label: Optional[str] = None, rmnest_sampler: str = 'dynesty',
                       n_time_bins: Optional[int] = None,
-                      noise_fraction: float = 0.1) -> Dict:
+                      noise_fraction: float = 0.1,
+                      exclude_edge_bins: int = 0) -> Dict:
     """
     Fit RM for time-series data (multiple time samples).
     
@@ -1161,6 +1174,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         Number of RM trial values for rm_synthesis
     n_time_bins : int, optional
         Number of time bins to fit (default: no binning)
+    exclude_edge_bins : int
+        Number of frequency bins to exclude from each spectrum edge before
+        fitting (default: 0)
         
     Returns:
     --------
@@ -1169,6 +1185,15 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     """
     times = time_series_data['time']
     n_time = len(times)
+    freq_fit = np.asarray(freq_hz, dtype=float)
+    n_edge = int(max(0, exclude_edge_bins))
+    if n_edge > 0:
+        if (2 * n_edge) >= len(freq_fit):
+            raise ValueError(
+                f"exclude_edge_bins={n_edge} removes all channels for time-series fitting "
+                f"(n_freq={len(freq_fit)})."
+            )
+        freq_fit = freq_fit[n_edge:-n_edge]
     
     # Determine which axis is time (the one matching length of times array)
     stokes_i_data = time_series_data['I']
@@ -1293,9 +1318,16 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                 stokes_v = np.mean(time_series_data['V'][:, bin_start:bin_end], axis=1)
             else:
                 stokes_v = None
+
+        if n_edge > 0:
+            stokes_i = stokes_i[n_edge:-n_edge]
+            stokes_q = stokes_q[n_edge:-n_edge]
+            stokes_u = stokes_u[n_edge:-n_edge]
+            if stokes_v is not None:
+                stokes_v = stokes_v[n_edge:-n_edge]
         
         # Initialize fitter
-        fitter = RMFitter(freq_hz, stokes_i, stokes_q, stokes_u, stokes_v)
+        fitter = RMFitter(freq_fit, stokes_i, stokes_q, stokes_u, stokes_v)
         
         # store derived polarisation angles & fractions for this bin
         # collapse any remaining frequency axis by taking simple mean values
@@ -1332,7 +1364,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
 
         # Store polarisation angle at reference frequency (before RM correction)
         # Use the median frequency as reference
-        ref_idx = len(freq_hz) // 2
+        ref_idx = len(freq_fit) // 2
         pol_angle_ref_array[i] = fitter.pol_angle[ref_idx]
         
         # Fit based on method
@@ -1640,7 +1672,7 @@ def plot_poincare_sphere(
         q_filt, u_filt, v_filt, sigma_q, sigma_u, sigma_v
     )
 
-    style = publication_plot_style()
+    style = _plot_style()
 
     # ------------------------------------------------------------------
     # Figure setup
@@ -1770,7 +1802,7 @@ def plot_poincare_sphere(
     if interactive:
         # present an interactive window before saving
         plt.show()
-    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré sphere plot saved to {output_file}")
     plt.close()
 
@@ -1843,7 +1875,7 @@ def plot_poincare_projections(
         (x, y, z) unit vector used as the projection centre for all four
         projections.  Defaults to the mean Stokes vector of the data.
     """
-    style = publication_plot_style()
+    style = _plot_style()
 
     # ------------------------------------------------------------------
     # 1.  Collect & filter Stokes points  (same logic as plot_poincare_sphere)
@@ -2161,7 +2193,7 @@ def plot_poincare_projections(
     #    f'(Q={cx:.3f}, U={cy:.3f}, V={cz:.3f})',
     #    fontsize=12, y=0.97)
 
-    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré projection panel saved to {output_file}")
     plt.close()
 
@@ -2209,7 +2241,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         Fraction of Stokes I samples used when estimating noise for lower-panel
         uncertainty & signal masking (default: 0.1)
     """
-    style = publication_plot_style()
+    style = _plot_style()
 
     # Identify peak regions if requested
     if separate_peaks and time_profile is not None:
@@ -2753,7 +2785,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
     
     plt.tight_layout()
     
-    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Time series plot saved to {output_file}")
     plt.close()
 
@@ -2795,7 +2827,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     invoke :func:`plot_poincare_sphere` explicitly with the appropriate
     ``time_series_data``.
     """
-    style = publication_plot_style()
+    style = _plot_style()
     n_rows = 3 if show_frac_panel else 2
     fig_height = 12 if show_frac_panel else 8
     fig_height = 7.4 if show_frac_panel else 5.2
@@ -3004,7 +3036,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     
     plt.tight_layout()
     
-    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Plot saved to {output_file}")
     plt.close()
 
@@ -3026,7 +3058,7 @@ def plot_burns_law_fits(fitter: RMFitter,
     - P_const(λ)      = P_i
     where P is the linear polarisation fraction (L/I).
     """
-    style = publication_plot_style()
+    style = _plot_style()
 
     lambda_sq = np.asarray(fitter.lambda_sq, dtype=float)
     freq_hz = np.asarray(fitter.freq_hz, dtype=float)
@@ -3608,7 +3640,7 @@ def plot_burns_law_fits(fitter: RMFitter,
     ax.tick_params(axis='both', labelsize=style['tick'])
 
     plt.tight_layout()
-    savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Burn-law fit plot saved to {output_file}")
     plt.close()
     
@@ -3736,6 +3768,8 @@ Examples:
                        help='Number of time bins to fit in time-series mode (default: no binning)')
     parser.add_argument('--freq-bins', type=int, default=None,
                        help='Number of frequency bins after --time-avg (default: no binning)')
+    parser.add_argument('--exclude-edge-bins', type=int, default=0,
+                       help='Exclude N bins from each end of the spectrum for frequency-domain fitting (default: 0)')
     parser.add_argument('--noise-fraction', type=float, default=0.1,
                        help='Fraction of Stokes I samples used for noise estimation (default: 0.10)')
     parser.add_argument('--turbulent-radius-pc', type=float, default=21.0,
@@ -3752,6 +3786,8 @@ Examples:
         parser.error("Use either --stokes-cube or separate --stokes-i/--stokes-q/--stokes-u inputs, not both")
     if (not using_cube) and (args.stokes_i is None or args.stokes_q is None or args.stokes_u is None):
         parser.error("Provide --stokes-cube or all of --stokes-i, --stokes-q, and --stokes-u")
+    if args.exclude_edge_bins < 0:
+        parser.error("--exclude-edge-bins must be >= 0")
 
     circle_segments: Optional[List[Tuple[int, int]]] = None
     if args.poincare_circle_segments is not None:
@@ -4052,6 +4088,35 @@ Examples:
             if stokes_v is not None:
                 stokes_v = stokes_v[tuple(idx)]
             print(f"  Using data shape: {stokes_i.shape}")
+
+    if args.exclude_edge_bins > 0:
+        n_freq_current = len(freq_hz)
+        if (2 * args.exclude_edge_bins) >= n_freq_current:
+            parser.error(
+                f"--exclude-edge-bins={args.exclude_edge_bins} removes all channels "
+                f"(n_freq={n_freq_current})."
+            )
+
+        trim_slice = slice(args.exclude_edge_bins, n_freq_current - args.exclude_edge_bins)
+        freq_hz = np.asarray(freq_hz, dtype=float)[trim_slice]
+        stokes_i = np.asarray(stokes_i, dtype=float)[trim_slice]
+        stokes_q = np.asarray(stokes_q, dtype=float)[trim_slice]
+        stokes_u = np.asarray(stokes_u, dtype=float)[trim_slice]
+        if stokes_v is not None:
+            stokes_v = np.asarray(stokes_v, dtype=float)[trim_slice]
+        if burn_pol_frac_err is not None:
+            burn_pol_frac_err = np.asarray(burn_pol_frac_err, dtype=float)[trim_slice]
+        if burn_valid_mask is not None:
+            burn_valid_mask = np.asarray(burn_valid_mask, dtype=bool)[trim_slice]
+        if burn_circ_frac_err is not None:
+            burn_circ_frac_err = np.asarray(burn_circ_frac_err, dtype=float)[trim_slice]
+        if burn_circ_valid_mask is not None:
+            burn_circ_valid_mask = np.asarray(burn_circ_valid_mask, dtype=bool)[trim_slice]
+
+        print(
+            f"  Excluded {args.exclude_edge_bins} edge bins per side: "
+            f"{n_freq_current} -> {len(freq_hz)} channels"
+        )
     
     print(f"  Frequency range: {freq_hz.min()/1e6:.2f} - {freq_hz.max()/1e6:.2f} MHz")
     print(f"  Number of channels: {len(freq_hz)}")
@@ -4245,6 +4310,27 @@ Examples:
                     sigma_u_pk = su_b
                     sigma_v_pk = sv_b
 
+                if args.exclude_edge_bins > 0:
+                    n_freq_pk_cur = len(freq_pk)
+                    if (2 * args.exclude_edge_bins) >= n_freq_pk_cur:
+                        print(
+                            f"  Skipping peak {i_extra}: --exclude-edge-bins={args.exclude_edge_bins} "
+                            f"would remove all channels (n_freq={n_freq_pk_cur})."
+                        )
+                        continue
+                    trim_slice_pk = slice(args.exclude_edge_bins, n_freq_pk_cur - args.exclude_edge_bins)
+                    freq_pk = np.asarray(freq_pk, dtype=float)[trim_slice_pk]
+                    stokes_i_pk = np.asarray(stokes_i_pk, dtype=float)[trim_slice_pk]
+                    stokes_q_pk = np.asarray(stokes_q_pk, dtype=float)[trim_slice_pk]
+                    stokes_u_pk = np.asarray(stokes_u_pk, dtype=float)[trim_slice_pk]
+                    if stokes_v_pk is not None:
+                        stokes_v_pk = np.asarray(stokes_v_pk, dtype=float)[trim_slice_pk]
+                    sigma_i_pk = np.asarray(sigma_i_pk, dtype=float)[trim_slice_pk]
+                    sigma_q_pk = np.asarray(sigma_q_pk, dtype=float)[trim_slice_pk]
+                    sigma_u_pk = np.asarray(sigma_u_pk, dtype=float)[trim_slice_pk]
+                    if sigma_v_pk is not None:
+                        sigma_v_pk = np.asarray(sigma_v_pk, dtype=float)[trim_slice_pk]
+
                 # Build Burn-law point uncertainties/mask for this peak
                 l_pk = np.sqrt(stokes_q_pk**2 + stokes_u_pk**2)
                 sigma_l_pk = np.sqrt((stokes_q_pk**2 * sigma_q_pk**2 + stokes_u_pk**2 * sigma_u_pk**2) / (l_pk**2 + 1e-20))
@@ -4403,7 +4489,8 @@ Examples:
             rmnest_outdir=args.rmnest_outdir or f"{args.output}_rmnest_ts",
             rmnest_label=args.rmnest_label or args.output,
             rmnest_sampler=args.rmnest_sampler,
-            n_time_bins=args.time_bins
+            n_time_bins=args.time_bins,
+            exclude_edge_bins=args.exclude_edge_bins
         )
         
         l_weights = None
