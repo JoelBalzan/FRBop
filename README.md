@@ -15,8 +15,9 @@ Install optional dependency bundles as needed:
 ```bash
 pip install -e ".[dm]"
 pip install -e ".[rm]"
-pip install -e ".[sc]"
-pip install -e ".[sn]"
+pip install -e ".[scint]"
+pip install -e ".[scatt]"
+pip install -e ".[sn]" # Requires separate installation of [ILEX](https://github.com/tdial2000/ILEX)
 ```
 
 Or install everything listed:
@@ -31,8 +32,8 @@ pip install -e ".[all]"
 frbop --help
 frbop dm --help
 frbop rm --help
-frbop sc-fit --help
-frbop sc-pipeline --help
+frbop scint --help
+frbop scatt --help
 frbop sn --help
 ```
 
@@ -41,6 +42,7 @@ Forward any existing script arguments after the subcommand:
 ```bash
 frbop dm --stokes-i I.npy --freq freq.npy --time time.npy
 frbop rm -i I.npy -q Q.npy -u U.npy --freq freq.npy
-frbop sc-pipeline FRB_250607.yaml --input-mode auto
+frbop scint FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy
+frbop scatt FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy
 frbop sn -x xpol.npy -y ypol.npy -p parameters.txt
 ```

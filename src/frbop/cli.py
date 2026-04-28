@@ -3,12 +3,11 @@ import runpy
 import sys
 from typing import Sequence
 
-
 COMMANDS = {
     "dm": ("DM optimization", "frbop.dmop.dm_optimisation"),
     "rm": ("RM fitting", "frbop.rmop.rm_fitting"),
-    "sc-fit": ("Scintillation fit", "frbop.scop.fit_frb_scintillation"),
-    "sc-pipeline": ("Scintillation pipeline", "frbop.scop.Scintillation_pipeline"),
+    "scint": ("Scintillation fit", "frbop.scop.fit_frb_scintillation"),
+    "scatt": ("Scattering timescale fit", "frbop.scop.fit_scattering_timescale"),
     "sn": ("S/N optimization", "frbop.snop.snop_cli"),
 }
 
@@ -45,8 +44,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  frbop dm --stokes-i I.npy --freq freq.npy --time time.npy\n"
             "  frbop rm -i I.npy -q Q.npy -u U.npy --freq freq.npy\n"
-            "  frbop sc-fit FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
-            "  frbop sc-pipeline FRB_250607.yaml --input-mode auto\n"
+            "  frbop scint FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
+            "  frbop scatt FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
             "  frbop sn -x xpol.npy -y ypol.npy -p parameters.txt"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

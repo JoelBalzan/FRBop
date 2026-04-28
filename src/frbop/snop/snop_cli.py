@@ -8,8 +8,6 @@ import sys
 import types
 from datetime import datetime
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 
 

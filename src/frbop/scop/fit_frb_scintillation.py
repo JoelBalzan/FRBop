@@ -5,8 +5,14 @@ from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from astropy import units as u
+from astropy.coordinates import Distance, SkyCoord
+from astropy.cosmology import WMAP5
 from scipy.optimize import curve_fit
 from scipy.special import erfc
+
+from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 
 def find_burst_window(ts, peak_idx, smooth_win=5, threshold_sigma=3.0, pad=50, fallback_window=200):
@@ -58,73 +64,104 @@ def find_burst_window(ts, peak_idx, smooth_win=5, threshold_sigma=3.0, pad=50, f
 
 
 def autocorr(x):
-    x = x - np.mean(x)
-    result = np.correlate(x, x, mode="full")
-    return result[result.size // 2:]
+    x = np.asarray(x)
+    mean = np.nanmean(x)
+
+    if mean == 0:
+        return np.zeros_like(x)
+
+    delta = (x - mean) / mean  # fractional fluctuations
+
+    result = np.correlate(delta, delta, mode="full")
+    acf = result[result.size // 2:]
+
+    # normalise
+    if acf[0] != 0:
+        acf /= acf[0]
+
+    return acf
+
+
+def compute_aic_bic(y, ymod, k):
+    resid = y - ymod
+    rss = np.nansum(resid ** 2)
+    n = y.size
+    if rss <= 0:
+        rss = 1e-12
+    aic = 2 * k + n * np.log(rss / n)
+    bic = k * np.log(n) + n * np.log(rss / n)
+    return aic, bic, rss
 
 
 def select_peaks_manual(stokes_i: np.ndarray, time_ms: np.ndarray) -> List[Tuple[int, int]]:
-    """
-    Manually select peak bounds by clicking on the pulse profile.
-
-    Click pairs of points (start, end) for each peak. Close the window when done.
-    Returns a list of (start_idx, end_idx) tuples (inclusive start, exclusive end-like indices).
-    """
-    time_series = np.mean(stokes_i, axis=0)
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(time_ms, time_series, color='k', linewidth=1)
-    ax.set_title('Click start/end bounds for each peak (close window to finish)')
-    ax.set_xlabel('Time (ms)')
-    ax.set_ylabel('Flux')
-    ax.grid(True, alpha=0.3)
-    cursor_line = ax.axvline(time_ms[0] if time_ms.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
-
-    times: List[float] = []
-
-    def on_move(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        cursor_line.set_xdata([event.xdata, event.xdata])
-        fig.canvas.draw_idle()
-
-    def on_click(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        x = float(event.xdata)
-        times.append(x)
-        ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
-        if len(times) % 2 == 0:
-            start_t, end_t = sorted((times[-2], times[-1]))
-            ax.axvspan(start_t, end_t, color='tab:orange', alpha=0.2)
-        fig.canvas.draw_idle()
-
-    fig.canvas.mpl_connect('motion_notify_event', on_move)
-    fig.canvas.mpl_connect('button_press_event', on_click)
-
-    plt.show()
-
-    n_time = time_ms.size
-    if len(times) < 2:
-        return [(0, n_time)]
-
-    if len(times) % 2 != 0:
-        times = times[:-1]
-
-    peak_regions: List[Tuple[int, int]] = []
-    for i in range(0, len(times), 2):
-        start_t, end_t = sorted((times[i], times[i + 1]))
-        start_idx = int(np.argmin(np.abs(time_ms - start_t)))
-        end_idx = int(np.argmin(np.abs(time_ms - end_t)))
-        start = min(start_idx, end_idx)
-        end_exclusive = min(time_ms.size, max(start_idx, end_idx) + 1)
-        peak_regions.append((start, end_exclusive))
-
-    return peak_regions
+    """Manually select peak bounds by clicking on the pulse profile."""
+    time_series = np.nanmean(stokes_i, axis=0)
+    return shared_select_peaks_manual(
+        time_ms,
+        time_series,
+        title='Click start/end bounds for each peak (close window when done)',
+        x_label='Time (ms)',
+        y_label='Flux',
+        exclusive_end=True,
+    )
 
 
-def lorentzian(delta_nu, delta_nu_d):
-    return 1.0 / (1.0 + (delta_nu / delta_nu_d) ** 2)
+def lorentzian(delta_nu, delta_nu_d, A, C):
+    return C + A / (1.0 + (delta_nu / delta_nu_d) ** 2)
+
+
+def lorentzian_1c(delta_nu, d1, A, C):
+    return C + A / (1.0 + (delta_nu / d1) ** 2)
+
+
+def lorentzian_2c(delta_nu, w1, d1, dd12, A, C):
+    d2 = d1 + dd12
+    return C + A * (
+        w1 / (1.0 + (delta_nu / d1) ** 2)
+        + (1.0 - w1) / (1.0 + (delta_nu / d2) ** 2)
+    )
+
+
+def lorentzian_3c(delta_nu, a, b, d1, dd12, dd23, A, C):
+    d2 = d1 + dd12
+    d3 = d2 + dd23
+    w1 = a
+    w2 = (1.0 - a) * b
+    w3 = (1.0 - a) * (1.0 - b)
+    return C + A * (
+        w1 / (1.0 + (delta_nu / d1) ** 2)
+        + w2 / (1.0 + (delta_nu / d2) ** 2)
+        + w3 / (1.0 + (delta_nu / d3) ** 2)
+    )
+
+
+def fit_with_restarts(model_fn, x, y, p0_list, bounds, maxfev=30000):
+    best = None
+    best_rss = np.inf
+    for p0 in p0_list:
+        try:
+            popt, pcov = curve_fit(model_fn, x, y, p0=p0, bounds=bounds, maxfev=maxfev)
+            ymod = model_fn(x, *popt)
+            rss = np.nansum((y - ymod) ** 2)
+            if np.isfinite(rss) and rss < best_rss:
+                best_rss = rss
+                best = (popt, pcov, ymod)
+        except Exception:
+            continue
+    return best
+
+
+def build_fit_diagnostics(y, ymod, k):
+    aic, bic, rss = compute_aic_bic(y, ymod, k)
+    n = y.size
+    rmse = np.sqrt(rss / max(n, 1))
+    tss = np.nansum((y - np.nanmean(y)) ** 2)
+    r2 = 1.0 - rss / tss if tss > 0 else np.nan
+    if n > (k + 1):
+        aicc = aic + (2.0 * k * (k + 1)) / (n - k - 1)
+    else:
+        aicc = np.nan
+    return dict(aic=aic, bic=bic, aicc=aicc, rss=rss, rmse=rmse, r2=r2)
 
 
 def scattered_gaussian(t, amp, mu, sigma, tau, offset):
@@ -135,100 +172,117 @@ def scattered_gaussian(t, amp, mu, sigma, tau, offset):
     return offset + 0.5 * amp * expo * erfc(arg)
 
 
-def estimate_ds_kpc_from_redshift(z, h0_km_s_mpc=67.4, omega_m=0.315, omega_lambda=0.685, n_steps=4096):
+def estimate_ds_kpc_from_redshift(z):
     """Estimate angular-diameter distance D_s (kpc) from redshift in flat ΛCDM."""
-    if z <= 0:
-        return 0.0
-    if h0_km_s_mpc <= 0:
-        raise ValueError("h0_km_s_mpc must be > 0")
-    if omega_m < 0 or omega_lambda < 0:
-        raise ValueError("omega_m and omega_lambda must be >= 0")
-
-    c_km_s = 299792.458
-    z_grid = np.linspace(0.0, z, int(max(256, n_steps)))
-    ez = np.sqrt(omega_m * (1.0 + z_grid) ** 3 + omega_lambda)
-    dc_mpc = (c_km_s / h0_km_s_mpc) * np.trapezoid(1.0 / ez, z_grid)
-    da_mpc = dc_mpc / (1.0 + z)
-    return float(da_mpc * 1e3)
+    return Distance(z=z, cosmology=WMAP5).to(u.kpc).value
 
 
-def estimate_lg_kpc_from_ne2025_peak_cn2(ldeg, bdeg, max_dist_kpc=50.0):
-    """Estimate L_g as the distance of peak Cn2 along LoS using mwprop NE2025."""
-    try:
-        from mwprop.nemod.NE2025 import ne2025
-    except Exception as exc:
-        raise RuntimeError("mwprop NE2025 import failed; install mwprop + dependencies") from exc
+def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0):
+    """
+    Estimate effective Galactic screen distance L_g using NE2025 Cn² profile
+    with geometric weighting appropriate for the two-screen scattering model.
 
-    if max_dist_kpc <= 0:
-        raise ValueError("max_dist_kpc must be > 0")
+    The effective distance is:
 
-    with tempfile.TemporaryDirectory(prefix="mwprop_ne2025_") as tmpdir:
-        old_cwd = os.getcwd()
-        try:
-            os.chdir(tmpdir)
-            ne2025(
-                ldeg=float(ldeg),
-                bdeg=float(bdeg),
-                dmd=float(max_dist_kpc),
-                ndir=-1,
-                classic=False,
-                dmd_only=False,
-                do_analysis=True,
-                plotting=False,
-                verbose=False,
-            )
-            out_dir = os.path.join(tmpdir, "output_ne2025p")
-            candidate_paths = [
-                os.path.join(out_dir, "f25_d2dm_ne_dsm_vs_s.txt"),
-                os.path.join(out_dir, "f25_dm2d_ne_dsm_vs_s.txt"),
-            ]
-            table_path = next((p for p in candidate_paths if os.path.exists(p)), None)
-            if table_path is None:
-                raise RuntimeError("NE2025 analysis file not found (expected f25_*_ne_dsm_vs_s.txt)")
+        L_g = Σ_s [ s · Cn²(s) · s·(1 - s/Da) ] / Σ_s [ Cn²(s) · s·(1 - s/Da) ]
 
-            d_vals = []
-            cn2_vals = []
-            with open(table_path, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    s = line.strip()
-                    if not s:
-                        continue
-                    parts = s.split()
-                    if len(parts) < 6:
-                        continue
-                    try:
-                        d = float(parts[0])
-                        cn2 = float(parts[5])
-                    except ValueError:
-                        continue
-                    if np.isfinite(d) and np.isfinite(cn2):
-                        d_vals.append(d)
-                        cn2_vals.append(cn2)
+    The geometric factor s·(1 - s/Da) is the two-screen scattering leverage:
+    a screen at distance s from the observer (source at Da) contributes
+    angular broadening ∝ s·(1 - s/Da), peaking at s = Da/2.
 
-            if len(d_vals) == 0:
-                raise RuntimeError("No numeric LoS rows parsed from NE2025 output table")
+    Falls back to plain Cn²-weighted mean if da_kpc is None or <= 0.
 
-            d_arr = np.asarray(d_vals)
-            cn2_arr = np.asarray(cn2_vals)
-            idx = int(np.argmax(cn2_arr))
-            lg_kpc = float(d_arr[idx])
-            cn2_peak = float(cn2_arr[idx])
-            return lg_kpc, cn2_peak
-        finally:
-            os.chdir(old_cwd)
+    Parameters
+    ----------
+    ldeg, bdeg   : Galactic longitude/latitude (deg)
+    da_kpc       : Angular-diameter distance to source (kpc)
+    max_dist_kpc : Maximum LoS distance to sample (kpc)
+
+    Returns
+    -------
+    lg_eff   : Geometrically-weighted effective screen distance (kpc)
+    cn2_peak : Peak Cn² value along LoS (m^{-20/3})
+    """
+    s, cn2 = get_cn2_profile(ldeg, bdeg, da_kpc=max_dist_kpc)
+
+    # Diagnostic plot
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')
+    ax.set_xlabel("Distance from observer (kpc)")
+    ax.set_ylabel(r"$C_n^2$ (m$^{-20/3}$)")
+    ax.set_title(f"NE2025  (l={ldeg:.2f}°, b={bdeg:.2f}°)")
+    ax.set_xscale('log')
+    ax.grid(alpha=0.3)
+
+    cn2_total = np.nansum(cn2)
+    if cn2_total == 0.0:
+        print("Warning: Cn² profile is all zeros — check coordinates and NE2025 model flag.")
+        lg_eff = float(s[0])
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+        return lg_eff, 0.0
+
+
+    lg_peak = float(s[np.argmax(cn2)])
+
+    ax.axvline(lg_peak, color='tab:green', lw=1.0, ls='--', label=f'L_g peak = {lg_peak:.3f} kpc')
+    ax.legend(loc='upper left', fontsize=8)
+    plt.tight_layout()
+    plt.show()
+
+    print("\n===== NE2025 Galactic Screen Estimate =====")
+    print(f"  L_g peak      ({'Cn² maximum':>20s}) = {lg_peak:.4f} kpc")
+    print(f"  Cn²_peak                          = {np.max(cn2):.4e} m^{{-20/3}}")
+
+    return lg_peak, float(np.max(cn2))
 
 
 def radec_to_galactic_deg(ra_hms, dec_dms):
     """Convert ICRS RA/Dec strings to Galactic (l, b) in degrees."""
-    try:
-        import astropy.units as u
-        from astropy.coordinates import SkyCoord
-    except Exception as exc:
-        raise RuntimeError("Astropy is required for RA/Dec to Galactic conversion") from exc
-
     c_icrs = SkyCoord(ra=ra_hms, dec=dec_dms, unit=(u.hourangle, u.deg), frame="icrs")
     c_gal = c_icrs.galactic
     return float(c_gal.l.deg), float(c_gal.b.deg)
+
+
+def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
+    import os
+
+    import mwprop.nemod.NE2025 as _ne2025_mod
+
+    ne2025    = _ne2025_mod.ne2025
+    sm_factor = _ne2025_mod.sm_factor
+
+    outdir = os.path.join(os.getcwd(), 'output_ne2025p')
+    os.makedirs(outdir, exist_ok=True)
+
+    Dn, Dv, Du, Dd = ne2025(
+        l_deg, b_deg, da_kpc, ndir,
+        classic=False,
+        dmd_only=False,
+        do_analysis=True,
+        plotting=False,
+        verbose=False,
+    )
+
+    prefix = "d2dm" if ndir < 0 else "dm2d"
+    f25 = os.path.join(outdir, f'f25_{prefix}_ne_dsm_vs_s.txt')
+    if not os.path.exists(f25):
+        raise FileNotFoundError(f"NE2025 LoS profile not found at {f25}")
+
+    # Columns: d, x, y, z, ne, Cn2, w, c, v, t, dm, nea, Fa
+    data = np.loadtxt(f25, skiprows=3)
+    s   = data[:, 0]   # distance (kpc)
+    ne  = data[:, 4]   # ne (cm^-3)
+    cn2 = data[:, 5]   # Cn2 (m^-20/3) -- direct, no sm_factor needed
+
+    nonzero = np.where(ne != 0)[0]
+    if nonzero.size > 0:
+        indkeep = min(int(1.1 * nonzero[-1]), s.size)
+        s   = s[:indkeep]
+        cn2 = cn2[:indkeep]
+
+    return s, cn2
 
 
 def main():
@@ -238,15 +292,16 @@ def main():
     parser.add_argument("--time", default="FRB_250607_htr_time.npy", help="Time axis .npy file (ms)")
     parser.add_argument("--smooth", type=int, default=5, help="Smoothing window for time series (bins)")
     parser.add_argument("--manual-peaks", action="store_true", help="Manually select one or more on-pulse regions by clicking start/end bounds")
+    parser.add_argument('--peak-indices', nargs='*', type=int, default=None, help='Manually specify peak indices as pairs: start1 end1 start2 end2 ...')
     parser.add_argument("--threshold-sigma", type=float, default=3.0, help="Threshold in robust sigmas for pulse gating")
     parser.add_argument("--pad", type=int, default=50, help="Padding added to detected pulse window (bins)")
     parser.add_argument("--fallback-window", type=int, default=200, help="Fallback half-window size if detection fails")
-    parser.add_argument("--fit-max-lag", type=float, default=50.0, help="Max lag (MHz) to use in ACF fit")
+    parser.add_argument("--fit-max-lag", type=float, default=8.0, help="Max lag (MHz) to use in ACF fit")
+    parser.add_argument("--dnu-mhz", type=float, default=None, help="Directly provide scintillation bandwidth Δν_d in MHz and skip frequency ACF Lorentzian fitting")
     parser.add_argument("--output", default=None, help="Optional output filename for plot (PNG)")
     parser.add_argument("--time-acf-model", choices=["exp", "gauss"], default="exp", help="Model for temporal ACF: exponential or gaussian")
     parser.add_argument("--fit-max-tau", type=float, default=100.0, help="Max time lag (ms) to use in temporal ACF fit")
-    parser.add_argument("--test-multiple", action="store_true", help="Test single vs. double-component ACF models and report AIC/BIC")
-    parser.add_argument("--t-scatt-ms", type=float, default=None, help="Pulse broadening time t_scatt in ms (from pulse-shape fit; used for two-screen distance estimate)")
+    parser.add_argument("--tau-ms", type=float, default=None, help="Pulse broadening time t_scatt in ms (from pulse-shape fit; used for two-screen distance estimate)")
     parser.add_argument("--redshift", type=float, default=None, help="Source redshift z for two-screen distance estimate")
     parser.add_argument("--ds-kpc", type=float, default=None, help="Source distance D_s in kpc for two-screen distance estimate")
     parser.add_argument("--center-freq-mhz", type=float, default=None, help="Observing frequency ν in MHz for two-screen equations (default: median of freq axis)")
@@ -258,9 +313,6 @@ def main():
     parser.add_argument("--ra-hms", type=str, default=None, help="ICRS right ascension in sexagesimal hour format (e.g., '12:34:56.7')")
     parser.add_argument("--dec-dms", type=str, default=None, help="ICRS declination in sexagesimal degree format (e.g., '-45:12:34.5')")
     parser.add_argument("--lg-max-dist-kpc", type=float, default=50.0, help="Max distance (kpc) for NE2025 LoS sampling when estimating L_g")
-    parser.add_argument("--h0-km-s-mpc", type=float, default=67.8, help="Hubble constant for D_s(z) estimator when --ds-kpc is omitted")
-    parser.add_argument("--omega-m", type=float, default=0.31, help="Matter density Ω_m for D_s(z) estimator")
-    parser.add_argument("--omega-lambda", type=float, default=0.69, help="Dark-energy density Ω_Λ for D_s(z) estimator")
 
     args = parser.parse_args()
 
@@ -282,7 +334,7 @@ def main():
     print(f"Time resolution = {time[1] - time[0]:.6e} ms")
 
     # Collapse over frequency to find burst in time
-    ts = np.mean(ds, axis=0)
+    ts = np.nanmean(ds, axis=0)
     if args.smooth > 1:
         ts_smooth = np.convolve(ts, np.ones(args.smooth) / args.smooth, mode="same")
     else:
@@ -291,14 +343,28 @@ def main():
     peak_idx = int(np.argmax(ts_smooth))
 
     onpulse_mask = np.zeros(ntime, dtype=bool)
-    if args.manual_peaks:
-        manual_regions = select_peaks_manual(ds, time)
+    if args.peak_indices is not None and len(args.peak_indices) > 0:
+        clipped_regions = parse_peak_index_pairs(args.peak_indices, ntime)
+        for start_idx, end_idx in clipped_regions:
+            onpulse_mask[start_idx:end_idx] = True
+
+        if np.any(onpulse_mask):
+            print(f"Peak-index gating regions (start:end) = {clipped_regions}")
+        else:
+            print("Peak-index gating produced no valid samples; falling back to automatic window")
+    elif args.manual_peaks:
+        manual_regions = select_peaks_manual(
+            time,
+            ts,
+            title='Click start/end bounds for each peak (close window when done)',
+            x_label='Time (ms)',
+            y_label='Flux',
+            exclusive_end=True,
+        )
         clipped_regions = []
         for start_idx, end_idx in manual_regions:
-            s = int(np.clip(start_idx, 0, ntime - 1))
-            e = int(np.clip(end_idx, 0, ntime))
-            if e <= s:
-                e = min(ntime, s + 1)
+            s = start_idx
+            e = end_idx
             onpulse_mask[s:e] = True
             clipped_regions.append((s, e))
 
@@ -324,7 +390,7 @@ def main():
     off_pulse = ds[:, ~onpulse_mask] if np.any(~onpulse_mask) else np.empty((nfreq, 0))
 
     if off_pulse.size > 0:
-        bandpass = np.mean(off_pulse, axis=1)
+        bandpass = np.nanmean(off_pulse, axis=1)
     else:
         # fallback: use low percentile across time to estimate baseline
         bandpass = np.percentile(ds, 10, axis=1)
@@ -332,12 +398,12 @@ def main():
     burst_ds = burst_ds - bandpass[:, None]
 
     # Frequency-integrated pulse profile and scattered-Gaussian fit for t_scatt
-    pulse_profile = np.mean(burst_ds, axis=0)
+    pulse_profile = np.nanmean(burst_ds, axis=0)
     t_burst = time[onpulse_mask]
-    t_scatt_fit_ms = None
+    t_scatt_fit_ms = args.tau_ms if args.tau_ms is not None else None
     t_scatt_fit_err_ms = None
 
-    if pulse_profile.size >= 5:
+    if t_scatt_fit_ms == None and pulse_profile.size >= 5:
         prof_max_idx = int(np.argmax(pulse_profile))
         mu0 = float(t_burst[prof_max_idx])
         p_low = np.percentile(pulse_profile, 5)
@@ -369,14 +435,16 @@ def main():
 
             print("\n===== Pulse-Profile Scattering Fit =====")
             if t_scatt_fit_err_ms is not None and np.isfinite(t_scatt_fit_err_ms):
-                print(f"t_scatt = {t_scatt_fit_ms:.6f} ± {t_scatt_fit_err_ms:.6f} ms (scattered Gaussian)")
+                print(f"tau_ms = {t_scatt_fit_ms:.6f} ± {t_scatt_fit_err_ms:.6f} ms (scattered Gaussian)")
             else:
-                print(f"t_scatt = {t_scatt_fit_ms:.6f} ms (scattered Gaussian)")
+                print(f"tau_ms = {t_scatt_fit_ms:.6f} ms (scattered Gaussian)")
         except Exception as e:
             print("Pulse-profile t_scatt fit failed:", e)
+    else:
+        print(f"tau_ms = {t_scatt_fit_ms} ms")
 
     # Collapse in time → 1D spectrum
-    raw_spectrum = np.mean(burst_ds, axis=1)
+    raw_spectrum = np.nanmean(burst_ds, axis=1)
     spectrum = raw_spectrum.copy()
 
     # Normalize robustly
@@ -395,39 +463,64 @@ def main():
 
     lags = np.arange(len(acf)) * df  # MHz
 
-    # Limit fit range (exclude zero lag to avoid forcing normalization)
-    mask = (lags > 0) & (lags < args.fit_max_lag)
-    lags_fit = lags[mask]
-    acf_fit = acf[mask]
+    # Build symmetric lags for plotting (explicitly exclude zero lag)
+    mask_plot = (lags > 0) & (lags <= args.fit_max_lag)
+    lags_plot = lags[mask_plot]
+    acf_plot = acf[mask_plot]
+    lags_plot_sym = np.concatenate((-lags_plot[::-1], lags_plot))
+    acf_plot_sym = np.concatenate((acf_plot[::-1], acf_plot))
+
+    # Limit fit range (explicitly exclude zero lag from Lorentzian fitting)
+    mask_lorentz_fit = (lags > 0) & (lags < args.fit_max_lag) & np.isfinite(acf)
+    lags_lorentz_fit = lags[mask_lorentz_fit]
+    acf_lorentz_fit = acf[mask_lorentz_fit]
 
     delta_nu_d = None
     delta_nu_d_err = None
-    try:
-        popt, pcov = curve_fit(lorentzian, lags_fit, acf_fit, p0=[1.0], maxfev=5000)
-        delta_nu_d = popt[0]
-        delta_nu_d_err = np.sqrt(np.diag(pcov))[0]
+    A_fit = None
+    C_fit = None
+    if args.dnu_mhz is not None:
+        if args.dnu_mhz <= 0:
+            print("Provided --dnu-mhz must be > 0; falling back to fitted Δν_d")
+        else:
+            delta_nu_d = float(args.dnu_mhz)
+            print("\n===== Scintillation Result =====")
+            print(f"Δν_d = {delta_nu_d:.3f} MHz (provided via --dnu-mhz; fit skipped)")
 
-        print("\n===== Scintillation Result =====")
-        print(f"Δν_d = {delta_nu_d:.3f} ± {delta_nu_d_err:.3f} MHz")
-    except Exception as e:
-        print("Fit failed:", e)
-            # Time axis is assumed to be in milliseconds
+    if delta_nu_d is None:
+        try:
+            p0 = [1.0, 1.0, 0.0]  # delta_nu_d, A, C
+            bounds = ([1e-6, 0.0, -1.0], [np.inf, 2.0, 1.0])
+            popt, pcov = curve_fit(
+                lorentzian,
+                lags_lorentz_fit,
+                acf_lorentz_fit,
+                p0=p0,
+                bounds=bounds,
+                maxfev=10000
+            )
 
-    t_scatt_for_calc_ms = args.t_scatt_ms if args.t_scatt_ms is not None else t_scatt_fit_ms
+            delta_nu_d, A_fit, C_fit = popt
+            delta_nu_d_err = np.sqrt(np.diag(pcov))[0]
+
+            print("\n===== Scintillation Result =====")
+            print(f"Δν_d = {delta_nu_d:.3f} ± {delta_nu_d_err:.3f} MHz")
+            if A_fit is not None:
+                print("\n===== Spectral Modulation from ACF =====")
+                print(f"m = {A_fit**0.5:.6f}")
+        except Exception as e:
+            print("Fit failed:", e)
+                # Time axis is assumed to be in milliseconds
+
+    t_scatt_for_calc_ms = args.tau_ms if args.tau_ms is not None else t_scatt_fit_ms
 
     ds_kpc_for_calc = args.ds_kpc
     if ds_kpc_for_calc is None and args.redshift is not None:
         try:
-            ds_kpc_for_calc = estimate_ds_kpc_from_redshift(
-                float(args.redshift),
-                h0_km_s_mpc=float(args.h0_km_s_mpc),
-                omega_m=float(args.omega_m),
-                omega_lambda=float(args.omega_lambda),
-            )
+            ds_kpc_for_calc = estimate_ds_kpc_from_redshift(float(args.redshift))
             print(
                 f"Estimated D_s from redshift z={args.redshift:.6f}: "
                 f"D_s={ds_kpc_for_calc:.6e} kpc "
-                f"(H0={args.h0_km_s_mpc:.3f}, Ω_m={args.omega_m:.3f}, Ω_Λ={args.omega_lambda:.3f})"
             )
         except Exception as e:
             print(f"Could not estimate D_s from redshift: {e}")
@@ -452,9 +545,10 @@ def main():
             print("NE2025 L_g estimate skipped: provide --gl-deg/--gb-deg or --ra-hms/--dec-dms")
         else:
             try:
-                lg_kpc_for_calc, cn2_peak = estimate_lg_kpc_from_ne2025_peak_cn2(
+                lg_kpc_for_calc, cn2_peak = estimate_lg_kpc_from_ne2025(
                     gl_for_lg,
                     gb_for_lg,
+                    ds_kpc_for_calc,
                     max_dist_kpc=args.lg_max_dist_kpc,
                 )
                 print("\n===== NE2025 Galactic Screen Estimate =====")
@@ -477,21 +571,21 @@ def main():
     if args.mg is None and can_do_two_screen:
         finite_spec = raw_spectrum[np.isfinite(raw_spectrum)]
         if finite_spec.size > 1:
-            mean_spec = float(np.mean(finite_spec))
+            mean_spec = float(np.nanmean(finite_spec))
             std_spec = float(np.std(finite_spec))
             if mean_spec > 0:
                 modulation_index = std_spec / mean_spec
-                print("\n===== Spectral Modulation =====")
+                print("\n===== Spectral Modulation from Raw Spectrum =====")
                 print(f"m = {modulation_index:.6f}")
             else:
-                print("\n===== Spectral Modulation =====")
+                print("\n===== Spectral Modulation from Raw Spectrum =====")
                 print("m could not be computed (mean spectrum <= 0 after baseline subtraction)")
 
     mg_for_calc = args.mg if args.mg is not None else modulation_index
 
     if delta_nu_d is not None and t_scatt_for_calc_ms is not None and args.redshift is not None and ds_kpc_for_calc is not None:
         if t_scatt_for_calc_ms <= 0:
-            print("Two-screen estimate skipped: --t-scatt-ms must be > 0")
+            print("Two-screen estimate skipped: --tau-ms must be > 0")
         elif ds_kpc_for_calc <= 0:
             print("Two-screen estimate skipped: D_s must be > 0 (from --ds-kpc or redshift estimate)")
         elif args.redshift < 0:
@@ -513,12 +607,12 @@ def main():
                 lxlg_partial_kpc2 = lxlg_upper_kpc2 / (mg ** 2)
 
             print("\n===== Two-Screen Distance Estimate =====")
-            t_source = "--t-scatt-ms" if args.t_scatt_ms is not None else "pulse-profile fit"
+            t_source = "--tau-ms" if args.tau_ms is not None else "pulse-profile fit"
             if mg is not None:
                 mg_source = "--mg" if args.mg is not None else "measured m"
-                print(f"Using ν_DC={delta_nu_d:.6f} MHz, t_scatt={t_scatt_for_calc_ms:.6f} ms ({t_source}), ν={nu_obs_mhz:.3f} MHz, z={z:.6f}, m_g={mg:.6f} ({mg_source})")
+                print(f"Using ν_DC={delta_nu_d:.6f} MHz, tau_ms={t_scatt_for_calc_ms:.6f} ms ({t_source}), ν={nu_obs_mhz:.3f} MHz, z={z:.6f}, m_g={mg:.6f} ({mg_source})")
             else:
-                print(f"Using ν_DC={delta_nu_d:.6f} MHz, t_scatt={t_scatt_for_calc_ms:.6f} ms ({t_source}), ν={nu_obs_mhz:.3f} MHz, z={z:.6f}")
+                print(f"Using ν_DC={delta_nu_d:.6f} MHz, tau_ms={t_scatt_for_calc_ms:.6f} ms ({t_source}), ν={nu_obs_mhz:.3f} MHz, z={z:.6f}")
             print(f"C = 2π ν_DC t_scatt = {c_val:.3e}")
             print(f"Eq.(2)-style upper limit (m_g=1): L_x L_g <= {lxlg_upper_kpc2:.6e} kpc^2")
 
@@ -537,11 +631,11 @@ def main():
                 else:
                     lg_kpc = float(lg_kpc_for_calc)
                     lx_upper_kpc = lxlg_upper_kpc2 / lg_kpc
-                    lg_source = "--lg-kpc" if args.lg_kpc is not None else "NE2025 Cn2 peak"
-                    print(f"Using L_g={lg_kpc:.6f} kpc ({lg_source}) -> L_x <= {lx_upper_kpc:.6e} kpc (from Eq. 2 upper limit)")
+                    lg_source = "--lg-kpc" if args.lg_kpc is not None else "NE2025"
+                    print(f"Eq. 2: Using L_g={lg_kpc:.3f} kpc ({lg_source}) -> L_x <= {lx_upper_kpc:.3e} kpc")
                     if mg is not None and mg < 1.0 and lxlg_partial_kpc2 is not None:
                         lx_partial_kpc = lxlg_partial_kpc2 / lg_kpc
-                        print(f"Using L_g={lg_kpc:.6f} kpc ({lg_source}) -> L_x ≈ {lx_partial_kpc:.6e} kpc (from Eq. 4 partial-modulation)")
+                        print(f"Eq. 4: Using L_g={lg_kpc:.3f} kpc ({lg_source}) -> L_x ≈ {lx_partial_kpc:.3e} kpc")
 
     # Plot
     plt.figure(figsize=(12, 5))
@@ -553,9 +647,10 @@ def main():
     plt.title("Burst Spectrum")
 
     plt.subplot(1, 2, 2)
-    plt.plot(lags_fit, acf_fit, label="ACF")
+    plt.plot(lags_plot_sym, acf_plot_sym, label="ACF")
     if delta_nu_d is not None:
-        plt.plot(lags_fit, lorentzian(lags_fit, delta_nu_d), "--", label="Lorentzian fit")
+        if A_fit is not None and C_fit is not None:
+            plt.plot(lags_plot_sym, lorentzian(lags_plot_sym, delta_nu_d, A_fit, C_fit), "--", label="Lorentzian fit")
         plt.title(f"Δν_d = {delta_nu_d:.2f} MHz")
     else:
         plt.title("ACF (fit failed)")
@@ -571,213 +666,246 @@ def main():
         plt.show()
 
     # ---------------------------
-    # Temporal ACF: scintillation timescale
-    # ---------------------------
-    dt = np.abs(time[1] - time[0])
-    # compute ACF per frequency channel within burst window
-    acf_channels = []
-    for i in range(nfreq):
-        x = burst_ds[i, :]
-        a = autocorr(x)
-        if a.size == 0 or a[0] == 0:
-            continue
-        a = a / a[0]
-        acf_channels.append(a)
-
-    if len(acf_channels) == 0:
-        print("Temporal ACF: insufficient data to compute per-channel ACFs")
-        return
-
-    # pad/truncate to same length
-    min_len = min(a.size for a in acf_channels)
-    acf_mat = np.vstack([a[:min_len] for a in acf_channels])
-    acf_time = np.mean(acf_mat, axis=0)
-    taus = np.arange(len(acf_time)) * dt
-
-    # Exclude zero lag from temporal fit as well (t=0 is trivially 1)
-    mask_t = (taus > 0) & (taus <= args.fit_max_tau)
-    taus_fit = taus[mask_t]
-    acf_time_fit = acf_time[mask_t]
-
-    if taus_fit.size < 3:
-        print("Temporal ACF: not enough points to fit timescale")
-        return
-
-    # Define single and double component temporal models
-    if args.time_acf_model == "exp":
-        def single_temporal(t, tau):
-            return np.exp(-t / tau)
-
-        def double_temporal(t, f, tau1, tau2):
-            return f * np.exp(-t / tau1) + (1 - f) * np.exp(-t / tau2)
-    else:
-        def single_temporal(t, tau):
-            return np.exp(-(t / tau) ** 2)
-
-        def double_temporal(t, f, tau1, tau2):
-            return f * np.exp(-(t / tau1) ** 2) + (1 - f) * np.exp(-(t / tau2) ** 2)
-
-    def compute_aic_bic(y, ymod, k):
-        resid = y - ymod
-        rss = np.sum(resid ** 2)
-        n = y.size
-        if rss <= 0:
-            rss = 1e-12
-        aic = 2 * k + n * np.log(rss / n)
-        bic = k * np.log(n) + n * np.log(rss / n)
-        return aic, bic, rss
-
-    results = {}
-
-    # Fit single-component
-    try:
-        # initial guess for tau: use point where acf drops to ~1/e or half
-        if np.any(acf_time_fit < np.exp(-1)):
-            idx = np.argmax(acf_time_fit < np.exp(-1))
-            p0 = [max(1e-6, taus_fit[idx])]
-        else:
-            p0 = [max(1e-6, taus_fit[len(taus_fit) // 10])]
-        popt_s, pcov_s = curve_fit(single_temporal, taus_fit, acf_time_fit, p0=p0, bounds=(1e-9, np.inf), maxfev=10000)
-        ymod_s = single_temporal(taus_fit, *popt_s)
-        aic_s, bic_s, rss_s = compute_aic_bic(acf_time_fit, ymod_s, k=1)
-        results['single'] = dict(popt=popt_s, pcov=pcov_s, aic=aic_s, bic=bic_s, rss=rss_s, ymod=ymod_s)
-    except Exception as e:
-        results['single'] = dict(error=str(e))
-
-    # Fit double-component
-    try:
-        # initial guess: f~0.5, taus from single guess
-        if 'popt_s' in locals():
-            tau_guess = float(popt_s[0])
-        else:
-            tau_guess = max(1e-6, taus_fit[len(taus_fit) // 10])
-        p0 = [0.5, tau_guess / 3.0, tau_guess * 3.0]
-        bounds = ([0.0, 1e-9, 1e-9], [1.0, np.inf, np.inf])
-        popt_d, pcov_d = curve_fit(double_temporal, taus_fit, acf_time_fit, p0=p0, bounds=bounds, maxfev=20000)
-        ymod_d = double_temporal(taus_fit, *popt_d)
-        aic_d, bic_d, rss_d = compute_aic_bic(acf_time_fit, ymod_d, k=3)
-        results['double'] = dict(popt=popt_d, pcov=pcov_d, aic=aic_d, bic=bic_d, rss=rss_d, ymod=ymod_d)
-    except Exception as e:
-        results['double'] = dict(error=str(e))
-
-    # Report results and prefer lower AIC/BIC
-    print("\n===== Temporal ACF Model Comparison =====")
-    for key in ('single', 'double'):
-        r = results.get(key, {})
-        if 'error' in r:
-            print(f"{key}: fit failed: {r['error']}")
-        else:
-            print(f"{key}: aic={r['aic']:.2f}, bic={r['bic']:.2f}, rss={r['rss']:.4e}")
-
-    preferred = None
-    if 'aic' in results.get('single', {}) and 'aic' in results.get('double', {}):
-        preferred = 'double' if results['double']['aic'] < results['single']['aic'] else 'single'
-        print(f"Preferred (AIC): {preferred}")
-
-    # Choose final model to report
-    final = results.get(preferred or 'single')
-    if 'popt' in final:
-        if preferred == 'double':
-            f, tau1, tau2 = final['popt']
-            print(f"\nBest-fit double temporal: f={f:.3f}, tau1={tau1:.6f} ms, tau2={tau2:.6f} ms")
-            tau_report = (tau1, tau2)
-        else:
-            tau = float(final['popt'][0])
-            print(f"\nBest-fit single temporal: tau={tau:.6f} ms")
-            tau_report = (tau,)
-    else:
-        print("Temporal fits failed; no timescale to report")
-
-    # plot temporal ACF with both fits
-    plt.figure(figsize=(6, 4))
-    plt.plot(taus_fit, acf_time_fit, label="Temporal ACF")
-    if 'single' in results and 'popt' in results['single']:
-        plt.plot(taus_fit, results['single']['ymod'], '--', label='single fit')
-    if 'double' in results and 'popt' in results['double']:
-        plt.plot(taus_fit, results['double']['ymod'], ':', label='double fit')
-    plt.xlabel("τ (ms)")
-    plt.ylabel("ACF")
-    plt.title("Temporal ACF (averaged over frequency)")
-    plt.legend()
-    if args.output:
-        base, ext = os.path.splitext(args.output)
-        out_time = base + "_time" + (ext if ext else ".png")
-        plt.savefig(out_time, dpi=200)
-        print(f"Saved temporal ACF plot to {out_time}")
-    else:
-        plt.show()
-
-    # ---------------------------
-    # Frequency ACF: compare single vs double Lorentzian
+    # Frequency ACF: compare 1 vs 2 vs 3 Lorentzian components
     # ---------------------------
     try:
-        # Fit single Lorentzian (already attempted earlier; reuse if available)
-        popt_f_single = None
-        try:
-            popt_f_single, pcov_f_single = curve_fit(lorentzian, lags_fit, acf_fit, p0=[1.0], maxfev=5000)
-            ymod_fs = lorentzian(lags_fit, *popt_f_single)
-            aic_fs, bic_fs, rss_fs = compute_aic_bic(acf_fit, ymod_fs, k=1)
-            f_single = dict(popt=popt_f_single, pcov=pcov_f_single, aic=aic_fs, bic=bic_fs, rss=rss_fs, ymod=ymod_fs)
-        except Exception as e:
-            f_single = dict(error=str(e))
+        if lags_lorentz_fit.size < 8:
+            raise RuntimeError("Insufficient positive-lag ACF points for 1/2/3-component comparison")
 
-        # double Lorentzian: f*(L1) + (1-f)*(L2)
-        def double_lorentz(delta_nu, f, d1, d2):
-            return f / (1.0 + (delta_nu / d1) ** 2) + (1 - f) / (1.0 + (delta_nu / d2) ** 2)
+        if delta_nu_d is not None and np.isfinite(delta_nu_d) and delta_nu_d > 0:
+            d_base = float(delta_nu_d)
+        else:
+            d_base = max(1e-3, args.fit_max_lag / 4.0)
 
-        try:
-            # initial guesses
-            p0 = [0.5, popt_f_single[0] / 3.0 if popt_f_single is not None else 1.0, popt_f_single[0] * 3.0 if popt_f_single is not None else 10.0]
-            bounds = ([0.0, 1e-9, 1e-9], [1.0, np.inf, np.inf])
-            popt_fd, pcov_fd = curve_fit(double_lorentz, lags_fit, acf_fit, p0=p0, bounds=bounds, maxfev=20000)
-            ymod_fd = double_lorentz(lags_fit, *popt_fd)
-            aic_fd, bic_fd, rss_fd = compute_aic_bic(acf_fit, ymod_fd, k=3)
-            f_double = dict(popt=popt_fd, pcov=pcov_fd, aic=aic_fd, bic=bic_fd, rss=rss_fd, ymod=ymod_fd)
-        except Exception as e:
-            f_double = dict(error=str(e))
+        amp_guess = max(0.05, float(np.nanmax(acf_lorentz_fit) - np.nanmin(acf_lorentz_fit)))
+        off_guess = float(np.nanmedian(acf_lorentz_fit[-max(3, int(0.2 * acf_lorentz_fit.size)):]))
 
-        print("\n===== Frequency ACF Model Comparison =====")
-        for key, r in (('single', f_single), ('double', f_double)):
-            if 'error' in r:
-                print(f"{key}: fit failed: {r['error']}")
+        # 1-component model
+        fit_1c = {}
+        best_1c = fit_with_restarts(
+            lorentzian_1c,
+            lags_lorentz_fit,
+            acf_lorentz_fit,
+            p0_list=[
+                [d_base, amp_guess, off_guess],
+                [d_base * 0.5, amp_guess, off_guess],
+                [d_base * 2.0, amp_guess, off_guess],
+            ],
+            bounds=([1e-6, 0.0, -1.5], [np.inf, 2.5, 1.5]),
+            maxfev=30000,
+        )
+        if best_1c is None:
+            fit_1c = dict(error="all initializations failed")
+        else:
+            popt, pcov, ymod = best_1c
+            fit_1c = dict(popt=popt, pcov=pcov, ymod=ymod, **build_fit_diagnostics(acf_lorentz_fit, ymod, k=3))
+
+        # 2-component model
+        fit_2c = {}
+        best_2c = fit_with_restarts(
+            lorentzian_2c,
+            lags_lorentz_fit,
+            acf_lorentz_fit,
+            p0_list=[
+                [0.5, d_base * 0.3, d_base * 1.5, amp_guess, off_guess],
+                [0.7, d_base * 0.2, d_base * 3.0, amp_guess, off_guess],
+                [0.3, d_base * 0.6, d_base * 2.0, amp_guess, off_guess],
+            ],
+            bounds=([0.0, 1e-6, 1e-6, 0.0, -1.5], [1.0, np.inf, np.inf, 2.5, 1.5]),
+            maxfev=50000,
+        )
+        if best_2c is None:
+            fit_2c = dict(error="all initializations failed")
+        else:
+            popt, pcov, ymod = best_2c
+            fit_2c = dict(popt=popt, pcov=pcov, ymod=ymod, **build_fit_diagnostics(acf_lorentz_fit, ymod, k=5))
+
+        # 3-component model
+        fit_3c = {}
+        best_3c = fit_with_restarts(
+            lorentzian_3c,
+            lags_lorentz_fit,
+            acf_lorentz_fit,
+            p0_list=[
+                [0.3, 0.5, d_base * 0.15, d_base * 0.7, d_base * 2.0, amp_guess, off_guess],
+                [0.5, 0.5, d_base * 0.2, d_base * 1.0, d_base * 3.0, amp_guess, off_guess],
+                [0.7, 0.4, d_base * 0.1, d_base * 0.8, d_base * 2.5, amp_guess, off_guess],
+            ],
+            bounds=(
+                [0.0, 0.0, 1e-6, 1e-6, 1e-6, 0.0, -1.5],
+                [1.0, 1.0, np.inf, np.inf, np.inf, 2.5, 1.5],
+            ),
+            maxfev=80000,
+        )
+        if best_3c is None:
+            fit_3c = dict(error="all initializations failed")
+        else:
+            popt, pcov, ymod = best_3c
+            fit_3c = dict(popt=popt, pcov=pcov, ymod=ymod, **build_fit_diagnostics(acf_lorentz_fit, ymod, k=7))
+
+        fit_models = [("1-component", fit_1c, lorentzian_1c), ("2-component", fit_2c, lorentzian_2c), ("3-component", fit_3c, lorentzian_3c)]
+
+        print("\n===== Frequency ACF Lorentzian Fit Diagnostics =====")
+        print(f"{'Model':<14} {'AIC':>10} {'BIC':>10} {'AICc':>10} {'RSS':>12} {'RMSE':>10} {'R^2':>10}")
+        for name, result, _ in fit_models:
+            if "error" in result:
+                print(f"{name:<14} fit failed: {result['error']}")
             else:
-                print(f"{key}: aic={r['aic']:.2f}, bic={r['bic']:.2f}, rss={r['rss']:.4e}")
+                print(
+                    f"{name:<14} {result['aic']:>10.3f} {result['bic']:>10.3f} {result['aicc']:>10.3f} "
+                    f"{result['rss']:>12.4e} {result['rmse']:>10.4e} {result['r2']:>10.4f}"
+                )
 
-        if 'aic' in f_single and 'aic' in f_double:
-            pref = 'double' if f_double['aic'] < f_single['aic'] else 'single'
-            print(f"Preferred (AIC) for frequency ACF: {pref}")
+        valid = [(name, result) for name, result, _ in fit_models if "aic" in result and np.isfinite(result["aic"])]
+        if valid:
+            best_aic_name, best_aic_result = min(valid, key=lambda item: item[1]["aic"])
+            best_bic_name, best_bic_result = min(valid, key=lambda item: item[1]["bic"])
+            print("\nModel preference summary:")
+            print(f"Best by AIC : {best_aic_name} (AIC={best_aic_result['aic']:.3f})")
+            print(f"Best by BIC : {best_bic_name} (BIC={best_bic_result['bic']:.3f})")
+            if len(valid) > 1:
+                sorted_aic = sorted(valid, key=lambda item: item[1]["aic"])
+                runner_up = sorted_aic[1]
+                print(f"ΔAIC to runner-up: {runner_up[1]['aic'] - sorted_aic[0][1]['aic']:.3f}")
+        else:
+            print("No valid Lorentzian component fits to compare.")
 
-        # If double fit succeeded, report the two component bandwidths (d1, d2)
-        if 'popt' in f_double:
-            fval, d1, d2 = f_double['popt']
-            try:
-                perr = np.sqrt(np.diag(f_double['pcov']))
-                f_err, d1_err, d2_err = perr
-            except Exception:
-                f_err = d1_err = d2_err = float('nan')
-            print(f"\nDouble-fit bandwidths: d1 = {d1:.6f} ± {d1_err:.6f} MHz, d2 = {d2:.6f} ± {d2_err:.6f} MHz (mix f={fval:.3f} ± {f_err:.3f})")
+        # Report component scales and weights for interpretability
+        if "popt" in fit_2c:
+            w1, d1, dd12, amp2, off2 = fit_2c["popt"]
+            d2 = d1 + dd12
+            print(
+                f"2-component parameters: d1={d1:.6f} MHz, d2={d2:.6f} MHz, "
+                f"w1={w1:.3f}, w2={1.0 - w1:.3f}, A={amp2:.3f}, C={off2:.3f}"
+            )
+        if "popt" in fit_3c:
+            a, b, d1, dd12, dd23, amp3, off3 = fit_3c["popt"]
+            d2 = d1 + dd12
+            d3 = d2 + dd23
+            w1 = a
+            w2 = (1.0 - a) * b
+            w3 = (1.0 - a) * (1.0 - b)
+            print(
+                f"3-component parameters: d1={d1:.6f} MHz, d2={d2:.6f} MHz, d3={d3:.6f} MHz, "
+                f"w1={w1:.3f}, w2={w2:.3f}, w3={w3:.3f}, A={amp3:.3f}, C={off3:.3f}"
+            )
 
-        # plot frequency ACF fits
-        plt.figure(figsize=(6, 4))
-        plt.plot(lags_fit, acf_fit, label='Freq ACF')
-        if 'popt' in f_single:
-            plt.plot(lags_fit, f_single['ymod'], '--', label='single lorentz')
-        if 'popt' in f_double:
-            plt.plot(lags_fit, f_double['ymod'], ':', label='double lorentz')
-        plt.xlabel('Δν (MHz)')
-        plt.ylabel('ACF')
-        plt.legend()
+        # Diagnostic comparison plot: separate fit panels + residuals + ΔAIC/ΔBIC bars
+        fig, axs = plt.subplots(2, 3, figsize=(16, 9))
+
+        xabs = np.abs(lags_plot_sym)
+
+        # Top row: separate model panels
+        ax0 = axs[0, 0]
+        ax0.plot(lags_plot_sym, acf_plot_sym, color='k', lw=1.3, label='ACF data')
+        if "popt" in fit_1c:
+            ax0.plot(lags_plot_sym, lorentzian_1c(xabs, *fit_1c["popt"]), lw=1.6, color='tab:blue', label='1c sum')
+        ax0.set_title("1-Component Lorentzian")
+        ax0.set_xlabel("Δν (MHz)")
+        ax0.set_ylabel("ACF")
+        ax0.grid(alpha=0.25)
+        ax0.legend(fontsize=8)
+
+        ax01 = axs[0, 1]
+        ax01.plot(lags_plot_sym, acf_plot_sym, color='k', lw=1.3, label='ACF data')
+        if "popt" in fit_2c:
+            w1, d1, dd12, amp2, off2 = fit_2c["popt"]
+            d2 = d1 + dd12
+            sum2 = lorentzian_2c(xabs, *fit_2c["popt"])
+            comp2_1 = amp2 * w1 / (1.0 + (xabs / d1) ** 2)
+            comp2_2 = amp2 * (1.0 - w1) / (1.0 + (xabs / d2) ** 2)
+            ax01.plot(lags_plot_sym, sum2, lw=1.6, color='tab:red', label='2c sum')
+            ax01.plot(lags_plot_sym, comp2_1, ls='--', lw=1.1, alpha=0.9, color='tab:cyan', label='2c comp-1')
+            ax01.plot(lags_plot_sym, comp2_2, ls='--', lw=1.1, alpha=0.9, color='tab:purple', label='2c comp-2')
+            ax01.plot(lags_plot_sym, np.full_like(lags_plot_sym, off2), ls=':', lw=1.0, alpha=0.8, color='tab:gray', label='2c offset')
+        ax01.set_title("2-Component Lorentzian")
+        ax01.set_xlabel("Δν (MHz)")
+        ax01.set_ylabel("ACF")
+        ax01.grid(alpha=0.25)
+        ax01.legend(fontsize=8)
+
+        ax02 = axs[0, 2]
+        ax02.plot(lags_plot_sym, acf_plot_sym, color='k', lw=1.3, label='ACF data')
+        if "popt" in fit_3c:
+            a, b, d1, dd12, dd23, amp3, off3 = fit_3c["popt"]
+            d2 = d1 + dd12
+            d3 = d2 + dd23
+            w1 = a
+            w2 = (1.0 - a) * b
+            w3 = (1.0 - a) * (1.0 - b)
+            sum3 = lorentzian_3c(xabs, *fit_3c["popt"])
+            comp3_1 = amp3 * w1 / (1.0 + (xabs / d1) ** 2)
+            comp3_2 = amp3 * w2 / (1.0 + (xabs / d2) ** 2)
+            comp3_3 = amp3 * w3 / (1.0 + (xabs / d3) ** 2)
+            ax02.plot(lags_plot_sym, sum3, lw=1.6, color='tab:orange', label='3c sum')
+            ax02.plot(lags_plot_sym, comp3_1, ls='-.', lw=1.1, alpha=0.9, color='tab:red', label='3c comp-1')
+            ax02.plot(lags_plot_sym, comp3_2, ls='-.', lw=1.1, alpha=0.9, color='tab:pink', label='3c comp-2')
+            ax02.plot(lags_plot_sym, comp3_3, ls='-.', lw=1.1, alpha=0.9, color='tab:brown', label='3c comp-3')
+            ax02.plot(lags_plot_sym, np.full_like(lags_plot_sym, off3), ls=':', lw=1.0, alpha=0.8, color='tab:gray', label='3c offset')
+        ax02.set_title("3-Component Lorentzian")
+        ax02.set_xlabel("Δν (MHz)")
+        ax02.set_ylabel("ACF")
+        ax02.grid(alpha=0.25)
+        ax02.legend(fontsize=8)
+
+        # Bottom-left: residuals of all models
+        ax1 = axs[1, 0]
+        ax1.axhline(0.0, color='0.5', lw=1)
+        for name, result, _ in fit_models:
+            if "ymod" in result:
+                resid = acf_lorentz_fit - result["ymod"]
+                ax1.plot(lags_lorentz_fit, resid, lw=1.3, label=name)
+        ax1.set_title("Residuals (positive lags)")
+        ax1.set_xlabel("Δν (MHz)")
+        ax1.set_ylabel("ACF residual")
+        ax1.grid(alpha=0.25)
+        ax1.legend(fontsize=8)
+
+        valid_names = [name for name, result, _ in fit_models if "aic" in result and np.isfinite(result["aic"])]
+        valid_aic = [result["aic"] for _, result, _ in fit_models if "aic" in result and np.isfinite(result["aic"])]
+        valid_bic = [result["bic"] for _, result, _ in fit_models if "bic" in result and np.isfinite(result["bic"])]
+
+        ax2 = axs[1, 1]
+        if valid_names:
+            min_aic = float(np.min(valid_aic))
+            delta_aic = [a - min_aic for a in valid_aic]
+            x = np.arange(len(valid_names))
+            ax2.bar(x, delta_aic, color='tab:blue', alpha=0.8)
+            ax2.set_xticks(x)
+            ax2.set_xticklabels(valid_names, rotation=15)
+            #ax2.set_title("ΔAIC (lower is better)")
+            ax2.set_ylabel("ΔAIC")
+            ax2.grid(axis='y', alpha=0.25)
+        else:
+            ax2.text(0.5, 0.5, "No valid AIC values", ha='center', va='center', transform=ax2.transAxes)
+            ax2.set_axis_off()
+
+        ax3 = axs[1, 2]
+        if valid_names:
+            min_bic = float(np.min(valid_bic))
+            delta_bic = [b - min_bic for b in valid_bic]
+            x = np.arange(len(valid_names))
+            ax3.bar(x, delta_bic, color='tab:green', alpha=0.8)
+            ax3.set_xticks(x)
+            ax3.set_xticklabels(valid_names, rotation=15)
+            #ax3.set_title("ΔBIC (lower is better)")
+            ax3.set_ylabel("ΔBIC")
+            ax3.grid(axis='y', alpha=0.25)
+        else:
+            ax3.text(0.5, 0.5, "No valid BIC values", ha='center', va='center', transform=ax3.transAxes)
+            ax3.set_axis_off()
+
+        plt.tight_layout()
         if args.output:
             base, ext = os.path.splitext(args.output)
-            out_freq = base + '_freq' + (ext if ext else '.png')
-            plt.savefig(out_freq, dpi=200)
-            print(f"Saved frequency ACF plot to {out_freq}")
+            out_diag = base + '_lorentzian_diagnostics' + (ext if ext else '.pdf')
+            plt.savefig(out_diag, dpi=220)
+            print(f"Saved Lorentzian diagnostics plot to {out_diag}")
         else:
             plt.show()
-    except Exception:
-        pass
+    except Exception as e:
+        print("Frequency multi-fit diagnostics failed:", e)
 
 
 if __name__ == "__main__":
     main()
-

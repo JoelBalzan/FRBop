@@ -32,7 +32,9 @@ from scipy.fftpack import dct
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from frbop.plotting import savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized
+from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 try:
 	from numba import njit
@@ -2114,59 +2116,16 @@ class DMOptimiser:
 		return peak_regions
 
 	def select_peaks_manual(self) -> List[Tuple[int, int]]:
-		"""
-		Manually select peak bounds by clicking on the pulse profile.
-
-		Click pairs of points (start, end) for each peak. Close the window when done.
-		"""
-		time_series = np.mean(self.stokes_i, axis=0)
-
-		fig, ax = plt.subplots(figsize=(10, 4))
-		ax.plot(self.time_ms, time_series, color='k', linewidth=1)
-		ax.set_title('Click start/end bounds for each peak (close window to finish)')
-		ax.set_xlabel('Time (ms)')
-		ax.set_ylabel('Flux')
-		ax.grid(True, alpha=0.3)
-		cursor_line = ax.axvline(self.time_ms[0], color='tab:blue', alpha=0.4, linewidth=1)
-
-		times: List[float] = []
-
-		def on_move(event):
-			if event.inaxes != ax or event.xdata is None:
-				return
-			cursor_line.set_xdata([event.xdata, event.xdata])
-			fig.canvas.draw_idle()
-
-		def on_click(event):
-			if event.inaxes != ax or event.xdata is None:
-				return
-			x = float(event.xdata)
-			times.append(x)
-			ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
-			if len(times) % 2 == 0:
-				start_t, end_t = sorted((times[-2], times[-1]))
-				ax.axvspan(start_t, end_t, color='tab:orange', alpha=0.2)
-			fig.canvas.draw_idle()
-
-		fig.canvas.mpl_connect('motion_notify_event', on_move)
-		fig.canvas.mpl_connect('button_press_event', on_click)
-
-		plt.show()
-
-		if len(times) < 2:
-			return [(0, self.n_time)]
-
-		if len(times) % 2 != 0:
-			times = times[:-1]
-
-		peak_regions = []
-		for i in range(0, len(times), 2):
-			start_t, end_t = sorted((times[i], times[i + 1]))
-			start_idx = int(np.argmin(np.abs(self.time_ms - start_t)))
-			end_idx = int(np.argmin(np.abs(self.time_ms - end_t)))
-			peak_regions.append((min(start_idx, end_idx), max(start_idx, end_idx)))
-
-		return peak_regions
+		"""Manually select peak bounds by clicking on the pulse profile."""
+		time_series = np.nanmean(self.stokes_i, axis=0)
+		return shared_select_peaks_manual(
+			self.time_ms,
+			time_series,
+			title='Click start/end bounds for each peak (close window to finish)',
+			x_label='Time (ms)',
+			y_label='Flux',
+			exclusive_end=True,
+		)
 	
 	def compare_methods(self, dm_range: Tuple[float, float], 
 					   peak_region: Optional[Tuple[int, int]] = None,
@@ -3650,30 +3609,20 @@ def main():
 	print("\n" + "="*70)
 	if args.peak_indices is not None:
 		print("Using manually specified peak indices...")
-		if len(args.peak_indices) % 2 != 0:
-			raise ValueError("--peak-indices requires an even number of values (pairs of start/end indices)")
-		if len(args.peak_indices) == 0:
-			raise ValueError("--peak-indices requires at least one pair of start/end indices")
-		peak_regions = []
-		for i in range(0, len(args.peak_indices), 2):
-			start_idx = args.peak_indices[i]
-			end_idx = args.peak_indices[i + 1]
-			if start_idx < 0 or end_idx > stokes_i.shape[1]:
-				raise ValueError(f"Peak indices must be in range [0, {stokes_i.shape[1]}]")
-			if start_idx >= end_idx:
-				raise ValueError(f"Peak start index ({start_idx}) must be less than end index ({end_idx})")
-			peak_regions.append((start_idx, end_idx))
+		peak_regions = parse_peak_index_pairs(args.peak_indices, stokes_i.shape[1])
 		print(f"  Specified {len(peak_regions)} peak region(s)")
 		for i, (start, end) in enumerate(peak_regions):
+			end_disp = min(end - 1, len(time_ms) - 1)
 			print(f"    Peak {i+1}: time indices {start}-{end} "
-				  f"({time_ms[start]:.2f} - {time_ms[end]:.2f} ms)")
+				  f"({time_ms[start]:.2f} - {time_ms[end_disp]:.2f} ms)")
 	elif args.manual_peaks:
 		print("Manual peak selection enabled...")
 		peak_regions = optimiser.select_peaks_manual()
 		print(f"  Selected {len(peak_regions)} peak region(s)")
 		for i, (start, end) in enumerate(peak_regions):
+			end_disp = min(end - 1, len(time_ms) - 1)
 			print(f"    Peak {i+1}: time indices {start}-{end} "
-				  f"({time_ms[start]:.2f} - {time_ms[end]:.2f} ms)")
+				  f"({time_ms[start]:.2f} - {time_ms[end_disp]:.2f} ms)")
 	elif args.separate_peaks:
 		print("Separating peaks...")
 		peak_regions = optimiser.separate_peaks(min_separation_ms=5.0, diagnostics_path=None)
@@ -3783,24 +3732,24 @@ def main():
 					f"dn_e={dn_e:.6e} [{dn_e_low:.6e}, {dn_e_high:.6e}] cm⁻³"
 				)
 
-		dne_path = Path(f'dm_component_dne_diagnostics_{label.lower()}.txt')
-		with open(dne_path, 'w') as f:
-			f.write("# dn_e diagnostics between components\n")
-			f.write("# Assumption: L ~ c * Delta t using component peak arrival times\n")
-			f.write("# Columns: pair method separation_pc delta_dm delta_dm_low delta_dm_high dn_e dn_e_low dn_e_high\n")
-			for i, pair_label in enumerate(dne_diag['pair_labels']):
-				sep_pc = float(dne_diag['pair_separations_pc'][i])
-				for method_name, method_vals in dne_diag['methods'].items():
-					f.write(
-						f"{pair_label} {method_name} {sep_pc:.10e} "
-						f"{float(method_vals['delta_dm'][i]):.10e} "
-						f"{float(method_vals['delta_dm_low'][i]):.10e} "
-						f"{float(method_vals['delta_dm_high'][i]):.10e} "
-						f"{float(method_vals['dn_e'][i]):.10e} "
-						f"{float(method_vals['dn_e_low'][i]):.10e} "
-						f"{float(method_vals['dn_e_high'][i]):.10e}\n"
-					)
-		print(f"Saved dn_e diagnostics to: {dne_path}")
+		#dne_path = Path(f'dm_component_dne_diagnostics_{label.lower()}.txt')
+		#with open(dne_path, 'w') as f:
+		#	f.write("# dn_e diagnostics between components\n")
+		#	f.write("# Assumption: L ~ c * Delta t using component peak arrival times\n")
+		#	f.write("# Columns: pair method separation_pc delta_dm delta_dm_low delta_dm_high dn_e dn_e_low dn_e_high\n")
+		#	for i, pair_label in enumerate(dne_diag['pair_labels']):
+		#		sep_pc = float(dne_diag['pair_separations_pc'][i])
+		#		for method_name, method_vals in dne_diag['methods'].items():
+		#			f.write(
+		#				f"{pair_label} {method_name} {sep_pc:.10e} "
+		#				f"{float(method_vals['delta_dm'][i]):.10e} "
+		#				f"{float(method_vals['delta_dm_low'][i]):.10e} "
+		#				f"{float(method_vals['delta_dm_high'][i]):.10e} "
+		#				f"{float(method_vals['dn_e'][i]):.10e} "
+		#				f"{float(method_vals['dn_e_low'][i]):.10e} "
+		#				f"{float(method_vals['dn_e_high'][i]):.10e}\n"
+		#			)
+		#print(f"Saved dn_e diagnostics to: {dne_path}")
 
 		dne_plot_path = f'dm_component_dne_diagnostics_{label.lower()}.{fig_ext}'
 		optimiser.plot_component_dne_diagnostics(
@@ -3816,9 +3765,10 @@ def main():
 	print(f"  - dm_comparison_{label.lower()}*.{fig_ext}: Comparison of methods for each {label.lower()}")
 	if len(all_results) > 1:
 		print(f"  - dm_component_dm_diagnostics.{fig_ext}: Multi-{label.lower()} DM diagnostics")
-		print(f"  - dm_component_dne_diagnostics_{label.lower()}.txt: dn_e diagnostics (L~cΔt)")
+		#print(f"  - dm_component_dne_diagnostics_{label.lower()}.txt: dn_e diagnostics (L~cΔt)")
 		print(f"  - dm_component_dne_diagnostics_{label.lower()}.{fig_ext}: dn_e plot between components")
 
 
 if __name__ == "__main__":
+	main()
 	main()

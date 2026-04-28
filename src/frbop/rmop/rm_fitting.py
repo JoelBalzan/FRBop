@@ -21,7 +21,9 @@ from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.constants import c
 from scipy.optimize import curve_fit
 
-from frbop.plotting import publication_plot_style, savefig_rasterized
+from frbop.utils.plotting import publication_plot_style, savefig_rasterized
+from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 warnings.filterwarnings('ignore')
 
@@ -1082,70 +1084,26 @@ def find_peak_regions(time_profile: np.ndarray, snr_array: Optional[np.ndarray] 
 
 
 def select_peaks_manual(time_ms: np.ndarray, stokes_i: np.ndarray) -> List[Tuple[int, int]]:
-    """
-    Manually select peak bounds by clicking on the pulse profile.
-
-    Click pairs of points (start, end) for each peak. Close the window when done.
-    Returns list of (start_idx, end_idx) in time-sample indices.
-    """
-    # Build a 1D time profile by averaging over frequency axis sensibly
+    """Manually select peak bounds by clicking on the pulse profile."""
     if stokes_i.ndim == 2:
-        # try to detect orientation: if length matches time_ms, use axis=0
         if stokes_i.shape[0] == len(time_ms):
-            time_series = np.mean(stokes_i, axis=1)
+            time_series = np.nanmean(stokes_i, axis=1)
         elif stokes_i.shape[1] == len(time_ms):
-            time_series = np.mean(stokes_i, axis=0)
+            time_series = np.nanmean(stokes_i, axis=0)
         else:
-            time_series = np.mean(stokes_i, axis=1)
+            time_series = np.nanmean(stokes_i, axis=1)
     else:
-        time_series = stokes_i
+        time_series = np.asarray(stokes_i, float)
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(time_ms * 1e3, time_series, color='k', linewidth=1)
-    ax.set_title('Click start/end bounds for each peak (close window to finish)')
-    ax.set_xlabel('Time (ms)')
-    ax.set_ylabel('Flux')
-    ax.grid(True, alpha=0.3)
-    cursor_line = ax.axvline(time_ms[0] * 1e3, color='tab:blue', alpha=0.4, linewidth=1)
-
-    times: List[float] = []
-
-    def on_move(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        cursor_line.set_xdata([event.xdata, event.xdata])
-        fig.canvas.draw_idle()
-
-    def on_click(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        x = float(event.xdata)
-        times.append(x / 1e3)  # convert back to seconds (time_ms input expected in s)
-        ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
-        if len(times) % 2 == 0:
-            start_t, end_t = sorted((times[-2], times[-1]))
-            ax.axvspan(start_t * 1e3, end_t * 1e3, color='tab:orange', alpha=0.2)
-        fig.canvas.draw_idle()
-
-    fig.canvas.mpl_connect('motion_notify_event', on_move)
-    fig.canvas.mpl_connect('button_press_event', on_click)
-
-    plt.show()
-
-    if len(times) < 2:
-        return [(0, len(time_ms) - 1)]
-
-    if len(times) % 2 != 0:
-        times = times[:-1]
-
-    peak_regions: List[Tuple[int, int]] = []
-    for i in range(0, len(times), 2):
-        start_t, end_t = sorted((times[i], times[i + 1]))
-        start_idx = int(np.argmin(np.abs(time_ms - start_t)))
-        end_idx = int(np.argmin(np.abs(time_ms - end_t)))
-        peak_regions.append((min(start_idx, end_idx), max(start_idx, end_idx)))
-
-    return peak_regions
+    display_time_ms = np.asarray(time_ms, float) * 1e3
+    return shared_select_peaks_manual(
+        display_time_ms,
+        time_series,
+        title='Click start/end bounds for each peak (close window to finish)',
+        x_label='Time (ms)',
+        y_label='Flux',
+        exclusive_end=True,
+    )
 
 
 def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
@@ -3904,8 +3862,7 @@ Examples:
                     print(f"  Using on-pulse window covering manual peaks: {start_idx} to {end_idx}")
                     onpulse_mask = (start_idx, end_idx)
             elif args.peak_indices is not None:
-                # convert flat list to pairs
-                pairs = list(zip(args.peak_indices[0::2], args.peak_indices[1::2]))
+                pairs = parse_peak_index_pairs(args.peak_indices, stokes_i.shape[1])
                 if len(pairs) == 0:
                     print("  Warning: --peak-indices provided but no valid pairs found")
                 else:
@@ -4170,13 +4127,13 @@ Examples:
             print(f"  Noise level = {result.get('noise_estimate', 0):.6f}")
             
             # Save RM spectrum
-            output_txt = args.output + '_rm_spectrum.txt'
-            np.savetxt(output_txt, 
-                      np.column_stack([result['rm_values'], 
-                                      result['rm_amplitude']]),
-                      header='RM(rad/m2) Amplitude',
-                      fmt='%.6f')
-            print(f"\nRM spectrum saved to {output_txt}")
+            #output_txt = args.output + '_rm_spectrum.txt'
+            #np.savetxt(output_txt, 
+            #          np.column_stack([result['rm_values'], 
+            #                          result['rm_amplitude']]),
+            #          header='RM(rad/m2) Amplitude',
+            #          fmt='%.6f')
+            #print(f"\nRM spectrum saved to {output_txt}")
             
             # Plotting
             if not args.no_plot:
