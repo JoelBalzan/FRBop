@@ -15,7 +15,7 @@ dependencies = []
 dm = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.4", "numba>=0.65.1"]
 rm = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.3", "RM-Tools>=1.4.2", "basemap==1.4.1", "rmnest", "setuptools<=80.0.0"]
 scint = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.4", "pyyaml>=6.0", "mwprop>=2.0.3", "astropy>=7.2", "mpmath>=1.4.1"]
-scatt = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.4", "pyyaml>=6.0"]
+scatt = ["numpy>=1.20"]
 sn = ["numpy>=1.20", "matplotlib>=3.4"]
 all = [
   "frbop[dm,rm,scint,scatt,sn]"

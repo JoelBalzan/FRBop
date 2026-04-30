@@ -17,8 +17,9 @@ pip install -e ".[dm]"
 pip install -e ".[rm]"
 pip install -e ".[scint]"
 pip install -e ".[scatt]"
-pip install -e ".[sn]" # Requires separate installation of [ILEX](https://github.com/tdial2000/ILEX)
+pip install -e ".[sn]"
 ```
+sn requires the separate installation of [ILEX](https://github.com/tdial2000/ILEX). Optional [FIRES](https://github.com/JoelBalzan/FIRES) installation for final dynamic spectrum, pulse and PA profile viewing. 
 
 Or install everything listed:
 
