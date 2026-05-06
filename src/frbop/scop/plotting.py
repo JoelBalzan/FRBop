@@ -44,6 +44,7 @@ def plot_macquart_diagnostics(
     corrected_result,
     output=None,
     fit_max_lag_mhz=None,
+    spectral_index: float | None = -1.5,
 ):
     m2_raw, dnu_raw, lags_raw, acov_raw = raw_result
     m2_corr, dnu_corr, lags_corr, acov_corr = corrected_result
@@ -60,7 +61,12 @@ def plot_macquart_diagnostics(
             raw_mean = float(np.nanmean(raw_spectrum[finite]))
             if np.isfinite(raw_mean) and raw_mean > 0:
                 ax0.axhline(raw_mean, color='tab:blue', lw=1.1, ls='--', label='Raw mean')
-            cm = _powerlaw_mean_spectrum(freq_mhz[finite], raw_spectrum[finite])
+            spec_index = -1.5 if spectral_index is None else float(spectral_index)
+            cm = _powerlaw_mean_spectrum(
+                freq_mhz[finite],
+                raw_spectrum[finite],
+                spectral_index=spec_index,
+            )
             if np.all(np.isfinite(cm)):
                 ax0.plot(
                     freq_mhz[finite],
@@ -68,7 +74,7 @@ def plot_macquart_diagnostics(
                     color='tab:orange',
                     lw=1.2,
                     ls='--',
-                    label=r'$\nu^{-1.5}$ mean model',
+                    label=rf'$\nu^{{{spec_index:.2f}}}$ mean model',
                 )
         except Exception:
             pass
@@ -80,9 +86,10 @@ def plot_macquart_diagnostics(
 
     ax1 = axs[1]
     plotted = False
+    spec_index = -1.5 if spectral_index is None else float(spectral_index)
     for lags, acov, label, color, dnu in (
         (lags_raw, acov_raw, 'Raw mean normalisation', 'tab:blue', dnu_raw),
-        (lags_corr, acov_corr, r'$\nu^{-1.5}$ corrected', 'tab:orange', dnu_corr),
+        (lags_corr, acov_corr, rf'$\nu^{{{spec_index:.2f}}}$ corrected', 'tab:orange', dnu_corr),
     ):
         if lags.size == 0 or acov.size == 0:
             continue
@@ -122,6 +129,64 @@ def plot_macquart_diagnostics(
         out = base + '_macquart_diagnostics' + (ext if ext else '.png')
         plt.savefig(out, dpi=220)
         print(f"Saved Macquart diagnostics plot to {out}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_spectrum_powerlaw_fit(
+    freq_mhz,
+    spectrum,
+    mean_model,
+    spectral_index: float | None = None,
+    output=None,
+):
+    fig, axs = plt.subplots(1, 2, figsize=(12.0, 4.0))
+    freq_mhz = np.asarray(freq_mhz, dtype=float)
+    spectrum = np.asarray(spectrum, dtype=float)
+    mean_model = np.asarray(mean_model, dtype=float)
+
+    finite = np.isfinite(freq_mhz) & np.isfinite(spectrum)
+    if np.any(finite):
+        axs[0].plot(freq_mhz[finite], spectrum[finite], color='0.25', lw=1.4, label='Spectrum')
+
+    model_mask = np.isfinite(freq_mhz) & np.isfinite(mean_model)
+    if np.any(model_mask):
+        idx_str = "" if spectral_index is None else f" (index={float(spectral_index):.2f})"
+        axs[0].plot(
+            freq_mhz[model_mask],
+            mean_model[model_mask],
+            color='tab:orange',
+            lw=1.4,
+            ls='--',
+            label=f"Power-law fit{idx_str}",
+        )
+
+    axs[0].set_title('Spectrum power-law fit')
+    axs[0].set_xlabel('Frequency (MHz)')
+    axs[0].set_ylabel('Flux / intensity')
+    axs[0].grid(alpha=0.25)
+    axs[0].legend(fontsize=8)
+
+    corrected = np.full_like(spectrum, np.nan, dtype=float)
+    corr_mask = np.isfinite(mean_model) & (mean_model > 0) & np.isfinite(spectrum)
+    if np.any(corr_mask):
+        corrected[corr_mask] = (spectrum[corr_mask] - mean_model[corr_mask]) / mean_model[corr_mask]
+        axs[1].plot(freq_mhz[corr_mask], corrected[corr_mask], color='tab:blue', lw=1.4)
+    else:
+        axs[1].text(0.5, 0.5, "No valid corrected spectrum", ha='center', va='center', transform=axs[1].transAxes)
+
+    axs[1].set_title('Corrected spectrum')
+    axs[1].set_xlabel('Frequency (MHz)')
+    axs[1].set_ylabel('Corrected flux')
+    axs[1].grid(alpha=0.25)
+    plt.tight_layout()
+
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + '_spectrum_powerlaw' + (ext if ext else '.png')
+        plt.savefig(out, dpi=220)
+        print(f"Saved spectrum power-law plot to {out}")
     else:
         plt.show()
     plt.close(fig)
@@ -243,11 +308,11 @@ def plot_scintillation_band_power_law(
     fit_max_lag_mhz: float | None = None,
 ):
     # Top row: power-law plot + residual ratio
-    # Bottom row: per-band ACF + Lorentzian fits
+    # Bottom rows: per-band spectra + ACF Lorentzian fits
     n_bands = len(band_results)
-    fig = plt.figure(figsize=(max(13.0, 4.5 * n_bands), 10.0))
-    gs_top = fig.add_gridspec(1, 2, top=0.95, bottom=0.55, hspace=0.35, wspace=0.3)
-    gs_bot = fig.add_gridspec(1, n_bands, top=0.45, bottom=0.07, hspace=0.35, wspace=0.35)
+    fig = plt.figure(figsize=(max(13.0, 4.5 * n_bands), 12.5))
+    gs_top = fig.add_gridspec(1, 2, top=0.95, bottom=0.62, hspace=0.35, wspace=0.3)
+    gs_bot = fig.add_gridspec(2, n_bands, top=0.57, bottom=0.07, hspace=0.45, wspace=0.35)
 
     ax0 = fig.add_subplot(gs_top[0, 0])
     ax1 = fig.add_subplot(gs_top[0, 1])
@@ -330,9 +395,30 @@ def plot_scintillation_band_power_law(
     ax1.grid(alpha=0.25)
     ax1.legend(fontsize=8)
 
-    # Per-band ACF panels
+    # Per-band spectrum + ACF panels
     for k, row in enumerate(band_results):
-        ax = fig.add_subplot(gs_bot[0, k])
+        ax_spec = fig.add_subplot(gs_bot[0, k])
+        ax = fig.add_subplot(gs_bot[1, k])
+        spec_freq = row.get("_spec_freq")
+        spec_flux = row.get("_spec_flux")
+
+        if spec_freq is not None and spec_flux is not None:
+            spec_freq = np.asarray(spec_freq, dtype=float)
+            spec_flux = np.asarray(spec_flux, dtype=float)
+            mask = np.isfinite(spec_freq) & np.isfinite(spec_flux)
+            if np.any(mask):
+                ax_spec.plot(spec_freq[mask], spec_flux[mask], color='0.25', lw=1.2)
+            else:
+                ax_spec.text(0.5, 0.5, "No spectrum", ha='center', va='center', transform=ax_spec.transAxes)
+        else:
+            ax_spec.text(0.5, 0.5, "No spectrum", ha='center', va='center', transform=ax_spec.transAxes)
+
+        ax_spec.set_title(f"Band {row['band_idx']}  ({row['center_mhz']:.0f} MHz)", fontsize=8)
+        ax_spec.set_xlabel('Frequency (MHz)', fontsize=7)
+        ax_spec.set_ylabel('Flux', fontsize=7)
+        ax_spec.tick_params(labelsize=7)
+        ax_spec.grid(alpha=0.25)
+
         lags = row.get("_lags")
         acf = row.get("_acf")
         lf = row.get("_lags_fit")
@@ -368,7 +454,6 @@ def plot_scintillation_band_power_law(
         ax.axvline(0, color='0.6', lw=0.8)
         if x_max is not None:
             ax.set_xlim(-x_max, x_max)
-        ax.set_title(f"Band {row['band_idx']}  ({row['center_mhz']:.0f} MHz)", fontsize=8)
         ax.set_xlabel('Delta nu (MHz)', fontsize=7)
         ax.set_ylabel('ACF', fontsize=7)
         ax.tick_params(labelsize=7)

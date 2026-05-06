@@ -86,81 +86,76 @@ def measure_scintillation_bands(
     *,
     fit_max_lag_mhz: float,
     off_pulse: np.ndarray | None = None,
+    raw_spectrum: np.ndarray | None = None,
 ) -> list[dict]:
     """Measure Delta nu_d in each sub-band by fitting a Lorentzian to the normalised ACF.
 
-    Uses the same autocorr + fit_with_restarts(lorentzian) pipeline as the
-    full-band analysis so results are directly comparable. The Macquart
-    half-power estimator is deliberately avoided here: it is unreliable on
-    narrow sub-bands where the ACF is noisy and the half-power crossing is
-    poorly defined.
-
-    Each band's fit-max-lag is capped at half the band width so we never try
-    to constrain lags that don't exist in the data. If off_pulse is provided,
-    a noise-informed Delta nu_d uncertainty is estimated and returned in dnu_err_mhz.
+    Parameters
+    ----------
+    freq_mhz      : channel frequencies (MHz), ascending
+    spectrum      : corrected fractional residual spectrum (output of correct_spectrum_powerlaw)
+    band_regions  : list of (start_idx, stop_idx) index pairs
+    fit_max_lag_mhz : upper lag limit for Lorentzian fit (MHz)
+    off_pulse     : 2D off-pulse data (nfreq, n_offpulse) in raw data units, for noise estimation
+    raw_spectrum  : 1D raw burst spectrum (nfreq,) in raw data units, for SNR denominator
     """
     results: list[dict] = []
-    freq_mhz = np.asarray(freq_mhz, dtype=float)
-    spectrum = np.asarray(spectrum, dtype=float)
+    freq_mhz     = np.asarray(freq_mhz, dtype=float)
+    spectrum     = np.asarray(spectrum,  dtype=float)
+    raw_spectrum = np.asarray(raw_spectrum, dtype=float) if raw_spectrum is not None else None
+
     max_bound_fraction = 0.9
-    max_rel_err = 0.75
-    min_r2 = 0.5
+    max_rel_err        = 0.75
+    min_r2             = 0.5
 
     for band_idx, (start_idx, stop_idx) in enumerate(band_regions, start=1):
         sub_freq = freq_mhz[start_idx:stop_idx]
         sub_spec = spectrum[start_idx:stop_idx]
+
         finite = np.isfinite(sub_freq) & np.isfinite(sub_spec)
         if np.count_nonzero(finite) < 8:
-            print(f"  Band {band_idx}: skipped - fewer than 8 finite channels")
+            print(f"  Band {band_idx}: skipped — fewer than 8 finite channels")
             continue
 
         sub_freq = sub_freq[finite]
         sub_spec = sub_spec[finite]
         band_width_mhz = float(np.nanmax(sub_freq) - np.nanmin(sub_freq))
-        df_band = float(np.median(np.abs(np.diff(sub_freq))))
+        df_band        = float(np.median(np.abs(np.diff(sub_freq))))
 
-        # Cap the lag range to half the band width (can't measure lags > band)
         band_fit_max_lag = min(float(fit_max_lag_mhz), 0.5 * band_width_mhz)
         if band_fit_max_lag < df_band * 2:
-            print(
-                f"  Band {band_idx}: skipped - fit-max-lag ({band_fit_max_lag:.3f} MHz) "
-                f"too small for channel spacing ({df_band:.3f} MHz)"
-            )
+            print(f"  Band {band_idx}: skipped — fit-max-lag ({band_fit_max_lag:.3f} MHz) "
+                  f"too small for channel spacing ({df_band:.3f} MHz)")
             continue
 
-        # Normalise the sub-band spectrum the same way as the full-band pipeline
-        sub_med = np.median(sub_spec)
-        sub_mad = np.median(np.abs(sub_spec - sub_med))
-        sub_sigma = 1.4826 * sub_mad if sub_mad > 0 else np.std(sub_spec)
-        sub_norm = (sub_spec - sub_med) / sub_sigma if sub_sigma > 0 else sub_spec - sub_med
+        # sub_spec is already a fractional residual from correct_spectrum_powerlaw;
+        # just zero-mean it (should already be near zero, but remove any residual offset)
+        sub_mean = float(np.nanmean(sub_spec))
+        sub_norm = sub_spec - sub_mean
 
-        # Build the normalised ACF
         acf_band = autocorr(sub_norm)
         if acf_band[0] != 0:
             acf_band /= acf_band[0]
-        lags_band = np.arange(len(acf_band)) * df_band  # MHz
+        lags_band = np.arange(len(acf_band)) * df_band
 
-        # Restrict to positive lags within the allowed range (exclude zero lag)
         fit_mask = (lags_band > 0) & (lags_band <= band_fit_max_lag) & np.isfinite(acf_band)
         lags_fit = lags_band[fit_mask]
-        acf_fit = acf_band[fit_mask]
+        acf_fit  = acf_band[fit_mask]
 
         if lags_fit.size < 4:
-            print(f"  Band {band_idx}: skipped - fewer than 4 ACF points in fit range")
+            print(f"  Band {band_idx}: skipped — fewer than 4 ACF points in fit range")
             continue
 
-        d_guess = band_fit_max_lag / 4.0
+        d_guess   = band_fit_max_lag / 4.0
         amp_guess = max(0.05, float(np.nanmax(acf_fit) - np.nanmin(acf_fit)))
         off_guess = float(np.nanmedian(acf_fit[-max(2, acf_fit.size // 5):]))
 
         best = fit_with_restarts(
-            lorentzian,
-            lags_fit,
-            acf_fit,
+            lorentzian, lags_fit, acf_fit,
             p0_list=[
-                [d_guess, amp_guess, off_guess],
-                [d_guess * 0.4, amp_guess, off_guess],
-                [d_guess * 2.0, amp_guess, off_guess],
+                [d_guess,                amp_guess, off_guess],
+                [d_guess * 0.4,          amp_guess, off_guess],
+                [d_guess * 2.0,          amp_guess, off_guess],
                 [band_fit_max_lag * 0.1, amp_guess, off_guess],
             ],
             bounds=([df_band * 0.5, 0.0, -1.5], [band_fit_max_lag, 2.5, 1.5]),
@@ -171,95 +166,110 @@ def measure_scintillation_bands(
             print(f"  Band {band_idx}: Lorentzian fit failed (all initialisations diverged)")
             continue
 
-        popt, pcov, ymod = best
+        popt, pcov, ymod   = best
         dnu_fit, A_fit, C_fit = popt
+
+        if dnu_fit <= 0 or not np.isfinite(dnu_fit):
+            print(f"  Band {band_idx}: Lorentzian fit returned non-physical "
+                  f"Δν_d = {dnu_fit:.4f} MHz; skipping")
+            continue
+
+        # Covariance-based uncertainty (unreliable alone — correlated ACF residuals)
         try:
             dnu_err_fit = float(np.sqrt(np.diag(pcov))[0])
         except Exception:
             dnu_err_fit = np.nan
 
-        # Noise-informed fractional uncertainty using off-pulse data, if available.
-        dnu_err_noise = np.nan
-        n_eff = np.nan
-        noise_ratio = np.nan
-        if off_pulse is not None and off_pulse.size > 0:
+        # ------------------------------------------------------------------
+        # Noise-informed uncertainty from off-pulse radiometric noise
+        # ------------------------------------------------------------------
+        dnu_err_noise   = np.nan
+        n_eff           = np.nan
+        snr_per_scintle = np.nan
+        noise_ratio     = np.nan
+
+        if off_pulse is not None and off_pulse.size > 0 and raw_spectrum is not None:
             off_band = off_pulse[start_idx:stop_idx]
-            if off_band.ndim == 2 and off_band.size > 0:
-                channel_med = np.nanmedian(off_band, axis=1, keepdims=True)
-                off_band = off_band - channel_med
-                med2 = np.nanmedian(off_band, axis=1, keepdims=True)
-                mad = np.nanmedian(np.abs(off_band - med2), axis=1)
-                sigma_chan = 1.4826 * mad
-                bad = ~np.isfinite(sigma_chan) | (sigma_chan <= 0)
-                if np.any(bad):
-                    sigma_chan[bad] = np.nanstd(off_band[bad], axis=1)
-                sigma_n = np.nanmedian(sigma_chan[np.isfinite(sigma_chan) & (sigma_chan > 0)])
 
-                mean_signal = np.nanmean(sub_spec)
-                if not np.isfinite(mean_signal) or mean_signal <= 0:
-                    mean_signal = np.nanmean(np.abs(sub_spec))
+            if off_band.ndim == 2 and off_band.shape[1] > 1:
+                # Per-channel thermal noise: MAD over off-pulse time samples
+                per_chan_rms = 1.4826 * np.nanmedian(
+                    np.abs(off_band - np.nanmedian(off_band, axis=1, keepdims=True)),
+                    axis=1,
+                )
+                valid_rms = per_chan_rms[np.isfinite(per_chan_rms) & (per_chan_rms > 0)]
+                sigma_n   = float(np.nanmedian(valid_rms)) if valid_rms.size > 0 else np.nan
 
-                n_chan = max(1, int(sub_spec.size))
-                n_eff = band_width_mhz / max(dnu_fit, df_band)
-                n_eff = float(np.clip(n_eff, 1.0, float(n_chan)))
+                # Mean signal in raw data units — use raw_spectrum, not the corrected residual
+                raw_sub  = raw_spectrum[start_idx:stop_idx]
+                raw_sub  = raw_sub[np.isfinite(raw_sub)]
+                raw_mean = float(np.nanmean(raw_sub)) if raw_sub.size > 0 else np.nan
 
-                if np.isfinite(sigma_n) and sigma_n > 0 and np.isfinite(mean_signal) and mean_signal > 0:
-                    noise_ratio = float(sigma_n / mean_signal)
-                    frac_err = (noise_ratio ** 2) / np.sqrt(n_eff)
-                    dnu_err_noise = float(frac_err * dnu_fit)
+                if (np.isfinite(sigma_n) and sigma_n > 0
+                        and np.isfinite(raw_mean) and raw_mean > 0):
 
-        dnu_err = dnu_err_noise if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 else dnu_err_fit
+                    snr_chan    = raw_mean / sigma_n
+                    noise_ratio = float(sigma_n / raw_mean)
 
-        if dnu_fit <= 0 or not np.isfinite(dnu_fit):
-            print(
-                f"  Band {band_idx}: Lorentzian fit returned non-physical "
-                f"Delta nu_d = {dnu_fit:.4f} MHz; skipping"
-            )
-            continue
+                    # Number of independent scintles across the band
+                    n_eff = float(band_width_mhz / max(dnu_fit, df_band))
 
-        diag = build_fit_diagnostics(acf_fit, ymod, k=3)
+                    # Noise adds a white pedestal ~1/SNR² to the ACF, which broadens
+                    # the apparent Lorentzian and inflates Δν_d uncertainty.
+                    # Effective scintle count accounting for this bias:
+                    #   N_eff_eff = N_eff / (1 + 1/SNR²)²
+                    n_eff_effective = n_eff / (1.0 + 1.0 / snr_chan ** 2) ** 2
+
+                    # Fundamental ACF estimator variance for a Lorentzian:
+                    #   sigma(Δν_d) / Δν_d = 1 / sqrt(2 * N_eff_eff)
+                    if n_eff_effective > 0:
+                        dnu_err_noise   = float(dnu_fit / np.sqrt(2.0 * n_eff_effective))
+                        snr_per_scintle = float(snr_chan / np.sqrt(max(n_eff, 1.0)))
+
+        # Use noise-informed error where available; fall back to covariance error
+        dnu_err = (dnu_err_noise
+                   if np.isfinite(dnu_err_noise) and dnu_err_noise > 0
+                   else dnu_err_fit)
+
+        diag    = build_fit_diagnostics(acf_fit, ymod, k=3)
         rel_err = dnu_err_fit / dnu_fit if np.isfinite(dnu_err_fit) and dnu_fit > 0 else np.inf
 
         if dnu_fit >= max_bound_fraction * band_fit_max_lag:
-            print(
-                f"  Band {band_idx}: skipped - Delta nu_d = {dnu_fit:.4f} MHz is too close to the fit upper bound "
-                f"({band_fit_max_lag:.4f} MHz)"
-            )
+            print(f"  Band {band_idx}: skipped — Δν_d = {dnu_fit:.4f} MHz is too close to the "
+                  f"fit upper bound ({band_fit_max_lag:.4f} MHz)")
             continue
         if not np.isfinite(rel_err) or rel_err > max_rel_err:
-            print(
-                f"  Band {band_idx}: skipped - fractional uncertainty {rel_err:.2f} exceeds the limit "
-                f"({max_rel_err:.2f})"
-            )
+            print(f"  Band {band_idx}: skipped — fractional uncertainty {rel_err:.2f} exceeds "
+                  f"the limit ({max_rel_err:.2f})")
             continue
         if not np.isfinite(diag["r2"]) or diag["r2"] < min_r2:
-            print(f"  Band {band_idx}: skipped - poor fit quality R2 = {diag['r2']:.4f} < {min_r2:.2f}")
+            print(f"  Band {band_idx}: skipped — poor fit quality R² = {diag['r2']:.4f} < {min_r2:.2f}")
             continue
 
-        results.append(
-            dict(
-                band_idx=band_idx,
-                start_idx=int(start_idx),
-                stop_idx=int(stop_idx),
-                center_mhz=float(np.nanmean(sub_freq)),
-                band_width_mhz=band_width_mhz,
-                dnu_mhz=float(dnu_fit),
-                dnu_err_mhz=dnu_err,
-                dnu_err_fit_mhz=dnu_err_fit,
-                dnu_err_noise_mhz=dnu_err_noise,
-                n_eff=n_eff,
-                noise_ratio=noise_ratio,
-                A_fit=float(A_fit),
-                C_fit=float(C_fit),
-                r2=diag["r2"],
-                rmse=diag["rmse"],
-                # store ACF arrays for per-band plot
-                _lags=lags_band,
-                _acf=acf_band,
-                _lags_fit=lags_fit,
-                _ymod=ymod,
-            )
-        )
+        results.append(dict(
+            band_idx        = band_idx,
+            start_idx       = int(start_idx),
+            stop_idx        = int(stop_idx),
+            center_mhz      = float(np.nanmean(sub_freq)),
+            band_width_mhz  = band_width_mhz,
+            dnu_mhz         = float(dnu_fit),
+            dnu_err_mhz     = dnu_err,
+            dnu_err_fit_mhz = dnu_err_fit,
+            dnu_err_noise_mhz = dnu_err_noise,
+            n_eff           = n_eff,
+            snr_per_scintle = snr_per_scintle,
+            noise_ratio     = noise_ratio,
+            A_fit           = float(A_fit),
+            C_fit           = float(C_fit),
+            r2              = diag["r2"],
+            rmse            = diag["rmse"],
+            _lags           = lags_band,
+            _acf            = acf_band,
+            _lags_fit       = lags_fit,
+            _ymod           = ymod,
+            _spec_freq      = sub_freq,
+            _spec_flux      = sub_spec,
+        ))
 
     return results
 
@@ -292,15 +302,7 @@ def fit_scintillation_band_power_law(
     x = np.log(band_centers_mhz[finite])
     y = np.log(band_dnu_mhz[finite])
 
-    # Use weighted polyfit if errors provided
-    if band_dnu_err_mhz is not None:
-        # Propagate error in dnu to log-space: d(log dnu) ~= (d dnu) / dnu
-        err_log_dnu = band_dnu_err_mhz[finite] / band_dnu_mhz[finite]
-        # Weights are inverse variance in log-space
-        weights = 1.0 / (err_log_dnu ** 2)
-        popt, pcov = np.polyfit(x, y, 1, w=weights, cov=True)
-    else:
-        popt, pcov = np.polyfit(x, y, 1, cov=True)
+    popt, pcov = np.polyfit(x, y, 1, cov=True)
 
     alpha_fit, log_norm_fit = popt
     alpha_err = float(np.sqrt(np.diag(pcov)[0])) if np.isfinite(pcov[0, 0]) else np.nan

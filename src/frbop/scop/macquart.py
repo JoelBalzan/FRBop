@@ -22,11 +22,124 @@ def _powerlaw_mean_spectrum(
     return scale * template
 
 
+def fit_powerlaw_spectral_index(
+    freq_mhz: np.ndarray,
+    spectrum: np.ndarray,
+    min_points: int = 6,
+) -> float | None:
+    """Fit a power-law spectral index to the spectrum (log-log linear fit).
+
+    Returns the fitted spectral index, or None if the fit is ill-conditioned.
+    """
+    alpha, _ = fit_powerlaw_spectral_index_with_error(
+        freq_mhz,
+        spectrum,
+        min_points=min_points,
+    )
+    return alpha
+
+
+def fit_powerlaw_spectral_index_with_error(
+    freq_mhz: np.ndarray,
+    spectrum: np.ndarray,
+    min_points: int = 6,
+) -> tuple[float | None, float | None]:
+    """Fit a power-law spectral index with uncertainty (log-log linear fit).
+
+    Returns (spectral_index, spectral_index_err).
+    """
+    freq_mhz = np.asarray(freq_mhz, dtype=float)
+    spectrum = np.asarray(spectrum, dtype=float)
+    finite = np.isfinite(freq_mhz) & np.isfinite(spectrum) & (freq_mhz > 0) & (spectrum > 0)
+    if np.count_nonzero(finite) < min_points:
+        return None, None
+
+    log_freq = np.log(freq_mhz[finite])
+    log_spec = np.log(spectrum[finite])
+    if log_freq.size < min_points:
+        return None, None
+
+    try:
+        coeffs, cov = np.polyfit(log_freq, log_spec, 1, cov=True)
+    except Exception:
+        return None, None
+
+    alpha = float(coeffs[0])
+    alpha_err = None
+    if cov is not None and np.isfinite(cov[0, 0]):
+        alpha_err = float(np.sqrt(cov[0, 0]))
+    return alpha, alpha_err
+
+
+def correct_spectrum_powerlaw(
+    freq_mhz: np.ndarray,
+    spectrum: np.ndarray,
+    off_pulse_rms: np.ndarray | None = None,
+    spectral_index: float | None = None,
+    min_snr: float = 2.0,
+    min_points: int = 6,
+) -> tuple[np.ndarray, np.ndarray, float, float | None, float | None]:
+    """Remove intrinsic spectral structure, returning the fractional residual.
+
+    Instead of dividing raw flux by the model (which inflates noise in faint
+    channels), this returns the SNR-gated fractional deviation:
+
+        corrected[i] = (S[i] - S̄[i]) / S̄[i]   if S̄[i] > min_snr * σ[i]
+        corrected[i] = 0.0                        otherwise  (excluded from ACF)
+
+    Returns
+    -------
+    corrected          : fractional residual spectrum, zero where SNR-gated out
+    mean_model         : the power-law mean model S̄(ν)
+    spectral_index_used: index actually applied
+    spectral_index_fit : fitted index (None if user-supplied)
+    spectral_index_err : 1-sigma error on fit (None if user-supplied)
+    """
+    freq_mhz = np.asarray(freq_mhz, dtype=float)
+    spectrum  = np.asarray(spectrum,  dtype=float)
+
+    if spectral_index is None:
+        spectral_index_fit, spectral_index_err = fit_powerlaw_spectral_index_with_error(
+            freq_mhz, spectrum, min_points=min_points,
+        )
+        spectral_index_used = spectral_index_fit if spectral_index_fit is not None else -1.5
+    else:
+        spectral_index_fit  = None
+        spectral_index_err  = None
+        spectral_index_used = float(spectral_index)
+
+    mean_model = _powerlaw_mean_spectrum(
+        freq_mhz, spectrum, spectral_index=float(spectral_index_used)
+    )
+
+    corrected = np.zeros_like(spectrum)
+    good = np.isfinite(mean_model) & np.isfinite(spectrum) & (mean_model > 0)
+
+    # SNR gate: only include channels where the model exceeds min_snr * noise
+    if off_pulse_rms is not None:
+        rms = np.asarray(off_pulse_rms, dtype=float)
+        snr_ok = np.isfinite(rms) & (rms > 0) & (mean_model > min_snr * rms)
+        good = good & snr_ok
+    # If no off_pulse_rms supplied, fall back to gating on model amplitude
+    # (channels below 10% of peak model are excluded)
+    else:
+        peak_model = float(np.nanmax(mean_model[good])) if np.any(good) else 1.0
+        good = good & (mean_model > 0.10 * peak_model)
+
+    corrected[good] = (spectrum[good] - mean_model[good]) / mean_model[good]
+    # Channels excluded by SNR gate are left as NaN so autocorr ignores them
+    corrected[~good] = np.nan
+
+    return corrected, mean_model, float(spectral_index_used), spectral_index_fit, spectral_index_err
+
+
 def estimate_macquart_modulation_index(
     freq_mhz: np.ndarray,
     spectrum: np.ndarray,
     *,
     corrected: bool = False,
+    spectral_index: float | None = -1.5,
+    mean_model: np.ndarray | None = None,
     fit_max_lag_mhz: float | None = None,
     min_fit_points: int = 4,
 ) -> tuple[float | None, float | None, np.ndarray, np.ndarray]:
@@ -35,10 +148,16 @@ def estimate_macquart_modulation_index(
     Implements Macquart et al. (2019):
         C(Delta nu) = <[F(nu'+Delta nu) - Fbar(nu')] * [F(nu') - Fbar(nu')]> / Fbar^2
 
+    spectral_index: power-law index to remove intrinsic structure when corrected=True.
     Returns (m2, delta_nu_d, lags_mhz, acov).
     """
     freq_mhz = np.asarray(freq_mhz, dtype=float)
     spectrum = np.asarray(spectrum, dtype=float)
+    mean_model_arr = None
+    if mean_model is not None:
+        mean_model_arr = np.asarray(mean_model, dtype=float)
+        if mean_model_arr.shape != spectrum.shape:
+            raise ValueError("mean_model must match spectrum shape")
 
     finite = np.isfinite(freq_mhz) & np.isfinite(spectrum)
     if np.count_nonzero(finite) < 4:
@@ -46,9 +165,17 @@ def estimate_macquart_modulation_index(
 
     freq_mhz = freq_mhz[finite]
     spectrum = spectrum[finite]
+    if mean_model_arr is not None:
+        mean_model_arr = mean_model_arr[finite]
 
-    if corrected:
-        mean_model = _powerlaw_mean_spectrum(freq_mhz, spectrum, spectral_index=-1.5)
+    if mean_model_arr is not None:
+        mean_model = mean_model_arr
+    elif corrected:
+        if spectral_index is None:
+            spectral_index = fit_powerlaw_spectral_index(freq_mhz, spectrum)
+        if spectral_index is None:
+            spectral_index = -1.5
+        mean_model = _powerlaw_mean_spectrum(freq_mhz, spectrum, spectral_index=float(spectral_index))
     else:
         mean_level = float(np.nanmean(spectrum))
         if not np.isfinite(mean_level) or mean_level <= 0:
@@ -128,6 +255,8 @@ def macquart_dnu_from_window(
     lag_lo_mhz: float,
     lag_hi_mhz: float,
     corrected: bool = False,
+    spectral_index: float | None = None,
+    mean_model: np.ndarray | None = None,
 ) -> float | None:
     """Extract a Macquart half-power Delta nu_d restricted to a specific lag window.
 
@@ -138,7 +267,12 @@ def macquart_dnu_from_window(
     Returns Delta nu_d in MHz, or None if no crossing is found in the window.
     """
     _, _, lags, acov = estimate_macquart_modulation_index(
-        freq_mhz, spectrum, corrected=corrected, fit_max_lag_mhz=lag_hi_mhz
+        freq_mhz,
+        spectrum,
+        corrected=corrected,
+        spectral_index=spectral_index,
+        mean_model=mean_model,
+        fit_max_lag_mhz=lag_hi_mhz,
     )
     if lags.size == 0 or acov.size == 0 or not np.isfinite(acov[0]):
         return None
