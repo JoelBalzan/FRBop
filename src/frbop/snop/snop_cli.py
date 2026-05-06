@@ -434,7 +434,15 @@ def main():
         "--tN",
         type=int,
         default=None,
-        help="time averaging factor (overridden by --time-res-ms if provided)"
+        help="make_dynspec time averaging factor (overridden by --time-res-ms if provided)"
+    )
+    parser.add_argument(
+        "--analysis-tN",
+        "--findfrb-tN",
+        dest="analysis_tN",
+        type=int,
+        default=None,
+        help="Override find_frb optimised tN for FRB analysis and RM fitting"
     )
     parser.add_argument(
         "--time-res-ms",
@@ -461,6 +469,8 @@ def main():
         raise ValueError("--time-res-ms must be > 0")
     if args.tN is not None and args.tN < 1:
         raise ValueError("--tN must be >= 1")
+    if args.analysis_tN is not None and args.analysis_tN < 1:
+        raise ValueError("--analysis-tN must be >= 1")
     if args.guard < 0:
         raise ValueError("--guard must be >= 0")
     if args.time_res_ms is not None and args.tN is not None:
@@ -471,14 +481,17 @@ def main():
         raise ValueError("--rm-stepsize/--rm-step must be > 0")
 
     if args.time_res_ms is not None:
-        effective_tN = max(1, int(round(args.time_res_ms / postfft_dt)))
-        target_dt = postfft_dt * effective_tN
+        dynspec_tN = max(1, int(round(args.time_res_ms / postfft_dt)))
+        target_dt = postfft_dt * dynspec_tN
     elif args.tN is not None:
-        effective_tN = int(args.tN)
-        target_dt = postfft_dt * effective_tN
+        dynspec_tN = int(args.tN)
+        target_dt = postfft_dt * dynspec_tN
     else:
-        effective_tN = 50
-        target_dt = postfft_dt * effective_tN
+        dynspec_tN = 50
+        target_dt = postfft_dt * dynspec_tN
+
+    analysis_tN = int(args.analysis_tN) if args.analysis_tN is not None else None
+    analysis_tN_source = "override" if analysis_tN is not None else None
 
     # ILEX out_*.npy are loaded at post-FFT cadence; requested tN is applied in FRB analysis.
     loaded_dt = postfft_dt
@@ -486,7 +499,7 @@ def main():
     df = None
     # raw_dt tracks the instrument sample interval.
     # loaded_dt is the cadence of out_*.npy when loaded into FRB.
-    # target_dt is the requested final cadence after FRB-side averaging by effective_tN.
+    # target_dt is the requested dynspec cadence after make_dynspec averaging by dynspec_tN.
     
     # Load FRB-specific settings with defaults
     frb_config = parameters.get('FRB_Config', {})
@@ -536,18 +549,22 @@ def main():
     )
     if args.time_res_ms is not None:
         logger.info(
-            "Using --time-res-ms=%.6f ms -> effective tN=%s (target final dt=%.6f ms)",
+            "Using --time-res-ms=%.6f ms -> dynspec tN=%s (target dynspec dt=%.6f ms)",
             float(args.time_res_ms),
-            effective_tN,
+            dynspec_tN,
             target_dt,
         )
     elif args.tN is not None:
-        logger.info("Using user-supplied tN=%s (target final dt=%.6f ms)", effective_tN, target_dt)
+        logger.info("Using user-supplied dynspec tN=%s (target dynspec dt=%.6f ms)", dynspec_tN, target_dt)
     else:
-        logger.info("Using default tN=%s (target final dt=%.6f ms)", effective_tN, target_dt)
+        logger.info("Using default dynspec tN=%s (target dynspec dt=%.6f ms)", dynspec_tN, target_dt)
 
-    # Apply requested temporal averaging during FRB analysis/saving.
-    analysis_tN = int(effective_tN)
+    if analysis_tN is not None:
+        logger.info("Using analysis tN override=%s", analysis_tN)
+    else:
+        logger.info("No analysis tN override; will use find_frb optimised tN")
+
+    # analysis_tN is chosen by find_frb unless explicitly overridden.
 
     # Step 1: Generate dynamic spectrum from X/Y polarisation data
     if not args.skip_dynspec:
@@ -565,7 +582,7 @@ def main():
             "--nFFT",
             str(args.nFFT),
             "--tN",
-            str(effective_tN),
+            str(dynspec_tN),
             "--guard",
             str(args.guard)
         ]
@@ -594,7 +611,7 @@ def main():
     # Loaded out_*.npy cadence before FRB-side averaging
     logger.info("=== Data loaded: %s channels × %s time samples ===", nchan, nsamp_loaded)
     logger.info("Loaded dynspec column width (post-FFT): %.6f ms", loaded_dt)
-    logger.info("Target final column width after FRB averaging: %.6f ms", target_dt)
+    logger.info("Target dynspec column width from make_dynspec: %.6f ms", target_dt)
     
     # Check if loaded data matches expected nFFT
     if args.skip_dynspec and nchan != args.nFFT:
@@ -653,8 +670,9 @@ def main():
         'mode': 'min',
         'padding': padding,
         'dt_from_peak_sigma': dt_from_peak_sigma,
-        'tN': analysis_tN
     }
+    if analysis_tN is not None:
+        find_frb_kwargs['tN'] = int(analysis_tN)
     if rms_guard is not None:
         find_frb_kwargs['rms_guard'] = rms_guard
     if rms_width is not None:
@@ -662,13 +680,18 @@ def main():
     if rms_offset is not None:
         find_frb_kwargs['rms_offset'] = rms_offset
     
-    frb.set(tN=int(analysis_tN))
+    if analysis_tN is not None:
+        frb.set(tN=int(analysis_tN))
     frb.find_frb(**find_frb_kwargs)
+    if analysis_tN is None:
+        analysis_tN = int(getattr(frb.metapar, "tN", 1) or 1)
+        analysis_tN_source = "find_frb"
     frb.set(tN=int(analysis_tN))
     logger.info(
-        "Requested averaging: make_dynspec tN=%s, FRB analysis tN=%s",
-        int(effective_tN),
+        "Requested averaging: make_dynspec tN=%s, FRB analysis tN=%s (%s)",
+        int(dynspec_tN),
         int(analysis_tN),
+        analysis_tN_source or "find_frb",
     )
   
     if plot_ds_intermediate or args.show_plots:
@@ -743,14 +766,14 @@ def main():
     frb_dt = float(getattr(frb.this_par, "dt", base_dt))  # sampling interval of FRB time series (final resolution)
     # compute time resolutions for reporting
     postfft_dt = raw_dt * args.nFFT  # time per FFT bin (before temporal averaging in make_dynspec)
-    # target_dt = raw_dt * nFFT * effective_tN (requested final time resolution)
+    # target_dt = raw_dt * nFFT * dynspec_tN (requested dynspec time resolution)
     logger.info(
-        "Time resolution chain: raw=%.6e ms → post-FFT loaded=%.6f ms (nFFT=%s) → target=%.6f ms (requested tN=%s) → FRB series=%.6f ms (active_tN=%s)",
+        "Time resolution chain: raw=%.6e ms → post-FFT loaded=%.6f ms (nFFT=%s) → target=%.6f ms (dynspec tN=%s) → FRB series=%.6f ms (active_tN=%s)",
         raw_dt,
         postfft_dt,
         args.nFFT,
         target_dt,
-        effective_tN,
+        dynspec_tN,
         frb_dt,
         active_tN,
     )
