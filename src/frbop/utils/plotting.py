@@ -29,6 +29,9 @@ def apply_cm_math_style(font_size: float = 14) -> None:
     plt.rcParams['mathtext.rm'] = 'CMU Serif'
     plt.rcParams['mathtext.it'] = 'CMU Serif:italic'
     plt.rcParams['mathtext.bf'] = 'CMU Serif:bold'
+    plt.rcParams['mathtext.sf'] = 'CMU Sans Serif'
+    plt.rcParams['mathtext.tt'] = 'CMU Typewriter Text'
+    plt.rcParams['mathtext.cal'] = 'CMU Serif:italic'  # Or use 'stix:italic'
     plt.rcParams["font.size"] = font_size
 
 
