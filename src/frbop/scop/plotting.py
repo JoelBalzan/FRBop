@@ -6,133 +6,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from frbop.scop.fit_utils import _decode_lorentzian_components
-from frbop.scop.macquart import _powerlaw_mean_spectrum
 from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c
-
-# Publication-friendly sizing (in inches) adapted from RM plotting helpers
-TWO_COLUMN_WIDTH_IN = 7.1
-SINGLE_COLUMN_WIDTH_IN = 4.8
+from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
 
 
-def _pub_figsize(single_column: bool = True, height_ratio: float = 0.62, min_height: float = 3.0):
-    """Return a figure size (width, height) in inches suitable for LaTeX figures.
-
-    By default returns a single-column width for a two-column layout. Set
-    single_column=False to get a full two-column width.
-    """
-    width = SINGLE_COLUMN_WIDTH_IN if single_column else TWO_COLUMN_WIDTH_IN
-    height = max(min_height, width * height_ratio)
-    return (width, height)
-
-
-def _plot_style():
-    """Return a small dict of plotting sizes used for publication-style figures."""
-    return {
-        'title': 11,
-        'label': 10,
-        'tick': 8,
-        'legend': 8,
-        'annotation': 7,
-        'line': 1.2,
-    }
-
-
-def plot_macquart_diagnostics(
-    freq_mhz,
-    raw_spectrum,
-    raw_result,
-    corrected_result,
-    output=None,
-    fit_max_lag_mhz=None,
-    spectral_index: float | None = -1.5,
-):
-    m2_raw, dnu_raw, lags_raw, acov_raw = raw_result
-    m2_corr, dnu_corr, lags_corr, acov_corr = corrected_result
-
-    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
-    freq_mhz = np.asarray(freq_mhz, dtype=float)
-    raw_spectrum = np.asarray(raw_spectrum, dtype=float)
-    finite = np.isfinite(freq_mhz) & np.isfinite(raw_spectrum)
-
-    ax0 = axs[0]
-    if np.any(finite):
-        ax0.plot(freq_mhz[finite], raw_spectrum[finite], color='0.25', lw=1.4, label='Raw spectrum')
-        try:
-            raw_mean = float(np.nanmean(raw_spectrum[finite]))
-            if np.isfinite(raw_mean) and raw_mean > 0:
-                ax0.axhline(raw_mean, color='tab:blue', lw=1.1, ls='--', label='Raw mean')
-            spec_index = -1.5 if spectral_index is None else float(spectral_index)
-            cm = _powerlaw_mean_spectrum(
-                freq_mhz[finite],
-                raw_spectrum[finite],
-                spectral_index=spec_index,
-            )
-            if np.all(np.isfinite(cm)):
-                ax0.plot(
-                    freq_mhz[finite],
-                    cm,
-                    color='tab:orange',
-                    lw=1.2,
-                    ls='--',
-                    label=rf'$\nu^{{{spec_index:.2f}}}$ mean model',
-                )
-        except Exception:
-            pass
-    ax0.set_title('Macquart spectrum reference')
-    ax0.set_xlabel('Frequency (MHz)')
-    ax0.set_ylabel('Flux / intensity')
-    ax0.grid(alpha=0.25)
-    ax0.legend(fontsize=8)
-
-    ax1 = axs[1]
-    plotted = False
-    spec_index = -1.5 if spectral_index is None else float(spectral_index)
-    for lags, acov, label, color, dnu in (
-        (lags_raw, acov_raw, 'Raw mean normalisation', 'tab:blue', dnu_raw),
-        (lags_corr, acov_corr, rf'$\nu^{{{spec_index:.2f}}}$ corrected', 'tab:orange', dnu_corr),
-    ):
-        if lags.size == 0 or acov.size == 0:
-            continue
-        plotted = True
-        mask = np.isfinite(lags) & np.isfinite(acov)
-        if fit_max_lag_mhz is not None:
-            mask &= lags <= float(fit_max_lag_mhz)
-        if not np.any(mask):
-            continue
-        half = 0.5 * float(acov[0]) if np.isfinite(acov[0]) else np.nan
-        ax1.plot(lags[mask], acov[mask], color=color, lw=1.6, label=f'{label} ACF')
-        if np.isfinite(half):
-            ax1.axhline(half, color=color, ls=':', lw=1.0, alpha=0.85)
-        if dnu is not None and np.isfinite(dnu):
-            ax1.axvline(dnu, color=color, ls='--', lw=1.1, alpha=0.85)
-            ax1.text(
-                dnu,
-                half if np.isfinite(half) else 0.05,
-                f'  nu_dc~{dnu:.3f} MHz',
-                color=color,
-                fontsize=8,
-                va='bottom',
-            )
-    ax1.axhline(0.0, color='0.5', lw=1.0)
-    ax1.set_title('Macquart autocovariance')
-    ax1.set_xlabel('Frequency lag Delta nu (MHz)')
-    ax1.set_ylabel('Mean-normalised autocovariance')
-    ax1.grid(alpha=0.25)
-    if plotted:
-        ax1.legend(fontsize=8)
-
-    fig.suptitle('Macquart modulation-index diagnostics')
-    plt.tight_layout()
-
-    if output:
-        base, ext = os.path.splitext(output)
-        out = base + '_macquart_diagnostics' + (ext if ext else '.png')
-        plt.savefig(out, dpi=220)
-        print(f"Saved Macquart diagnostics plot to {out}")
-    else:
-        plt.show()
-    plt.close(fig)
-
+def _apply_publication_style() -> dict:
+    styles = publication_plot_style()
+    apply_cm_math_style(font_size=float(styles.get("label", 10)))
+    plt.rcParams.update({
+        "axes.titlesize": styles["title"],
+        "axes.labelsize": styles["label"],
+        "xtick.labelsize": styles["tick"],
+        "ytick.labelsize": styles["tick"],
+        "legend.fontsize": styles["legend"],
+        "lines.linewidth": styles["line"],
+    })
+    return styles
 
 def plot_spectrum_powerlaw_fit(
     freq_mhz,
@@ -141,6 +30,7 @@ def plot_spectrum_powerlaw_fit(
     spectral_index: float | None = None,
     output=None,
 ):
+    styles = _apply_publication_style()
     fig, axs = plt.subplots(1, 2, figsize=(12.0, 4.0))
     freq_mhz = np.asarray(freq_mhz, dtype=float)
     spectrum = np.asarray(spectrum, dtype=float)
@@ -162,30 +52,32 @@ def plot_spectrum_powerlaw_fit(
             label=f"Power-law fit{idx_str}",
         )
 
-    axs[0].set_title('Spectrum power-law fit')
-    axs[0].set_xlabel('Frequency (MHz)')
-    axs[0].set_ylabel('Flux / intensity')
+    axs[0].set_title('Spectrum power-law fit', fontsize=styles['title'])
+    axs[0].set_xlabel('Frequency (MHz)', fontsize=styles['label'])
+    axs[0].set_ylabel('Flux / intensity', fontsize=styles['label'])
+    axs[0].tick_params(labelsize=styles['tick'])
     axs[0].grid(alpha=0.25)
-    axs[0].legend(fontsize=8)
+    axs[0].legend(fontsize=styles['legend'])
 
     corrected = np.full_like(spectrum, np.nan, dtype=float)
     corr_mask = np.isfinite(mean_model) & (mean_model > 0) & np.isfinite(spectrum)
     if np.any(corr_mask):
         corrected[corr_mask] = (spectrum[corr_mask] - mean_model[corr_mask]) / mean_model[corr_mask]
-        axs[1].plot(freq_mhz[corr_mask], corrected[corr_mask], color='tab:blue', lw=1.4)
+        axs[1].plot(freq_mhz[corr_mask], corrected[corr_mask], color='k', lw=1.4)
     else:
         axs[1].text(0.5, 0.5, "No valid corrected spectrum", ha='center', va='center', transform=axs[1].transAxes)
 
-    axs[1].set_title('Corrected spectrum')
-    axs[1].set_xlabel('Frequency (MHz)')
-    axs[1].set_ylabel('Corrected flux')
+    axs[1].set_title('Corrected spectrum', fontsize=styles['title'])
+    axs[1].set_xlabel('Frequency (MHz)', fontsize=styles['label'])
+    axs[1].set_ylabel('Corrected flux', fontsize=styles['label'])
+    axs[1].tick_params(labelsize=styles['tick'])
     axs[1].grid(alpha=0.25)
     plt.tight_layout()
 
     if output:
         base, ext = os.path.splitext(output)
         out = base + '_spectrum_powerlaw' + (ext if ext else '.png')
-        plt.savefig(out, dpi=220)
+        savefig_rasterized(out, dpi=300, fig=fig)
         print(f"Saved spectrum power-law plot to {out}")
     else:
         plt.show()
@@ -198,8 +90,10 @@ def plot_lorentzian_diagnostics(
     lags_lorentz_fit,
     acf_lorentz_fit,
     fit_models,
+    lag_zoom,
     output=None,
 ):
+    styles = _apply_publication_style()
     fig, axs = plt.subplots(2, 3, figsize=(16, 9))
     xabs = np.abs(lags_plot_sym)
 
@@ -242,11 +136,13 @@ def plot_lorentzian_diagnostics(
                 color='tab:gray',
                 label='offset',
             )
-        ax.set_title(title)
-        ax.set_xlabel("Delta nu (MHz)")
-        ax.set_ylabel("ACF")
+        ax.set_xlim(-lag_zoom, lag_zoom)
+        ax.set_title(title, fontsize=styles['title'])
+        ax.set_xlabel("Delta nu (MHz)", fontsize=styles['label'])
+        ax.set_ylabel("ACF", fontsize=styles['label'])
+        ax.tick_params(labelsize=styles['tick'])
         ax.grid(alpha=0.25)
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=styles['legend'])
 
     # Residuals
     ax1 = axs[1, 0]
@@ -254,11 +150,12 @@ def plot_lorentzian_diagnostics(
     for name, result, _ in fit_models:
         if "ymod" in result:
             ax1.plot(lags_lorentz_fit, acf_lorentz_fit - result["ymod"], lw=1.3, label=name)
-    ax1.set_title("Residuals (positive lags)")
-    ax1.set_xlabel("Delta nu (MHz)")
-    ax1.set_ylabel("ACF residual")
+    ax1.set_title("Residuals (positive lags)", fontsize=styles['title'])
+    ax1.set_xlabel("Delta nu (MHz)", fontsize=styles['label'])
+    ax1.set_ylabel("ACF residual", fontsize=styles['label'])
+    ax1.tick_params(labelsize=styles['tick'])
     ax1.grid(alpha=0.25)
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=styles['legend'])
 
     # Delta AIC bar
     valid_names = [n for n, r, _ in fit_models if "aic" in r and np.isfinite(r["aic"])]
@@ -293,7 +190,7 @@ def plot_lorentzian_diagnostics(
     if output:
         base, ext = os.path.splitext(output)
         out = base + '_lorentzian_diagnostics' + (ext if ext else '.pdf')
-        plt.savefig(out, dpi=220)
+        savefig_rasterized(out, dpi=300, fig=fig)
         print(f"Saved Lorentzian diagnostics plot to {out}")
     else:
         plt.show()
@@ -307,6 +204,7 @@ def plot_scintillation_band_power_law(
     output=None,
     fit_max_lag_mhz: float | None = None,
 ):
+    styles = _apply_publication_style()
     # Top row: power-law plot + residual ratio
     # Bottom rows: per-band spectra + ACF Lorentzian fits
     n_bands = len(band_results)
@@ -384,16 +282,18 @@ def plot_scintillation_band_power_law(
         ax1.axvline(power_law_fit["reference_freq_mhz"], color='0.45', lw=1.0, ls=':')
         ax1.set_ylim(0.2, 2.5)
 
-    ax0.set_xlabel('Frequency (MHz)')
-    ax0.set_ylabel(r'$\Delta\nu_d$ (MHz)')
-    ax0.set_title('Scintillation bandwidth vs frequency')
+    ax0.set_xlabel('Frequency (MHz)', fontsize=styles['label'])
+    ax0.set_ylabel(r'$\Delta\nu_d$ (MHz)', fontsize=styles['label'])
+    ax0.set_title('Scintillation bandwidth vs frequency', fontsize=styles['title'])
+    ax0.tick_params(labelsize=styles['tick'])
     ax0.grid(alpha=0.25, which='both')
-    ax0.legend(fontsize=8)
-    ax1.set_xlabel('Frequency (MHz)')
-    ax1.set_ylabel('Observed / model')
-    ax1.set_title('Residual ratio diagnostic')
+    ax0.legend(fontsize=styles['legend'])
+    ax1.set_xlabel('Frequency (MHz)', fontsize=styles['label'])
+    ax1.set_ylabel('Observed / model', fontsize=styles['label'])
+    ax1.set_title('Residual ratio diagnostic', fontsize=styles['title'])
+    ax1.tick_params(labelsize=styles['tick'])
     ax1.grid(alpha=0.25)
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=styles['legend'])
 
     # Per-band spectrum + ACF panels
     for k, row in enumerate(band_results):
@@ -463,7 +363,7 @@ def plot_scintillation_band_power_law(
     if output:
         base, ext = os.path.splitext(output)
         out = base + '_scint_bw_powerlaw' + (ext if ext else '.png')
-        plt.savefig(out, dpi=220)
+        savefig_rasterized(out, dpi=300, fig=fig)
         print(f"Saved scintillation bandwidth power-law plot to {out}")
     else:
         plt.show()

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
 
+from frbop.scop import acf
 from frbop.scop.acf import autocorr
 from frbop.scop.band_analysis import (
     convert_mhz_to_frequency_indices,
@@ -14,10 +15,8 @@ from frbop.scop.band_analysis import (
 )
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts, _decode_lorentzian_components
 from frbop.scop.gating import find_burst_window, select_peaks_manual
-from frbop.scop.macquart import (
+from frbop.scop.power import (
     correct_spectrum_powerlaw,
-    estimate_macquart_modulation_index,
-    macquart_dnu_from_window,
 )
 from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c, scattered_gaussian
 from frbop.scop.ne2025 import (
@@ -29,12 +28,13 @@ from frbop.scop.ne2025 import (
 from frbop.scop.physics import estimate_ds_kpc_from_redshift, radec_to_galactic_deg, scale_scintillation_bandwidth
 from frbop.scop.plotting import (
     plot_lorentzian_diagnostics,
-    plot_macquart_diagnostics,
     plot_spectrum_powerlaw_fit,
     plot_scintillation_band_power_law,
 )
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
 from frbop.utils.peaks import parse_peak_index_pairs
+
+from frbop.utils.plotting import (publication_plot_style, apply_cm_math_style, savefig_rasterized)
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +68,16 @@ def main():
     parser.add_argument("--pad",               type=int,   default=50)
     parser.add_argument("--fallback-window",   type=int,   default=200)
     parser.add_argument("--fit-max-lag",       type=float, default=8.0)
+    parser.add_argument("--lag-zoom",          type=float, default=None,
+                        help="Zoom factor for ACF lag axis in diagnostic plots.")
     parser.add_argument("--dnu-mhz",           type=float, nargs='+', default=None,
                         help="Provide one or more Δν_d values in MHz (skips Lorentzian fitting). "
                              "E.g. --dnu-mhz 0.68 3.2 for two components.")
     parser.add_argument("--dnu-ref-freq-mhz",  type=float, default=None)
+    parser.add_argument("--bline", action="store_true", 
+                            help="Baseline correct dynamic spectrum.")
+    parser.add_argument("--raw-acf", action="store_true",
+                        help="Use raw ACF instead of corrected spectrum ACF for Lorentzian fitting.")
     parser.add_argument("--output",            default=None)
     parser.add_argument("--time-acf-model",    choices=["exp", "gauss"], default="exp")
     parser.add_argument("--fit-max-tau",       type=float, default=100.0)
@@ -119,8 +125,9 @@ def main():
     # ------------------------------------------------------------------
     n_offpulse = max(1, int(args.offpulse_fraction * ntime))
     off_pulse  = ds[:, :n_offpulse]                          # shape (nfreq, n_offpulse)
-    bandpass   = np.nanmean(off_pulse, axis=1)               # per-channel mean, shape (nfreq,)
-    ds         = ds - bandpass[:, None]                      # baseline-subtract the full array once
+    if args.bline:
+        bandpass   = np.nanmean(off_pulse, axis=1)               # per-channel mean, shape (nfreq,)
+        ds         = ds - bandpass[:, None]                      # baseline-subtract the full array once
 
     print(f"Off-pulse baseline: first {n_offpulse} samples "
           f"({args.offpulse_fraction*100:.1f}% of {ntime}), "
@@ -197,6 +204,9 @@ def main():
     raw_spectrum  = np.nanmean(burst_ds, axis=1)
     corrected_spectrum, mean_model, spec_index_used, spec_index_fit, spec_index_err = \
         correct_spectrum_powerlaw(freq, raw_spectrum, off_pulse_rms, min_snr=args.threshold_sigma)
+    if args.raw_acf:
+        print("Using raw spectrum for ACF fitting (no power-law correction).")
+        corrected_spectrum = raw_spectrum
 
     # Frequency mask for ACF fitting
     freq_mask = np.ones(nfreq, dtype=bool)
@@ -288,24 +298,16 @@ def main():
     elif args.freq_band_indices is not None or args.manual_freq_bands:
         print("Frequency-band selection produced no valid scintillation measurements.")
 
-    # ------------------------------------------------------------------
-    # Normalise for ACF (corrected_spectrum is already a fractional residual;
-    # just zero-mean and remove any remaining NaN-channel bias)
-    # ------------------------------------------------------------------
     spectrum = spectrum_acf.copy()
     n_finite_spec = int(np.count_nonzero(np.isfinite(spectrum)))
     if n_finite_spec < 4:
-        print(f"Warning: only {n_finite_spec} finite channels in ACF range; fits will be poorly conditioned.")
-
-    spec_med   = float(np.nanmedian(spectrum)) if n_finite_spec > 0 else 0.0
-    spec_mad   = float(np.nanmedian(np.abs(spectrum - spec_med))) if n_finite_spec > 0 else np.nan
-    spec_sigma = 1.4826 * spec_mad if np.isfinite(spec_mad) and spec_mad > 0 else float(np.nanstd(spectrum))
-    if not np.isfinite(spec_sigma) or spec_sigma <= 0:
-        spec_sigma = 1.0
-    spectrum = (spectrum - spec_med) / spec_sigma
+        print(f"Warning: only {n_finite_spec} finite channels in ACF range; "
+              "fits will be poorly conditioned.")
+    # spectrum is already a fractional residual (S - S̄)/S̄ from correct_spectrum_powerlaw.
+    # autocorr() handles zero-meaning internally; no further normalisation needed.
 
     # ------------------------------------------------------------------
-    # Normalised ACF
+    #  ACF
     # ------------------------------------------------------------------
     acf  = autocorr(spectrum)
     lags = np.arange(len(acf)) * df_acf
@@ -346,10 +348,12 @@ def main():
     ) -> tuple[float, float, float]:
         """Return (dnu_err_noise, n_eff, snr_per_scintle).  NaN on failure."""
         if off_pulse_rms_band is None or off_pulse_rms_band.size == 0:
+            print(f"Warning: no valid off-pulse RMS values for noise-informed Δν_d error: ")
             return np.nan, np.nan, np.nan
 
         valid_rms = off_pulse_rms_band[np.isfinite(off_pulse_rms_band) & (off_pulse_rms_band > 0)]
         if valid_rms.size == 0:
+            print(f"Warning: no valid off-pulse RMS values for noise-informed Δν_d error: ")
             return np.nan, np.nan, np.nan
         sigma_n = float(np.nanmedian(valid_rms))
 
@@ -358,6 +362,7 @@ def main():
 
         if not (np.isfinite(sigma_n) and sigma_n > 0
                 and np.isfinite(raw_mean) and raw_mean > 0):
+            print(f"Warning: invalid noise or signal level for noise-informed Δν_d error: ")
             return np.nan, np.nan, np.nan
 
         snr_chan        = raw_mean / sigma_n
@@ -365,6 +370,7 @@ def main():
         n_eff_effective = n_eff / (1.0 + 1.0 / snr_chan ** 2) ** 2
 
         if n_eff_effective <= 0:
+            print(f"Warning: invalid effective number of samples for noise-informed Δν_d error: ")
             return np.nan, n_eff, snr_chan / max(n_eff, 1.0) ** 0.5
 
         dnu_err_noise   = float(dnu_fit / np.sqrt(2.0 * n_eff_effective))
@@ -382,7 +388,7 @@ def main():
             raise RuntimeError("Insufficient positive-lag ACF points for Lorentzian fitting")
 
         d_base    = max(1e-3, args.fit_max_lag / 4.0)
-        amp_guess = max(0.05, float(np.nanmax(acf_lorentz_fit) - np.nanmin(acf_lorentz_fit)))
+        amp_guess = float(acf[0]) if np.isfinite(acf[0]) else 0.1   # acf[0] = m²
         off_guess = float(np.nanmedian(acf_lorentz_fit[-max(3, int(0.2 * acf_lorentz_fit.size)):]))
 
         best_1c = fit_with_restarts(
@@ -392,7 +398,7 @@ def main():
                 [d_base * 0.5, amp_guess, off_guess],
                 [d_base * 2.0, amp_guess, off_guess],
             ],
-            bounds=([1e-6, 0.0, -1.5], [np.inf, 2.5, 1.5]),
+            bounds=([1e-6, 0.0, -amp_guess], [np.inf, 10.0, amp_guess]),
         )
         best_2c = fit_with_restarts(
             lorentzian_2c, lags_lorentz_fit, acf_lorentz_fit,
@@ -435,53 +441,106 @@ def main():
             ("3-component", r3, lorentzian_3c),
         ]
 
-        valid = [(name, r) for name, r, _ in fit_models if "aic" in r and np.isfinite(r["aic"])]
-        best_name, best_result = min(valid, key=lambda x: x[1]["aic"]) if valid else ("1-component", r1)
+
+        def _pcov_dnu_err(n_comp, comp_idx, pcov):
+            """Return sigma(Δν_d) for component comp_idx from the fit covariance matrix."""
+            try:
+                diag = np.diag(pcov)
+                if n_comp == 1:
+                    # popt = [d1, A, C]
+                    return float(np.sqrt(diag[0]))
+                elif n_comp == 2:
+                    # popt = [w1, d1, dd12, A, C]
+                    # d1_err = sqrt(var[d1])
+                    # d2_err = sqrt(var[d1] + var[dd12] + 2*cov[d1,dd12])
+                    if comp_idx == 0:
+                        return float(np.sqrt(diag[1]))
+                    else:
+                        var = diag[1] + diag[2] + 2.0 * pcov[1, 2]
+                        return float(np.sqrt(max(var, 0.0)))
+                elif n_comp == 3:
+                    # popt = [a, b, d1, dd12, dd23, A, C]
+                    # d1_err = sqrt(var[d1])
+                    # d2_err = sqrt(var[d1] + var[dd12] + 2*cov[d1,dd12])
+                    # d3_err = sqrt(var[d1] + var[dd12] + var[dd23]
+                    #               + 2*cov[d1,dd12] + 2*cov[d1,dd23] + 2*cov[dd12,dd23])
+                    if comp_idx == 0:
+                        return float(np.sqrt(diag[2]))
+                    elif comp_idx == 1:
+                        var = diag[2] + diag[3] + 2.0 * pcov[2, 3]
+                        return float(np.sqrt(max(var, 0.0)))
+                    else:
+                        var = (diag[2] + diag[3] + diag[4]
+                               + 2.0 * pcov[2, 3] + 2.0 * pcov[2, 4] + 2.0 * pcov[3, 4])
+                        return float(np.sqrt(max(var, 0.0)))
+            except Exception:
+                return np.nan
+
+        # ------------------------------------------------------------------
+        # Physical validation before model selection
+        # ------------------------------------------------------------------
+        def _validate_fit(result: dict, n_comp: int) -> tuple[bool, str]:
+            if "error" in result or "popt" not in result:
+                return False, "fit failed"
+            components, A, C = _decode_lorentzian_components(n_comp, result["popt"])
+            if not np.isfinite(A) or A <= 0:
+                return False, f"non-finite/non-positive amplitude A={A:.4f}"
+            if A > 1.0:
+                return False, f"m=sqrt(A)={np.sqrt(A):.4f} > 1 unphysical for DISS"
+            if abs(C) > 0.9 * 1.5:
+                return False, f"offset C={C:.4f} hitting bound — degenerate fit"
+            for i, (w, d) in enumerate(components):
+                if d < df_acf:
+                    return False, f"component {i+1} Δν_d={d:.4f} MHz < channel width {df_acf:.4f} MHz"
+                if d > args.fit_max_lag:
+                    return False, f"component {i+1} Δν_d={d:.4f} MHz > fit_max_lag {args.fit_max_lag:.4f} MHz"
+                if w < 0.01:
+                    return False, f"component {i+1} weight={w:.4f} negligible"
+                try:
+                    d_err = _pcov_dnu_err(n_comp, i, result["pcov"])
+                    if not np.isfinite(d_err):
+                        return False, f"component {i+1} Δν_d uncertainty non-finite"
+                    if d_err > d:
+                        return False, f"component {i+1} fractional uncertainty {d_err/d:.2f} > 1"
+                except Exception:
+                    pass
+            return True, ""
+
+        validations = {}
+        for name, result, _ in fit_models:
+            ok, reason = _validate_fit(result, int(name[0]))
+            validations[name] = (ok, reason)
+
+        valid_physical = [
+            (name, r) for name, r, _ in fit_models
+            if "aic" in r and np.isfinite(r["aic"]) and validations[name][0]
+        ]
+
+        # Fall back to all models if everything fails validation
+        if not valid_physical:
+            print("  Warning: all fits failed physical validation; ignoring physical cuts")
+            valid_physical = [(name, r) for name, r, _ in fit_models
+                              if "aic" in r and np.isfinite(r["aic"])]
+
+        # Prefer simpler model unless ΔAIC > 2
+        one_comp_aic = next((r["aic"] for n, r in valid_physical if n == "1-component"), None)
+        best_name, best_result = min(valid_physical, key=lambda x: x[1]["aic"])
+        if one_comp_aic is not None and best_name != "1-component":
+            delta_aic = one_comp_aic - best_result["aic"]
+            if delta_aic < 2.0:
+                best_name   = "1-component"
+                best_result = next(r for n, r in valid_physical if n == "1-component")
+
         best_n_comp = int(best_name[0])
         best_fit    = best_result
 
+        # Extract Δν_d from best model (primary component = highest-weight one)
         if "popt" in best_result:
             components, _, _ = _decode_lorentzian_components(best_n_comp, best_result["popt"])
             primary_comp = max(components, key=lambda x: x[0])
             delta_nu_d   = primary_comp[1]
 
-            # Noise-informed error for each component
-            acf_band_width = float(args.fit_max_lag)   # lag range used, not spectral bandwidth
-            # Extract per-component pcov errors with correct index mapping
-            def _pcov_dnu_err(n_comp, comp_idx, pcov):
-                """Return sigma(Δν_d) for component comp_idx from the fit covariance matrix."""
-                try:
-                    diag = np.diag(pcov)
-                    if n_comp == 1:
-                        # popt = [d1, A, C]
-                        return float(np.sqrt(diag[0]))
-                    elif n_comp == 2:
-                        # popt = [w1, d1, dd12, A, C]
-                        # d1_err = sqrt(var[d1])
-                        # d2_err = sqrt(var[d1] + var[dd12] + 2*cov[d1,dd12])
-                        if comp_idx == 0:
-                            return float(np.sqrt(diag[1]))
-                        else:
-                            var = diag[1] + diag[2] + 2.0 * pcov[1, 2]
-                            return float(np.sqrt(max(var, 0.0)))
-                    elif n_comp == 3:
-                        # popt = [a, b, d1, dd12, dd23, A, C]
-                        # d1_err = sqrt(var[d1])
-                        # d2_err = sqrt(var[d1] + var[dd12] + 2*cov[d1,dd12])
-                        # d3_err = sqrt(var[d1] + var[dd12] + var[dd23]
-                        #               + 2*cov[d1,dd12] + 2*cov[d1,dd23] + 2*cov[dd12,dd23])
-                        if comp_idx == 0:
-                            return float(np.sqrt(diag[2]))
-                        elif comp_idx == 1:
-                            var = diag[2] + diag[3] + 2.0 * pcov[2, 3]
-                            return float(np.sqrt(max(var, 0.0)))
-                        else:
-                            var = (diag[2] + diag[3] + diag[4]
-                                   + 2.0 * pcov[2, 3] + 2.0 * pcov[2, 4] + 2.0 * pcov[3, 4])
-                            return float(np.sqrt(max(var, 0.0)))
-                except Exception:
-                    return np.nan
-
+            acf_band_width = float(args.fit_max_lag)
             component_noise_errs = []
             for i, (w_c, d_c) in enumerate(components):
                 dnu_err_noise, n_eff_c, snr_c = _noise_informed_dnu_err(
@@ -489,14 +548,10 @@ def main():
                     off_pulse_rms_acf, raw_spectrum_acf,
                 )
                 dnu_err_cov = _pcov_dnu_err(best_n_comp, i, best_result["pcov"])
-
-                # For a component wider than the band, N_eff < 1 and the noise
-                # error formula breaks down — fall back to pcov in that case
                 if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 and n_eff_c >= 1.0:
                     dnu_err = dnu_err_noise
                 else:
                     dnu_err = dnu_err_cov
-
                 component_noise_errs.append(
                     dict(dnu_err=dnu_err, dnu_err_noise=dnu_err_noise,
                          dnu_err_cov=dnu_err_cov, n_eff=n_eff_c, snr_per_scintle=snr_c)
@@ -505,50 +560,6 @@ def main():
             delta_nu_d           = d_base
             component_noise_errs = []
 
-    # ------------------------------------------------------------------
-    # Macquart modulation index
-    # ------------------------------------------------------------------
-    mac_raw  = estimate_macquart_modulation_index(freq, raw_spectrum, corrected=False,
-                                                   fit_max_lag_mhz=args.fit_max_lag)
-    mac_corr = estimate_macquart_modulation_index(freq, raw_spectrum, corrected=True,
-                                                   mean_model=mean_model,
-                                                   fit_max_lag_mhz=args.fit_max_lag)
-    m2_raw,  dnu_raw,  lags_raw,  acov_raw  = mac_raw
-    m2_corr, dnu_corr, lags_corr, acov_corr = mac_corr
-
-    # Per-component Macquart Δν_d: window the ACF around each Lorentzian component's scale
-    mac_dnu_per_component: list[tuple[float, float | None, float | None]] = []
-    # list of (lorentz_dnu, mac_dnu_raw, mac_dnu_corr)
-    if fit_models and "popt" in best_fit:
-        components, _, _ = _decode_lorentzian_components(best_n_comp, best_fit["popt"])
-        active_components = [(w, d) for (w, d) in components if w > 0.05]
-        if len(active_components) > 1:
-            # sort by scale
-            active_components = sorted(active_components, key=lambda x: x[1])
-            # define lag windows: each component owns the range from half its scale
-            # to midpoint between it and the next (or fit_max_lag for the last)
-            for i, (w, d) in enumerate(active_components):
-                lo = d * 0.1
-                if i + 1 < len(active_components):
-                    hi = (d + active_components[i + 1][1]) / 2.0
-                else:
-                    hi = args.fit_max_lag
-                hi = min(hi, args.fit_max_lag)
-                mdnu_raw  = macquart_dnu_from_window(freq, raw_spectrum,  lo, hi, corrected=False)
-                mdnu_corr = macquart_dnu_from_window(
-                    freq,
-                    raw_spectrum,
-                    lo,
-                    hi,
-                    corrected=True,
-                    mean_model=mean_model,
-                )
-                mac_dnu_per_component.append((d, mdnu_raw, mdnu_corr))
-        else:
-            # single active component: use the overall Macquart Δν_d
-            mac_dnu_per_component.append((delta_nu_d, dnu_raw, dnu_corr))
-    else:
-        mac_dnu_per_component.append((delta_nu_d, dnu_raw, dnu_corr))
 
     # ------------------------------------------------------------------
     # ===== SECTION 1: SCINTILLATION & MODULATION INDEX =====
@@ -581,21 +592,49 @@ def main():
                       f"{result['aicc']:>10.3f} {result['rss']:>12.4e} "
                       f"{result['rmse']:>10.4e} {result['r2']:>8.4f}")
 
-        valid = [(n, r) for n, r, _ in fit_models if "aic" in r and np.isfinite(r["aic"])]
-        if valid:
-            best_aic_n, best_aic_r = min(valid, key=lambda x: x[1]["aic"])
-            best_bic_n, best_bic_r = min(valid, key=lambda x: x[1]["bic"])
-            sorted_aic = sorted(valid, key=lambda x: x[1]["aic"])
-            daic_runner = sorted_aic[1][1]["aic"] - sorted_aic[0][1]["aic"] if len(sorted_aic) > 1 else None
+        # Print validation results for all models
+        for name, result, _ in fit_models:
+            ok, reason = validations[name]
+            if not ok:
+                print(f"  {name} rejected: {reason}")
+
+        # Print AIC/BIC table over physically valid models only
+        if valid_physical:
+            best_aic_n, best_aic_r = min(valid_physical, key=lambda x: x[1]["aic"])
+            best_bic_n, best_bic_r = min(valid_physical, key=lambda x: x[1]["bic"])
+            sorted_aic  = sorted(valid_physical, key=lambda x: x[1]["aic"])
+            daic_runner = (sorted_aic[1][1]["aic"] - sorted_aic[0][1]["aic"]
+                           if len(sorted_aic) > 1 else None)
+
+            one_comp_aic = next((r["aic"] for n, r in valid_physical if n == "1-component"), None)
+            revert_note  = ""
+            if one_comp_aic is not None and best_name == "1-component" and best_aic_n != "1-component":
+                delta_aic   = one_comp_aic - best_aic_r["aic"]
+                revert_note = f" — reverted from {best_aic_n} (ΔAIC={delta_aic:.2f} < 2)"
+
             print(f"\n  Best by AIC : {best_aic_n}  (AIC={best_aic_r['aic']:.3f}"
                   + (f", ΔAIC to runner-up={daic_runner:.2f}" if daic_runner else "") + ")")
             print(f"  Best by BIC : {best_bic_n}  (BIC={best_bic_r['bic']:.3f})")
+            print(f"  Selected    : {best_name}{revert_note}")
 
         # Component parameters for best model
+        m = 0.0
         if best_fit and "popt" in best_fit:
             components, A_fit, C_fit = _decode_lorentzian_components(best_n_comp, best_fit["popt"])
+            m = np.sqrt(max(A_fit, 0.0))
+            # When using the power-law corrected spectrum, `spectrum` is a fractional residual
+            # (S - \bar{S})/\bar{S} with mean ~0, so the modulation index is simply std(spectrum).
+            # When `--raw-acf` is used, `spectrum` is in raw intensity units and m = std/mean.
+            if args.raw_acf:
+                _spec_mean = float(np.nanmean(spectrum))
+                m_spec = float(np.nanstd(spectrum) / _spec_mean) if _spec_mean != 0.0 else np.nan
+            else:
+                m_spec = float(np.nanstd(spectrum))
             print(f"\n  Best model ({best_n_comp}-component) parameters:")
-            print(f"    A (amplitude) = {A_fit:.4f},  C (offset) = {C_fit:.4f}")
+            print(f"    m²  (ACF amplitude A) = {A_fit:.6f}")
+            print(f"    m   (modulation index) = {m:.6f}")
+            print(f"    m   (from spectrum)     = {m_spec:.6f}")
+            print(f"    C   (offset)           = {C_fit:.6f}")
             for i, (w, d) in enumerate(components):
                 errs    = component_noise_errs[i] if i < len(component_noise_errs) else {}
                 dnu_err = errs.get("dnu_err", np.nan)
@@ -606,30 +645,6 @@ def main():
                             if np.isfinite(errs.get("snr_per_scintle", np.nan)) else ""
                 print(f"    Component {i+1}: Δν_d = {d:.4f}{err_str} MHz,  "
                       f"weight = {w:.4f}{n_eff_str}{snr_str}")
-
-    # Macquart modulation index
-    print(f"\n  Macquart (2019) modulation index:")
-    if spec_index_fit is not None:
-        err_str = f" ± {spec_index_err:.3f}" if spec_index_err is not None and np.isfinite(spec_index_err) else ""
-        print(f"    mean-spectrum index (fit) = {spec_index_fit:.3f}{err_str}")
-    else:
-        print("    mean-spectrum index (fit) = N/A (using -1.5)")
-    if m2_raw is not None:
-        m_raw = np.sqrt(max(m2_raw, 0.0))
-        dnu_raw_str = f"{dnu_raw:.4f} MHz" if dnu_raw is not None else "N/A"
-        print(f"    m  (raw mean)         = {m_raw:.6f}   Δν_d = {dnu_raw_str}")
-    if m2_corr is not None:
-        m_corr = np.sqrt(max(m2_corr, 0.0))
-        dnu_corr_str = f"{dnu_corr:.4f} MHz" if dnu_corr is not None else "N/A"
-        print(f"    m  (ν^-1.5 corrected) = {m_corr:.6f}   Δν_d = {dnu_corr_str}")
-
-    if len(mac_dnu_per_component) > 1:
-        print(f"\n  Macquart Δν_d per Lorentzian component (windowed ACF):")
-        for i, (lor_d, mdnu_r, mdnu_c) in enumerate(mac_dnu_per_component):
-            r_str = f"{mdnu_r:.4f} MHz" if mdnu_r is not None else "N/A"
-            c_str = f"{mdnu_c:.4f} MHz" if mdnu_c is not None else "N/A"
-            print(f"    Component {i+1} (Lorentzian Δν_d={lor_d:.4f} MHz): "
-                  f"Macquart raw={r_str},  corrected={c_str}")
 
     if band_scintillation_results:
         print(f"\n  Frequency-band Lorentzian fits (Δν_d vs ν power law):")
@@ -726,13 +741,7 @@ def main():
             print("\nNE2025 L_g estimate skipped: provide --gl-deg/--gb-deg or --ra-hms/--dec-dms")
 
     # Modulation index for two-screen
-    modulation_index = None
-    if args.mg is None:
-        if m2_corr is not None and m2_corr > 0:
-            modulation_index = float(np.sqrt(m2_corr))
-        elif m2_raw is not None and m2_raw > 0:
-            modulation_index = float(np.sqrt(m2_raw))
-    mg_for_calc = args.mg if args.mg is not None else modulation_index
+    mg_for_calc = args.mg if args.mg is not None else m
 
     can_do_two_screen = (
         delta_nu_d_for_calc is not None
@@ -817,44 +826,84 @@ def main():
         output=args.output,
     )
 
-    # Spectrum + normalised ACF
-    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-    axs[0].plot(freq_acf, spectrum)
-    axs[0].set_xlabel("Frequency (MHz)")
-    axs[0].set_ylabel("Normalised intensity")
-    axs[0].set_title("Corrected burst spectrum")
+    lag_zoom = args.lag_zoom if args.lag_zoom is not None else args.fit_max_lag
 
-    axs[1].plot(lags_plot_sym, acf_plot_sym, label="ACF")
+    # Spectrum + normalised ACF
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+
+    styles = publication_plot_style()
+    apply_cm_math_style(font_size=float(styles.get('label', 10)))
+    plt.rcParams.update({
+        'axes.titlesize': styles['title'],
+        'axes.labelsize': styles['label'],
+        'xtick.labelsize': styles['tick'],
+        'ytick.labelsize': styles['tick'],
+        'legend.fontsize': styles['legend'],
+        'lines.linewidth': styles['line'],
+    })
+
+    xabs = np.abs(lags_plot_sym)
+
+    comp_colors = ['#D81B60', '#1E88E5', '#FFC107', '#004D40']
+
+    ax.plot(lags_plot_sym, acf_plot_sym, label="ACF", color="k", lw=2)
+    labels = ["Lorentzian", "Double Lorentzian", "Triple Lorentzian"]
     if delta_nu_d is not None and fit_models and best_fit and "popt" in best_fit:
         model_fn = [lorentzian, lorentzian_2c, lorentzian_3c][best_n_comp - 1]
-        axs[1].plot(lags_plot_sym, model_fn(np.abs(lags_plot_sym), *best_fit["popt"]),
-                    "--", label=f"Best fit ({best_n_comp}c)")
-    elif delta_nu_d is not None:
-        axs[1].set_title(f"Δν_d = {delta_nu_d:.2f} MHz (provided)")
-    axs[1].set_xlabel("Δν (MHz)")
-    axs[1].set_ylabel("ACF")
-    axs[1].legend()
+        ax.plot(
+            lags_plot_sym,
+            model_fn(xabs, *best_fit["popt"]),
+            "-",
+            label=f"{labels[best_n_comp - 1]}",
+            lw=1.5,
+            color=comp_colors[0],            
+        )
+
+        # Overlay the individual Lorentzian components for multi-component fits.
+        # Components are shown without the offset C (which is drawn separately).
+        if best_n_comp > 1:
+            components, A_fit, C_fit = _decode_lorentzian_components(best_n_comp, best_fit["popt"])
+            for i, (w, d) in enumerate(components, start=1):
+                errs    = component_noise_errs[i-1] if (i-1) < len(component_noise_errs) else {}
+                dnu_err = errs.get("dnu_err", np.nan)
+                comp = A_fit * w / (1.0 + (xabs / d) ** 2)
+                ax.plot(
+                    lags_plot_sym,
+                    comp,
+                    ls="--",
+                    lw=1.5,
+                    alpha=0.9,
+                    label=rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err:.2f}$ MHz",
+                    color=comp_colors[i]
+                )
+            #ax.plot(
+            #    lags_plot_sym,
+            #    np.full_like(lags_plot_sym, C_fit),
+            #    ls=":",
+            #    lw=1.0,
+            #    alpha=0.8,
+            #    color="tab:gray",
+            #    label="Offset C",
+            #)
+    ax.set_xlim(-lag_zoom, lag_zoom)
+    ax.set_xlabel(rf"Frequency lag (MHz)")
+    ax.set_ylabel("ACF power")
+    ax.legend(fontsize=8, loc="upper right")
     plt.tight_layout()
     if args.output:
-        plt.savefig(args.output, dpi=200)
+        savefig_rasterized(args.output, dpi=300, fig=fig)
         print(f"\nSaved spectrum+ACF plot to {args.output}")
     else:
         plt.show()
     plt.close(fig)
 
-    # Macquart diagnostics
-    plot_macquart_diagnostics(
-        freq, raw_spectrum, mac_raw, mac_corr,
-        output=args.output, fit_max_lag_mhz=args.fit_max_lag,
-        spectral_index=spec_index_used,
-    )
 
     # Lorentzian component diagnostics
     if fit_models:
         plot_lorentzian_diagnostics(
             lags_plot_sym, acf_plot_sym,
             lags_lorentz_fit, acf_lorentz_fit,
-            fit_models, output=args.output,
+            fit_models, lag_zoom, output=args.output,
         )
 
     # Frequency-band scintillation power-law plot

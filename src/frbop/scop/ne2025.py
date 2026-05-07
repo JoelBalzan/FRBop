@@ -5,6 +5,8 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+from frbop.utils.plotting import apply_cm_math_style, publication_plot_style
+
 
 def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
     import mwprop.nemod.NE2025 as _ne2025_mod
@@ -38,6 +40,17 @@ def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
 def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0):
     """Return (lg_peak_kpc, cn2_peak) using NE2025 Cn2 peak distance."""
     s, cn2 = get_cn2_profile(ldeg, bdeg, da_kpc=max_dist_kpc)
+
+    styles = publication_plot_style()
+    apply_cm_math_style(font_size=float(styles.get('label', 10)))
+    plt.rcParams.update({
+        'axes.titlesize': styles['title'],
+        'axes.labelsize': styles['label'],
+        'xtick.labelsize': styles['tick'],
+        'ytick.labelsize': styles['tick'],
+        'legend.fontsize': styles['legend'],
+        'lines.linewidth': styles['line'],
+    })
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')

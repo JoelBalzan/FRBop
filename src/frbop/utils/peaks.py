@@ -75,6 +75,7 @@ def select_peaks_manual(
         if stop <= start:
             stop = min(time_axis.size, start + 1)
         regions.append((start, stop))
+    print(f"Parsed {len(regions)} peak regions: {regions}")
 
     return regions if regions else [(0, time_axis.size)]
 

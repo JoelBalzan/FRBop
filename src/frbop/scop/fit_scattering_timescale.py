@@ -6,9 +6,14 @@ from scipy.optimize import curve_fit
 
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
-from frbop.scop.plotting import _plot_style, _pub_figsize
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
+
+
+def _pub_figsize(*, single_column: bool = True) -> tuple[float, float]:
+    """Simple publication-ish figure sizes in inches."""
+    return (3.35, 2.6) if single_column else (6.9, 3.6)
 
 
 def main():
@@ -217,7 +222,8 @@ def main():
 
             # Optional plot with FWHM markers (publication style)
             if args.output:
-                styles = _plot_style()
+                styles = publication_plot_style()
+                apply_cm_math_style(font_size=float(styles.get('label', 10)))
                 plt.rcParams.update({
                     'axes.titlesize': styles['title'],
                     'axes.labelsize': styles['label'],
@@ -257,8 +263,7 @@ def main():
                 ax.legend(loc='best')
                 ax.grid(True, alpha=0.3)
                 plt.tight_layout()
-                # Save with higher DPI suitable for publication
-                plt.savefig(args.output, dpi=300, bbox_inches='tight')
+                savefig_rasterized(args.output, dpi=300, fig=fig)
                 print(f"Plot saved to {args.output}")
 
         except Exception as e:
