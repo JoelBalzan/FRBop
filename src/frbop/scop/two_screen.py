@@ -15,7 +15,7 @@ def two_screen_estimate(
 ) -> dict:
     """Compute LxLg (and optionally Lx) from the two-screen scattering model.
 
-    Based on Macquart et al. (2019) Eqs. (2) and (4):
+    Based on Sammons et al. (2023) Eqs. (2) and (4):
         LxLg <= Ds^2 * nu_dc / (2 pi nu^2 (1+z) tau_scatt)    [Eq. 2, mg=1 limit]
         LxLg ~= LxLg_upper / mg^2                            [Eq. 4, mg<1]
 

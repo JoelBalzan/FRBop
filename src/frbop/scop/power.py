@@ -1,4 +1,4 @@
-"""Macquart (2019) autocovariance estimator helpers."""
+"""power law fitting and correction."""
 
 import numpy as np
 
