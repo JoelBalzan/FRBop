@@ -12,6 +12,7 @@ from frbop.scop.band_analysis import (
     measure_scintillation_bands,
     select_frequency_bands_manual,
     split_frequency_bands_equal,
+    split_frequency_bands_equal_snr,
 )
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts, _decode_lorentzian_components
 from frbop.scop.gating import find_burst_window, select_peaks_manual
@@ -51,6 +52,8 @@ def main():
     parser.add_argument("--peak-indices",      nargs='*',  type=int, default=None)
     parser.add_argument("--freq-bands",        type=int,   default=None,
                         help="Automatically divide the spectrum into N equal contiguous frequency bands.")
+    parser.add_argument("--freq-bands-snr", "--freq-snr",    type=int,   default=None,
+                        help="Divide the spectrum into N contiguous bands with equal total S/N.")
     parser.add_argument("--manual-freq-bands", "--manual-freq",  action="store_true")
     parser.add_argument("--freq-band-indices", "--freq-indices",  nargs='*', type=int, default=None)
     parser.add_argument("--freq-band-mhz",    nargs='*', type=float, default=None,
@@ -235,6 +238,7 @@ def main():
     band_freq     = np.asarray(freq, dtype=float)
     band_spectrum = np.asarray(corrected_spectrum, dtype=float)
     band_off_pulse = off_pulse if off_pulse.size > 0 else None
+    band_snr_weights = None
     freq_reversed = False
     N = band_freq.size
     if N > 1 and band_freq[0] > band_freq[-1]:
@@ -244,7 +248,31 @@ def main():
     if band_off_pulse is not None and freq_reversed:
         band_off_pulse = band_off_pulse[::-1, :]
 
-    if args.freq_bands is not None:
+    if off_pulse_rms is not None:
+        band_snr_weights = np.zeros_like(raw_spectrum, dtype=float)
+        valid = np.isfinite(raw_spectrum) & np.isfinite(off_pulse_rms) & (off_pulse_rms > 0)
+        band_snr_weights[valid] = np.maximum(raw_spectrum[valid] / off_pulse_rms[valid], 0.0)
+        if freq_reversed:
+            band_snr_weights = band_snr_weights[::-1]
+    elif args.freq_bands_snr is not None:
+        print("Equal-SNR banding requested but off-pulse RMS is unavailable; falling back to equal-width bands.")
+
+    if args.freq_bands_snr is not None:
+        if args.freq_bands_snr <= 0:
+            print(f"Skipping frequency-band analysis: --freq-bands-snr must be > 0 (got {args.freq_bands_snr})")
+        else:
+            band_regions = split_frequency_bands_equal_snr(
+                band_freq,
+                band_snr_weights,
+                args.freq_bands_snr,
+            )
+            print(f"Frequency-band gating: auto {len(band_regions)} equal-SNR bands")
+            for i, (start, stop) in enumerate(band_regions, start=1):
+                print(f"  Band {i}: {band_freq[start]:.3f}–{band_freq[stop - 1]:.3f} MHz")
+            band_scintillation_results = measure_scintillation_bands(
+                band_freq, band_spectrum, band_regions, fit_max_lag_mhz=args.fit_max_lag,
+                off_pulse=band_off_pulse, raw_spectrum=raw_spectrum)
+    elif args.freq_bands is not None:
         if args.freq_bands <= 0:
             print(f"Skipping frequency-band analysis: --freq-bands must be > 0 (got {args.freq_bands})")
         else:
@@ -312,11 +340,11 @@ def main():
     acf  = autocorr(spectrum)
     lags = np.arange(len(acf)) * df_acf
 
-    mask_plot        = (lags >= 0) & (lags <= args.fit_max_lag)
+    mask_plot        = (lags > 0) & (lags <= args.fit_max_lag)
     lags_plot        = lags[mask_plot]
     acf_plot         = acf[mask_plot]
-    lags_plot_sym    = np.concatenate((-lags_plot[1:][::-1], lags_plot))
-    acf_plot_sym     = np.concatenate(( acf_plot[1:][::-1], acf_plot))
+    lags_plot_sym    = np.concatenate((-lags_plot[::-1], lags_plot))
+    acf_plot_sym     = np.concatenate(( acf_plot[::-1], acf_plot))
 
     mask_lorentz_fit = (lags > 0) & (lags < args.fit_max_lag) & np.isfinite(acf)
     lags_lorentz_fit = lags[mask_lorentz_fit]
@@ -548,10 +576,11 @@ def main():
                     off_pulse_rms_acf, raw_spectrum_acf,
                 )
                 dnu_err_cov = _pcov_dnu_err(best_n_comp, i, best_result["pcov"])
-                if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 and n_eff_c >= 1.0:
-                    dnu_err = dnu_err_noise
-                else:
-                    dnu_err = dnu_err_cov
+                dnu_err = dnu_err_cov
+                #if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 and n_eff_c >= 1.0:
+                #    dnu_err = dnu_err_noise
+                #else:
+                #    dnu_err = dnu_err_cov
                 component_noise_errs.append(
                     dict(dnu_err=dnu_err, dnu_err_noise=dnu_err_noise,
                          dnu_err_cov=dnu_err_cov, n_eff=n_eff_c, snr_per_scintle=snr_c)
