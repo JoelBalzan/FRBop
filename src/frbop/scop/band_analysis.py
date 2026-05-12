@@ -195,8 +195,6 @@ def measure_scintillation_bands(
         sub_norm = sub_spec - sub_mean
 
         acf_band = autocorr(sub_norm)
-        if acf_band[0] != 0:
-            acf_band /= acf_band[0]
         lags_band = np.arange(len(acf_band)) * df_band
 
         fit_mask = (lags_band > 0) & (lags_band <= band_fit_max_lag) & np.isfinite(acf_band)
@@ -314,7 +312,7 @@ def measure_scintillation_bands(
             center_mhz      = float(np.nanmean(sub_freq)),
             band_width_mhz  = band_width_mhz,
             dnu_mhz         = float(dnu_fit),
-            dnu_err_mhz     = dnu_err_fit,
+            dnu_err_mhz     = dnu_err,
             dnu_err_fit_mhz = dnu_err_fit,
             dnu_err_noise_mhz = dnu_err_noise,
             n_eff           = n_eff,

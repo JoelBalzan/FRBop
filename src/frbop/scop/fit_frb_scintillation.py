@@ -15,7 +15,7 @@ from frbop.scop.band_analysis import (
     split_frequency_bands_equal_snr,
 )
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts, _decode_lorentzian_components
-from frbop.scop.gating import find_burst_window, select_peaks_manual
+from frbop.scop.gating import find_burst_window, select_peak_fwhm_manual, select_peaks_manual
 from frbop.scop.power import (
     correct_spectrum_powerlaw,
 )
@@ -33,7 +33,7 @@ from frbop.scop.plotting import (
     plot_scintillation_band_power_law,
 )
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
-from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs
 
 from frbop.utils.plotting import (publication_plot_style, apply_cm_math_style, savefig_rasterized)
 
@@ -47,8 +47,12 @@ def main():
     parser.add_argument("ds",   nargs="?", default="FRB_250607_htr_dsI.npy")
     parser.add_argument("--freq", default="FRB_250607_htr_freq.npy")
     parser.add_argument("--time", default="FRB_250607_htr_time.npy")
-    parser.add_argument("--smooth",            type=int,   default=5)
+    parser.add_argument("--smooth",            type=int,   default=1)
     parser.add_argument("--manual-peaks",      action="store_true")
+    parser.add_argument("--manual-peak-fwhm", action="store_true",
+                        help="Click a peak once and gate the burst using its FWHM.")
+    parser.add_argument("--auto-peak-fwhm",   action="store_true",
+                        help="Use the argmax peak and gate the burst using its FWHM.")
     parser.add_argument("--peak-indices",      nargs='*',  type=int, default=None)
     parser.add_argument("--freq-bands",        type=int,   default=None,
                         help="Automatically divide the spectrum into N equal contiguous frequency bands.")
@@ -152,6 +156,20 @@ def main():
             print(f"Peak-index gating: {list(zip(*[iter(args.peak_indices)]*2))}")
         else:
             print("Peak-index gating produced no valid samples; falling back to automatic window")
+    elif args.manual_peak_fwhm:
+        (start_idx, end_idx), fwhm_ms = select_peak_fwhm_manual(time, ts)
+        onpulse_mask[start_idx:end_idx] = True
+        if np.isfinite(fwhm_ms):
+            print(f"Manual FWHM gating: {start_idx}–{end_idx} (FWHM={fwhm_ms:.4f} ms)")
+        else:
+            print(f"Manual FWHM gating: {start_idx}–{end_idx}")
+    elif args.auto_peak_fwhm:
+        (start_idx, end_idx), fwhm_ms, _ = measure_fwhm_region(time, ts, peak_idx)
+        onpulse_mask[start_idx:end_idx] = True
+        if np.isfinite(fwhm_ms):
+            print(f"Auto FWHM gating: {start_idx}–{end_idx} (FWHM={fwhm_ms:.4f} ms)")
+        else:
+            print(f"Auto FWHM gating: {start_idx}–{end_idx}")
     elif args.manual_peaks:
         for start_idx, end_idx in select_peaks_manual(time, ts):
             onpulse_mask[start_idx:end_idx] = True
@@ -340,7 +358,7 @@ def main():
     acf  = autocorr(spectrum)
     lags = np.arange(len(acf)) * df_acf
 
-    mask_plot        = (lags > 0) & (lags <= args.fit_max_lag)
+    mask_plot        = (lags >= 0) & (lags <= args.fit_max_lag)
     lags_plot        = lags[mask_plot]
     acf_plot         = acf[mask_plot]
     lags_plot_sym    = np.concatenate((-lags_plot[::-1], lags_plot))
@@ -883,7 +901,7 @@ def main():
             lags_plot_sym,
             model_fn(xabs, *best_fit["popt"]),
             "-",
-            label=f"{labels[best_n_comp - 1]}",
+            label=f"{labels[best_n_comp - 1]}\n" + rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err:.2f}$ MHz" if best_n_comp == 1 else f"{labels[best_n_comp - 1]} fit",
             lw=1.5,
             color=comp_colors[0],            
         )
