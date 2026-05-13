@@ -52,6 +52,8 @@ def print_two_screen_results(
     redshift,
     mg,
     lg_kpc,
+    lg_peak_kpc,
+    lg_eff_kpc,
     delta_nu_d_for_calc_source,
     lg_source,
 ):
@@ -65,7 +67,11 @@ def print_two_screen_results(
     if mg is not None:
         print(f"  m_g              = {mg:.6f}")
     if lg_kpc is not None:
-        print(f"  L_g              = {lg_kpc:.4f} kpc  ({lg_source})")
+        print(f"  L_g (used)       = {lg_kpc:.4f} kpc  ({lg_source})")
+    if lg_peak_kpc is not None:
+        print(f"  L_g (peak)       = {lg_peak_kpc:.4f} kpc")
+    if lg_eff_kpc is not None and (lg_kpc is None or abs(lg_eff_kpc - lg_kpc) > 1e-6):
+        print(f"  L_g (weighted) = {lg_eff_kpc:.4f} kpc")
 
     for r in results:
         print(f"\n  --- {r['label']} ---")

@@ -53,7 +53,7 @@ def main():
     freq = np.load(args.freq)
     time = np.load(args.time)
     time = time.astype(float)
-    ref_freq = float(args.ref_freq) if args.ref_freq is not None else float(np.nanmin(freq))
+    ref_freq = float(args.ref_freq) if args.ref_freq is not None else float(np.nanmedian(freq))
     band_center_freq = float(np.nanmean(freq))
     scattering_index = float(args.scattering_index)
     fit_index_mode = bool(args.fit_index)

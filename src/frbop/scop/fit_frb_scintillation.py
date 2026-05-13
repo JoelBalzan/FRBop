@@ -228,6 +228,8 @@ def main():
     if args.raw_acf:
         print("Using raw spectrum for ACF fitting (no power-law correction).")
         corrected_spectrum = raw_spectrum
+    else:
+        print(f"Power-law spectral index used for correction: {spec_index_used:.3f} +/- {spec_index_err:.3f}" if np.isfinite(spec_index_used) else "Power-law spectral index used for correction: None")
 
     # Frequency mask for ACF fitting
     freq_mask = np.ones(nfreq, dtype=bool)
@@ -762,9 +764,11 @@ def main():
 
     # Resolve Lg (NE2025 or user-supplied)
     lg_kpc_for_calc = args.lg_kpc
+    lg_peak_kpc     = args.lg_kpc
     lg_source       = "--lg-kpc"
     _ne2025_s_kpc   = None   # set below if NE2025 is run
     _ne2025_cn2     = None
+    lg_eff_kpc      = None
     if lg_kpc_for_calc is None and args.estimate_lg_ne2025:
         gl_for_lg = args.gl_deg
         gb_for_lg = args.gb_deg
@@ -775,9 +779,14 @@ def main():
                 print(f"\nRA/Dec → Galactic conversion failed: {e}")
         if gl_for_lg is not None and gb_for_lg is not None:
             try:
-                lg_kpc_for_calc, cn2_peak = estimate_lg_kpc_from_ne2025(
+                lg_peak_kpc, cn2_peak, lg_eff_kpc = estimate_lg_kpc_from_ne2025(
                     gl_for_lg, gb_for_lg, ds_kpc_for_calc,
-                    max_dist_kpc=args.lg_max_dist_kpc)
+                    max_dist_kpc=args.lg_max_dist_kpc,
+                    output=args.output
+                )
+                lg_kpc_for_calc = lg_peak_kpc
+                if lg_eff_kpc is not None and lg_eff_kpc > 0:
+                    lg_kpc_for_calc = lg_eff_kpc
                 lg_source = "NE2025"
                 # Keep the full profile for scattering predictions
                 _ne2025_s_kpc, _ne2025_cn2 = get_cn2_profile(
@@ -835,13 +844,14 @@ def main():
                     nu_ref_mhz=scatt_ref_mhz,
                     v_iss_km_s=args.iss_velocity_km_s,
                 )
-                print_ne2025_scattering_prediction(ne_pred, lg_kpc_for_calc, ds_kpc_for_calc)
+                lg_peak_for_print = lg_peak_kpc if lg_source == "NE2025" else lg_kpc_for_calc
+                print_ne2025_scattering_prediction(ne_pred, lg_peak_for_print, ds_kpc_for_calc)
             except Exception as e:
                 print(f"\n  NE2025 scattering prediction failed: {e}")
 
         print_two_screen_results(
             ts_results, t_scatt_for_calc, nu_for_two_screen,
-            float(args.redshift), mg_for_calc, lg_kpc_for_calc,
+            float(args.redshift), mg_for_calc, lg_kpc_for_calc, lg_peak_kpc, lg_eff_kpc,
             source_label, lg_source,
         )
 
@@ -849,7 +859,10 @@ def main():
         if lg_kpc_for_calc is not None and lg_source == "NE2025":
             print(f"\n  NE2025 L_g details:")
             print(f"    l={gl_for_lg:.4f} deg, b={gb_for_lg:.4f} deg")
-            print(f"    L_g = {lg_kpc_for_calc:.4f} kpc,  Cn²_peak = {cn2_peak:.4e} m^{{-20/3}}")
+            line = f"    L_g (peak) = {lg_peak_kpc:.4f} kpc,  Cn²_peak = {cn2_peak:.4e} m^{{-20/3}}"
+            if lg_eff_kpc is not None:
+                line += f",  L_g (weighted) = {lg_eff_kpc:.4f} kpc"
+            print(line)
         if ds_kpc_for_calc is not None and args.redshift is not None:
             print(f"  D_s = {ds_kpc_for_calc:.4e} kpc  (z={args.redshift:.6f})")
     else:

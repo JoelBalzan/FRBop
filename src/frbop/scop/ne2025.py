@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import apply_cm_math_style, publication_plot_style
+from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
 
 
 def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
@@ -37,8 +37,8 @@ def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
     return s, cn2
 
 
-def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0):
-    """Return (lg_peak_kpc, cn2_peak) using NE2025 Cn2 peak distance."""
+def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=None):
+    """Return (lg_peak_kpc, cn2_peak, lg_eff_kpc) from an NE2025 Cn2 profile."""
     s, cn2 = get_cn2_profile(ldeg, bdeg, da_kpc=max_dist_kpc)
 
     styles = publication_plot_style()
@@ -69,17 +69,39 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0):
 
     lg_peak = float(s[np.argmax(cn2)])
     cn2_peak = float(np.max(cn2))
+    lg_eff_kpc = None
+    if da_kpc is not None and np.isfinite(da_kpc) and da_kpc > 0:
+        geom_weight = s * (1.0 - s / da_kpc)
+        numer = np.trapezoid(cn2 * geom_weight, s)
+        denom = np.trapezoid(cn2, s)
+        if denom > 0 and np.isfinite(numer):
+            lg_eff_kpc = float(numer / denom)
     ax.axvline(
         lg_peak,
         color='tab:green',
         lw=1.0,
         ls='--',
-        label=f'L_g peak = {lg_peak:.3f} kpc',
+        label=rf'$L_g$ peak = {lg_peak:.3f} kpc',
     )
+    if lg_eff_kpc is not None:
+        ax.axvline(
+            lg_eff_kpc,
+            color='tab:orange',
+            lw=1.0,
+            ls='-.',
+            label=rf'$L_g$ (weighted) = {lg_eff_kpc:.3f} kpc',
+        )
     ax.legend(loc='upper left', fontsize=8)
     plt.tight_layout()
-    plt.show()
-    return lg_peak, cn2_peak
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + '_Cn2' + (ext if ext else '.pdf')
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"Saved Cn2 profile plot to {out}")
+    else:
+        plt.show()
+    plt.close(fig)
+    return lg_peak, cn2_peak, lg_eff_kpc
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +132,18 @@ def ne2025_scattering_prediction(
     # Convert to SI: m^{-17/3}
     SM_si = SM_kpc * kpc_to_m
 
-    # Effective geometric distance for a thin screen at L_g, source at D_s
-    if ds_kpc > lg_kpc > 0:
-        D_eff_kpc = lg_kpc * (ds_kpc - lg_kpc) / ds_kpc
+    # Weighted effective geometric distance for an extended medium
+    if ds_kpc > 0 and np.isfinite(ds_kpc):
+        geom_weight = s_arr[finite] * (1.0 - s_arr[finite] / ds_kpc)
+        numer = np.trapezoid(cn2_arr[finite] * geom_weight, s_arr[finite])
+        denom = np.trapezoid(cn2_arr[finite], s_arr[finite])
+        if denom > 0 and np.isfinite(numer):
+            lg_eff_kpc = float(numer / denom)
+        else:
+            lg_eff_kpc = lg_kpc
     else:
-        D_eff_kpc = lg_kpc
-    D_eff_m = D_eff_kpc * kpc_to_m
+        lg_eff_kpc = lg_kpc
+    D_eff_m = lg_eff_kpc * kpc_to_m
 
     nu_hz = nu_ref_mhz * 1e6
     lam_m = c_m_s / nu_hz
@@ -145,7 +173,7 @@ def ne2025_scattering_prediction(
     return dict(
         SM_kpc=SM_kpc,
         SM_si=SM_si,
-        D_eff_kpc=D_eff_kpc,
+        lg_eff_kpc=lg_eff_kpc,
         tau_scatt_ms=tau_scatt_ms,
         delta_nu_d_mhz=delta_nu_d_mhz,
         t_scint_s=t_scint_s,
@@ -155,14 +183,15 @@ def ne2025_scattering_prediction(
     )
 
 
-def print_ne2025_scattering_prediction(pred: dict, lg_kpc: float, ds_kpc: float) -> None:
+def print_ne2025_scattering_prediction(pred: dict, lg_peak_kpc: float | None, ds_kpc: float) -> None:
     print("\n  NE2025 predicted scattering (Galactic screen):")
     print(f"    Reference frequency    = {pred['nu_ref_mhz']:.3f} MHz")
-    print(f"    SM (numerical integral) = {pred['SM_kpc']:.4e} kpc m^{{-20/3}}")
+    print(f"    SM (integral)          = {pred['SM_kpc']:.4e} kpc m^{{-20/3}}")
     print(f"    SM (SI)                = {pred['SM_si']:.4e} m^{{-17/3}}")
-    print(f"    L_g                    = {lg_kpc:.4f} kpc")
+    if lg_peak_kpc is not None:
+        print(f"    L_g (peak)             = {lg_peak_kpc:.4f} kpc")
+    print(f"    L_g (weighted)         = {pred['lg_eff_kpc']:.4f} kpc")
     print(f"    D_s                    = {ds_kpc:.4e} kpc")
-    print(f"    D_eff                  = {pred['D_eff_kpc']:.4f} kpc")
     print(f"    tau_scatt (predicted)  = {pred['tau_scatt_ms']:.4e} ms")
     print(f"    Delta nu_d (predicted) = {pred['delta_nu_d_mhz']:.4e} MHz")
     if np.isfinite(pred['t_scint_s']):

@@ -18,4 +18,5 @@ def estimate_ds_kpc_from_redshift(z):
 
 def radec_to_galactic_deg(ra_hms, dec_dms):
     c = SkyCoord(ra=ra_hms, dec=dec_dms, unit=(u.hourangle, u.deg), frame="icrs")
+    print(f"\n  RA={ra_hms}, Dec={dec_dms} -> l={c.galactic.l.deg:.4f} deg, b={c.galactic.b.deg:.4f} deg")
     return float(c.galactic.l.deg), float(c.galactic.b.deg)
