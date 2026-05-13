@@ -482,10 +482,11 @@ class DMOptimiser:
 		np.save(run_dir / f"{run_prefix}_DMs.npy", dm_values)
 		np.save(run_dir / f"{run_prefix}_I_{dt_us}us.npy", i_data)
 
-		script_path = _SHRINE_PATH / script_name
+		module_name = script_name[:-3] if script_name.endswith(".py") else script_name
 		cmd = [
 			sys.executable,
-			str(script_path),
+			"-m",
+			f"frbop.dmop.SHRINE.python.{module_name}",
 			"-l", run_prefix,
 			"-t", str(dt_us),
 		]
@@ -742,6 +743,64 @@ class DMOptimiser:
 		high_dm = self._dm_crossing(metric, dm, best_idx_eff, threshold, direction=1)
 		return self._uncertainty_dict(best_dm, low_dm, high_dm, "half-prominence")
 
+	def _uncertainty_from_local_quadratic(self,
+						 dm_values: np.ndarray,
+						 metric_values: np.ndarray,
+						 best_idx: int,
+						 target_points: int = 11) -> Dict[str, Optional[float]]:
+		dm, metric = self._finite_metric_arrays(dm_values, metric_values)
+		best_idx_eff = int(np.argmax(metric))
+		best_dm = float(dm[best_idx_eff])
+		n = len(dm)
+		if n < 5:
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+
+		points = int(max(5, min(target_points, n)))
+		half = points // 2
+		start = max(0, best_idx_eff - half)
+		end = min(n, start + points)
+		start = max(0, end - points)
+		x = dm[start:end]
+		y = metric[start:end]
+		if x.size < 5:
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+
+		try:
+			coeffs = np.polyfit(x, y, 2)
+		except Exception:
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+
+		a = float(coeffs[0])
+		if not np.isfinite(a) or a >= 0:
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+
+		y_fit = np.polyval(coeffs, x)
+		resid = y - y_fit
+		med = float(np.median(resid))
+		mad = float(np.median(np.abs(resid - med)))
+		sigma = 1.4826 * mad if mad > 0 else float(np.std(resid))
+		if not np.isfinite(sigma) or sigma <= 0:
+			step = float(np.median(np.diff(dm))) if n > 1 else 0.0
+			if step > 0:
+				return self._uncertainty_dict(
+					best_dm,
+					best_dm - 0.5 * step,
+					best_dm + 0.5 * step,
+					"local quadratic",
+				)
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+
+		width = float(np.sqrt(sigma / -a))
+		if not np.isfinite(width) or width <= 0:
+			return self._uncertainty_dict(best_dm, None, None, "local quadratic")
+		max_width = 0.5 * float(x[-1] - x[0]) if x.size > 1 else 0.0
+		if max_width > 0:
+			width = min(width, max_width)
+
+		low_dm = float(best_dm - width)
+		high_dm = float(best_dm + width)
+		return self._uncertainty_dict(best_dm, low_dm, high_dm, "local quadratic (1-sigma)")
+
 	def _uncertainty_from_snr_drop(self,
 						 dm_values: np.ndarray,
 						 snr_values: np.ndarray,
@@ -816,39 +875,14 @@ class DMOptimiser:
 								 data_u: np.ndarray,
 								 data_i: np.ndarray) -> np.ndarray:
 		"""
-		Build an L/I-specific time profile for SHRINE-like uncertainty.
+		Build a SHRINE-compatible time profile for L/I uncertainty.
 
-		Using a pulse-masked L/I profile keeps uncertainty tied to the L/I metric
-		itself and avoids edge/noise regions dominating the error range.
+		Using the Stokes I mean profile matches SHRINE's uncertainty recipe and
+		avoids flat L/I profiles inflating the error range.
 		"""
-		if (
-			self.full_q_noise_rms is not None
-			and self.full_u_noise_rms is not None
-			and data_q.ndim == 2
-			and self.full_q_noise_rms.shape[0] == data_q.shape[0]
-		):
-			q_rms, u_rms = self.full_q_noise_rms, self.full_u_noise_rms
-		else:
-			q_rms, u_rms = self._qu_noise_rms(data_q, data_u)
-
-		l_debias, _, _ = self._debiased_linear_from_qu(data_q, data_u, q_rms, u_rms)
-		l_over_i_2d = np.where(data_i > 0, l_debias / data_i, 0.0)
-		l_over_i_2d = np.clip(l_over_i_2d, 0.0, 1.0)
-		l_over_i = np.mean(l_over_i_2d, axis=0)
-
-		i_ts = np.mean(data_i, axis=0)
-		sigma_i = float(self.full_i_noise_std)
-		threshold = float(self.full_i_noise_median) + self.li_i_sigma_cut * sigma_i
-		mask = i_ts > threshold
-
-		if np.any(mask):
-			fill = float(np.median(l_over_i[mask]))
-		else:
-			fill = float(np.median(l_over_i)) if np.any(np.isfinite(l_over_i)) else 0.0
-
-		profile = np.where(mask, l_over_i, fill)
+		profile = self._nonshrine_uncertainty_reference_profile(data_i, data_q, data_u)
 		profile = np.asarray(profile, dtype=float)
-		profile[~np.isfinite(profile)] = fill
+		profile[~np.isfinite(profile)] = 0.0
 		return profile
 
 	def _uncertainty_from_shrine_relative(self,
@@ -1863,13 +1897,23 @@ class DMOptimiser:
 				uncertainty_reference_profiles,
 				kc=self._nonshrine_resolved_kc,
 			)
+			if (
+				li_uncertainty.get('uncertainty_low_dm') is None
+				or li_uncertainty.get('uncertainty_high_dm') is None
+			):
+				li_uncertainty = self._uncertainty_from_local_quadratic(dm_values, li_values, max_idx)
+				if (
+					li_uncertainty.get('uncertainty_low_dm') is None
+					or li_uncertainty.get('uncertainty_high_dm') is None
+				):
+					li_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_values, max_idx)
 		else:
 			li_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_values, max_idx)
 		li_uncertainty = self._clamp_uncertainty_to_dm_bounds(
 			optimal_dm,
 			li_uncertainty,
 			dm_values,
-			fill_missing_with_bounds=True,
+			fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 		)
 		run_prefix = f"{label}_{segment or 'segment'}_l_i_{mode}"
 		run_dir = self._save_nonshrine_run_outputs(
@@ -2446,13 +2490,27 @@ class DMOptimiser:
 					li_uncertainty_profiles,
 					kc=self._nonshrine_resolved_kc,
 				)
+				if (
+					li_mean_uncertainty.get('uncertainty_low_dm') is None
+					or li_mean_uncertainty.get('uncertainty_high_dm') is None
+				):
+					li_mean_uncertainty = self._uncertainty_from_local_quadratic(
+						dm_values, li_mean_values, max_idx_li_mean
+					)
+					if (
+						li_mean_uncertainty.get('uncertainty_low_dm') is None
+						or li_mean_uncertainty.get('uncertainty_high_dm') is None
+					):
+						li_mean_uncertainty = self._uncertainty_from_half_prominence(
+							dm_values, li_mean_values, max_idx_li_mean
+						)
 			else:
 				li_mean_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_mean_values, max_idx_li_mean)
 			li_mean_uncertainty = self._clamp_uncertainty_to_dm_bounds(
 				optimal_dm_li_mean,
 				li_mean_uncertainty,
 				dm_values,
-				fill_missing_with_bounds=True,
+				fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 			)
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
 			run_dir_li_mean = self._save_nonshrine_run_outputs(
@@ -3770,5 +3828,4 @@ def main():
 
 
 if __name__ == "__main__":
-	main()
 	main()
