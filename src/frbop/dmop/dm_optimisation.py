@@ -245,6 +245,11 @@ def parse_args() -> argparse.Namespace:
 		help="Stokes I sigma cutoff for L/I mean masking (default: 2.0)",
 	)
 	parser.add_argument(
+		"--debias-linear",
+		action="store_true",
+		help="Enable linear-polarisation debiasing for PA/L/I metrics.",
+	)
+	parser.add_argument(
 		"--methods",
 		nargs="+",
 		choices=["structure", "snr", "pa", "pa-shrine", "li"],
@@ -297,6 +302,7 @@ class DMOptimiser:
 				 nonshrine_kc_minimise_uncertainty: bool = False,
 				 nonshrine_kc: Optional[int] = None,
 				 li_i_sigma_cut: float = 2.0,
+				 debias_linear: bool = False,
 				 random_seed: Optional[int] = None):
 		"""
 		Initialize the DM optimiser.
@@ -338,6 +344,7 @@ class DMOptimiser:
 		self.li_i_sigma_cut = float(li_i_sigma_cut)
 		if self.li_i_sigma_cut <= 0:
 			raise ValueError("li_i_sigma_cut must be positive")
+		self.debias_linear = bool(debias_linear)
 		self.random_seed = random_seed
 		self.rng = np.random.default_rng(random_seed)
 
@@ -1256,21 +1263,24 @@ class DMOptimiser:
 		u_rms = np.std(data_u[:, :n_edge], axis=1, keepdims=True)
 		return q_rms, u_rms
 
-	@staticmethod
-	def _debiased_linear_from_qu(data_q: np.ndarray, data_u: np.ndarray,
-							   q_rms: np.ndarray, u_rms: np.ndarray,
-							   cutoff: float = 1.57, eps: float = 1e-12) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+	def _debiased_linear_from_qu(self, data_q: np.ndarray, data_u: np.ndarray,
+						   q_rms: np.ndarray, u_rms: np.ndarray,
+						   cutoff: float = 1.57, eps: float = 1e-12) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 		"""
-		Debias linear polarisation using propagated sigma_L and detection cutoff.
+		Optionally debias linear polarisation using propagated sigma_L and detection cutoff.
 		"""
 		L_meas = np.sqrt(data_q**2 + data_u**2)
 		sigma_L = np.sqrt(data_q**2 * q_rms**2 + data_u**2 * u_rms**2) / np.maximum(L_meas, eps)
 		r = L_meas / np.maximum(sigma_L, eps)
 		det = r >= cutoff
 
-		L_debias = np.zeros_like(L_meas)
-		L_debias[det] = np.sqrt(np.maximum(L_meas[det]**2 - sigma_L[det]**2, 0.0))
-		return L_debias, sigma_L, det
+		if self.debias_linear:
+			L_out = np.zeros_like(L_meas)
+			L_out[det] = np.sqrt(np.maximum(L_meas[det]**2 - sigma_L[det]**2, 0.0))
+		else:
+			L_out = L_meas.copy()
+			L_out[~det] = 0.0
+		return L_out, sigma_L, det
 
 	def _pa_series_deg(self, data_q: np.ndarray, data_u: np.ndarray, data_i: Optional[np.ndarray] = None) -> np.ndarray:
 		q_ts = np.mean(data_q, axis=0)
@@ -3514,6 +3524,7 @@ def main():
 		print(f"  - Input data already dedispersed at DM: {args.input_dm} pc cm⁻³")
 	print(f"  - PA weight strength: {args.pa_weight_strength}")
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
+	print(f"  - Linear debiasing: {args.debias_linear}")
 	print(f"  - Non-SHRINE kc smoothing: {args.nonshrine_kc_smooth}")
 	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
 	if args.nonshrine_kc is not None:
@@ -3634,6 +3645,7 @@ def main():
 		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
 		nonshrine_kc=args.nonshrine_kc,
 		li_i_sigma_cut=args.li_sig,
+		debias_linear=args.debias_linear,
 		random_seed=args.seed,
 	)
 
