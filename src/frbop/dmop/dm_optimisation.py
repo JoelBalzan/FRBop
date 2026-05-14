@@ -36,6 +36,8 @@ from frbop.utils.plotting import savefig_rasterized
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
+from frbop.utils.plotting import (publication_plot_style, apply_cm_math_style, savefig_rasterized)
+
 try:
 	from numba import njit
 	_NUMBA_AVAILABLE = True
@@ -3706,6 +3708,17 @@ def main():
 	
 	label = "Peak" if args.separate_peaks else "Segment"
 	fig_ext = args.ext.strip().lower().lstrip('.') or 'png'
+
+	styles = publication_plot_style()
+	apply_cm_math_style(font_size=float(styles.get('label', 10)))
+	plt.rcParams.update({
+		'axes.titlesize': styles['title'],
+		'axes.labelsize': styles['label'],
+		'xtick.labelsize': styles['tick'],
+		'ytick.labelsize': styles['tick'],
+		'legend.fontsize': styles['legend'],
+		'lines.linewidth': styles['line'],
+	})
 
 	# Analyze each segment (peak or full dataset)
 	all_results = []
