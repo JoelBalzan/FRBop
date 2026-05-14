@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 DEFAULT_PUBLICATION_STYLE: Dict[str, float] = {
     "title": 11,
     "label": 10,
-    "tick": 8,
-    "legend": 8,
+    "tick": 11,
+    "legend": 10,
     "annotation": 7,
     "line": 1.4,
 }

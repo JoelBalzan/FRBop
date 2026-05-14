@@ -15,6 +15,7 @@ import warnings
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import numpy as np
 from RMtools_1D.do_RMclean_1D import run_rmclean
 from RMtools_1D.do_RMsynth_1D import run_rmsynth
@@ -2167,37 +2168,17 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 					   time_series_data: Optional[Dict] = None,
 					   freq_hz: Optional[np.ndarray] = None,
 					   n_rm_bins: int = 20,
+					   n_pa_bins: int = 50,
 					   noise_fraction: float = 0.1):
 	"""
 	Plot RM as a function of time.
 	
 	Parameters:
 	-----------
-	time_array : array
-		Time array
-	rm_results : dict
-		Results from fit_rm_time_series containing 'rm', 'snr', etc.
-	output_file : str
-		Output filename for plot
-	time_profile : array, optional
-		Time profile (total intensity) for peak detection
-	separate_peaks : bool
-		Whether to create separate side-by-side plots for each peak (default: False)
-	min_gap_bins : int
-		Minimum gap size to separate peaks (default: 3)
-	min_peak_bins : int
-		Minimum number of consecutive significant bins for a valid peak (default: 3)
-	max_merge_gap : int
-		Maximum gap size for merging nearby peaks (default: 0, no merging)
-	time_series_data : dict, optional
-		Original time series data for binned RM analysis
-	freq_hz : array, optional
-		Frequency array for binned RM analysis
-	n_rm_bins : int
-		Number of bins for binned RM analysis (default: 20)
-	noise_fraction : float
-		Fraction of Stokes I samples used when estimating noise for lower-panel
-		uncertainty & signal masking (default: 0.1)
+	...
+	n_pa_bins : int
+		Number of bins for PA/EA plot (0 = full resolution, default: 0)
+	...
 	"""
 	style = _plot_style()
 
@@ -2214,32 +2195,37 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 		peak_regions = [(0, len(time_array) - 1)]
 		n_peaks = 1
 	
-	# Create figure with 3 rows of subplots for each peak
-	# Top row: combined Pulse Profile (left y-axis) + RM (right y-axis)
-	# Middle row: Polarisation fractions
-	# Bottom row: Polarisation Angle (PA) and Ellipticity Angle (EA)
-	# sharex ensures lower panels use same time axis as top
+	# Row order: PA (top), Pulse Profile + RM (middle), Polarisation fractions (bottom)
 	rm_ts_height = max(6.8, 2.25 * 3)
 	rm_ts_width = SINGLE_COLUMN_WIDTH_IN if n_peaks == 1 else min(TWO_COLUMN_WIDTH_IN, SINGLE_COLUMN_WIDTH_IN * n_peaks)
-	fig, axes = plt.subplots(3, n_peaks, figsize=(rm_ts_width, rm_ts_height), squeeze=False, sharex='col')
+	fig = plt.figure(figsize=(rm_ts_width, rm_ts_height))
+	gs = GridSpec(3, n_peaks, figure=fig, hspace=0, wspace=0.3)
+	axes = np.empty((3, n_peaks), dtype=object)
+	for col in range(n_peaks):
+		for row in range(3):
+			if row == 0:
+				axes[row, col] = fig.add_subplot(gs[row, col])
+			else:
+				axes[row, col] = fig.add_subplot(gs[row, col], sharex=axes[0, col])
 	
+	# Tick styling shared across all axes
+	TICK_LENGTH = 3  # reduced from matplotlib default (~4-5)
+
 	# Determine which points have sufficient signal (SNR >= 5 or use other criteria)
 	if 'snr' in rm_results and np.any(rm_results['snr'] > 0):
 		snr_threshold = 5.0
 		good_signal = rm_results['snr'] >= snr_threshold
 	else:
-		# If no SNR, use all points
 		good_signal = np.ones(len(time_array), dtype=bool)
 	
 	# Plot for each peak region
 	for peak_idx, (start_idx, end_idx) in enumerate(peak_regions):
-		# Extract data for this peak
 		peak_mask = np.zeros(len(time_array), dtype=bool)
 		peak_mask[start_idx:end_idx+1] = True
 		
 		time_peak = time_array[peak_mask]
 		good_signal_peak = good_signal[peak_mask]
-		# If full time-series data is available, compute full-resolution profiles
+
 		full_time = None
 		snr_full = None
 		P_frac_full = None
@@ -2247,7 +2233,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 		V_frac_full = None
 		if time_series_data is not None and 'time' in time_series_data:
 			full_time = np.asarray(time_series_data['time'])
-			# Determine time axis in data arrays
 			if time_series_data['I'].ndim == 2:
 				if time_series_data['I'].shape[0] == len(full_time):
 					time_axis_dim = 0
@@ -2258,13 +2243,11 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			else:
 				time_axis_dim = 0
 
-			# Compute per-sample averages over frequency axis
 			if time_axis_dim == 0:
 				I_full = np.mean(time_series_data['I'], axis=1)
 				Q_full = np.mean(time_series_data['Q'], axis=1)
 				U_full = np.mean(time_series_data['U'], axis=1)
 				V_full = np.mean(time_series_data['V'], axis=1) if 'V' in time_series_data else np.zeros_like(I_full)
-
 			else:
 				I_full = np.mean(time_series_data['I'], axis=0)
 				Q_full = np.mean(time_series_data['Q'], axis=0)
@@ -2272,16 +2255,11 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				V_full = np.mean(time_series_data['V'], axis=0) if 'V' in time_series_data else np.zeros_like(I_full)
 
 			pol_int_full = np.sqrt(Q_full**2 + U_full**2)
-
 			P_frac_full = np.sqrt(Q_full**2 + U_full**2 + V_full**2) / (I_full + 1e-10)
 			L_full = np.sqrt(Q_full**2 + U_full**2)
 			L_frac_full = L_full / (I_full + 1e-10)
-			# preserve sign of V fraction (positive or negative circular polarisation)
 			V_frac_full = V_full / (I_full + 1e-10)
 
-
-			# Restrict full-resolution arrays to the same time window as `time_peak`.
-			# Pad the window by half the sampling interval to avoid excluding nearby samples
 			if len(time_peak) > 0:
 				tmin = time_peak.min()
 				tmax = time_peak.max()
@@ -2294,7 +2272,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			else:
 				full_mask = np.ones_like(full_time, dtype=bool)
 
-			# If mask is empty (no overlap), fall back to the nearest sample
 			if not np.any(full_mask):
 				if len(full_time) > 0:
 					centre = 0.5 * (tmin + tmax) if len(time_peak) > 0 else full_time[0]
@@ -2304,71 +2281,163 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				else:
 					full_mask = np.ones_like(full_time, dtype=bool)
 
-			# Estimate noise using initial fraction of Stokes I samples
 			n_frac = max(1, int(len(I_full) * noise_fraction))
 			noise_est = np.nanstd(I_full[:n_frac])
 			if noise_est <= 0:
-				# Fallback robust MAD or small fraction of median
 				mad = np.nanmedian(np.abs(I_full - np.nanmedian(I_full)))
 				if mad > 0:
 					noise_est = mad / 0.6745
 				else:
 					noise_est = max(np.nanmedian(I_full) * 0.1, 1e-10)
 
-			# Use noise estimate of Stokes I as the per-sample noise level for polarisation
 			snr_full = pol_int_full / (noise_est + 1e-10)
-		
-		# Top panel: combined pulse profile (left y-axis) and RM (right y-axis)
-		ax_top = axes[0, peak_idx]
+
+		# ── Row 0: PA / EA (TOP panel) ──────────────────────────────────────
+		ax_pa = axes[0, peak_idx]
+		if time_series_data is not None and full_time is not None:
+			Q_vals = Q_full[full_mask]
+			U_vals = U_full[full_mask]
+			V_vals = V_full[full_mask] if 'V' in time_series_data else np.zeros_like(Q_vals)
+			times_ms = full_time[full_mask] * 1e3
+
+			pa_rad = 0.5 * np.arctan2(U_vals, Q_vals)
+			pa_deg = np.degrees(np.unwrap(pa_rad))
+
+			P_amp = np.sqrt(Q_vals**2 + U_vals**2 + V_vals**2) + 1e-10
+			sin_arg = np.clip(V_vals / P_amp, -1.0, 1.0)
+			ea_rad = 0.5 * np.arcsin(sin_arg)
+			ea_deg = np.degrees(ea_rad)
+
+			n_frac_pa = max(1, int(len(I_full) * noise_fraction))
+			sigma_Q = np.nanstd(Q_full[:n_frac_pa])
+			sigma_U = np.nanstd(U_full[:n_frac_pa])
+			sigma_V = np.nanstd(V_full[:n_frac_pa]) if 'V' in time_series_data else 0.0
+			if sigma_Q <= 0:
+				mad_q = np.nanmedian(np.abs(Q_full - np.nanmedian(Q_full)))
+				sigma_Q = mad_q / 0.6745 if mad_q > 0 else 1e-10
+			if sigma_U <= 0:
+				mad_u = np.nanmedian(np.abs(U_full - np.nanmedian(U_full)))
+				sigma_U = mad_u / 0.6745 if mad_u > 0 else 1e-10
+			if sigma_V <= 0 and 'V' in time_series_data:
+				mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
+				sigma_V = mad_v / 0.6745 if mad_v > 0 else 1e-10
+
+			P_lin_sq = Q_vals**2 + U_vals**2 + 1e-20
+			pa_sigma_rad = 0.5 * np.sqrt((U_vals**2 * sigma_Q**2 + Q_vals**2 * sigma_U**2) / (P_lin_sq**2))
+			pa_sigma_deg = np.degrees(pa_sigma_rad)
+
+			sigma_P = np.sqrt((Q_vals**2 * sigma_Q**2 + U_vals**2 * sigma_U**2)) / (P_amp + 1e-10)
+			sigma_VoverP = np.sqrt((sigma_V**2 / (P_amp**2)) + ((V_vals**2) * (sigma_P**2) / (P_amp**2 + 1e-20)))
+			denom = np.sqrt(1.0 - (V_vals / P_amp)**2 + 1e-20)
+			ea_sigma_rad = 0.5 * (sigma_VoverP / denom)
+			ea_sigma_deg = np.degrees(ea_sigma_rad)
+
+			# I-S/N mask (recomputed locally since combined isn't set yet)
+			snr_i_full_pa = I_full / (noise_est + 1e-10)
+			badi_pa = snr_i_full_pa < 2.0
+			combined_pa = ~badi_pa[full_mask]
+			bad_pa_err = pa_sigma_deg > 50.0
+			bad_ea_err = ea_sigma_deg > 50.0
+			mask_pa = combined_pa & ~bad_pa_err & ~bad_ea_err
+
+			if n_pa_bins > 0 and np.any(mask_pa):
+				# ── Bin PA and EA ──────────────────────────────────────────
+				t_good = times_ms[mask_pa]
+				pa_good = pa_deg[mask_pa]
+				ea_good = ea_deg[mask_pa]
+				pa_sig_good = pa_sigma_deg[mask_pa]
+				ea_sig_good = ea_sigma_deg[mask_pa]
+
+				bin_edges = np.linspace(t_good.min(), t_good.max(), n_pa_bins + 1)
+				bin_centres, pa_binned, pa_binned_err = [], [], []
+				ea_binned, ea_binned_err = [], []
+				for b in range(n_pa_bins):
+					sel = (t_good >= bin_edges[b]) & (t_good < bin_edges[b + 1])
+					if b == n_pa_bins - 1:
+						sel = (t_good >= bin_edges[b]) & (t_good <= bin_edges[b + 1])
+					if not np.any(sel):
+						continue
+					w_pa = 1.0 / (pa_sig_good[sel]**2 + 1e-20)
+					w_ea = 1.0 / (ea_sig_good[sel]**2 + 1e-20)
+					bin_centres.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
+					pa_binned.append(np.sum(w_pa * pa_good[sel]) / np.sum(w_pa))
+					pa_binned_err.append(1.0 / np.sqrt(np.sum(w_pa)))
+					ea_binned.append(np.sum(w_ea * ea_good[sel]) / np.sum(w_ea))
+					ea_binned_err.append(1.0 / np.sqrt(np.sum(w_ea)))
+
+				bc = np.array(bin_centres)
+				pa_b = np.array(pa_binned)
+				pa_be = np.array(pa_binned_err)
+				ea_b = np.array(ea_binned)
+				ea_be = np.array(ea_binned_err)
+
+				ax_pa.errorbar(bc, pa_b, yerr=pa_be, fmt='o', color='r',
+							   markersize=4, capsize=2, label='PA', zorder=2)
+				ax_pa.errorbar(bc, ea_b, yerr=ea_be, fmt='s', color='b',
+							   markersize=4, capsize=2, label='EA', zorder=2)
+			else:
+				# Full-resolution scatter (original behaviour)
+				def scatter_runs(x, y, axis, **kwargs):
+					if len(x) == 0:
+						return
+					idx = np.arange(len(x))
+					splits = np.where(np.diff(idx) != 1)[0] + 1
+					for seg in np.split(idx, splits):
+						if len(seg) > 0:
+							axis.scatter(x[seg], y[seg], **kwargs)
+
+				scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2)
+				scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2)
+				if np.any(mask_pa):
+					ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
+								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
+					ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa],
+								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
+
+		ax_pa.set_ylabel('Angle (deg)', fontsize=style['label'])
+		if n_peaks > 1:
+			ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
+		ax_pa.grid(True, alpha=0.3)
+		ax_pa.legend(loc='best', fontsize=style['legend'])
+		# No x tick labels — shared axis, label suppressed
+		ax_pa.tick_params(axis='both', labelsize=style['tick'], length=TICK_LENGTH, labelbottom=False)
+
+		# ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
+		ax_top = axes[1, peak_idx]
 		ax_top_twin = ax_top.twinx()
-		# Ensure RM ticks are on the right and label axis
 		ax_top_twin.yaxis.set_label_position('right')
 		ax_top_twin.yaxis.tick_right()
-		ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='m')
-		ax_top_twin.tick_params(axis='y', colors='m', labelsize=style['tick'])
+		ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='darkorange')
+		ax_top_twin.tick_params(axis='y', colors='darkorange', labelsize=style['tick'], length=TICK_LENGTH)
 
 		rm_peak = rm_results['rm'][peak_mask]
-
-		# Plot all RM points within the time-cropped window.  the only masks
-		# applied anywhere in the figure now are the crop itself and the
-		# Stokes I S/N > 2 threshold used later for the fraction panel.
 		tms = time_peak * 1e3
 		rm_err_peak = rm_results.get('rm_err', None)
 		if rm_err_peak is not None:
 			rm_err_peak = rm_err_peak[peak_mask]
 			ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-								 fmt='o-', color='m', markersize=3,
-								 linewidth=1.5, capsize=2, alpha=0.7,
+								 fmt='o-', color='darkorange', markersize=3,
+								 linewidth=1.5, capsize=2, alpha=1,
 								 label='RM')
 		else:
-			ax_top_twin.plot(tms, rm_peak, 'm-o', linewidth=1.5,
-							 markersize=3, label='RM')
-		# mean line for reference
-		if len(rm_peak) > 0:
-			rm_mean = np.nanmean(rm_peak)
-			rm_std = np.nanstd(rm_peak)
-			ax_top_twin.axhline(rm_mean, color='r', linestyle='--',
-								linewidth=2, alpha=0.5,
-								#label=f'Mean RM: {rm_mean:.2f} rad/m²'
-								)
+			ax_top_twin.plot(tms, rm_peak, 'darkorange-o', linewidth=1.5, markersize=3, label='RM')
 
-		# Plot pulse profile (intensity) on left axis
+		#if len(rm_peak) > 0:
+		#	rm_mean = np.nanmean(rm_peak)
+		#	ax_top_twin.axhline(rm_mean, color='r', linestyle='--', linewidth=2, alpha=0.5)
+
 		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
-		ax_top.set_ylabel('Intensity (arbitrary units)', fontsize=style['label'])
-		ax_top.tick_params(axis='y', labelsize=style['tick'])
-		# plot L and V
+		ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
+		ax_top.tick_params(axis='y', labelsize=style['tick'], length=TICK_LENGTH)
 		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L')
 		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V')
 		
-		# Compute binned RM if data is available and RM results are not already binned
 		if time_series_data is not None and freq_hz is not None and not rm_results.get('is_binned', False):
-			# Determine time axis orientation
 			if time_series_data['I'].shape[0] == len(time_array):
 				time_axis_dim = 0
 			else:
 				time_axis_dim = 1
 			
-			# Create bins
 			n_time = np.sum(peak_mask)
 			bin_size = max(1, n_time // n_rm_bins)
 			n_bins_actual = (n_time + bin_size - 1) // bin_size
@@ -2377,8 +2446,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			binned_rm_err = []
 			binned_time = []
 			
-			# Compute off-pulse Q/U noise from same fraction of samples used
-			# for I noise estimation so binned fits use consistent noise levels.
 			if time_axis_dim == 0:
 				I_full_tmp = np.mean(time_series_data['I'], axis=1)
 				Q_tmp = time_series_data['Q']
@@ -2398,7 +2465,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			u_std_chan_tmp = np.nanstd(u_off_tmp, axis=0 if time_axis_dim == 0 else 1)
 			noise_q_tmp = np.nanmedian(q_std_chan_tmp) if np.nanmedian(q_std_chan_tmp) > 0 else (np.nanmean(q_std_chan_tmp) if np.nanmean(q_std_chan_tmp) > 0 else 1e-10)
 			noise_u_tmp = np.nanmedian(u_std_chan_tmp) if np.nanmedian(u_std_chan_tmp) > 0 else (np.nanmean(u_std_chan_tmp) if np.nanmean(u_std_chan_tmp) > 0 else 1e-10)
-			# Off-pulse I noise (time-domain) for binned fits
 			noise_i_tmp = np.nanstd(I_full_tmp[:n_frac_tmp])
 			if noise_i_tmp <= 0:
 				mad_tmp = np.nanmedian(np.abs(I_full_tmp - np.nanmedian(I_full_tmp)))
@@ -2412,11 +2478,8 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			for bin_idx in range(n_bins_actual):
 				bin_start = start_idx + bin_idx * bin_size
 				bin_end = min(start_idx + (bin_idx + 1) * bin_size, end_idx + 1)
-				
 				if bin_end <= bin_start:
 					continue
-				
-				# Average data in this bin
 				if time_axis_dim == 0:
 					i_avg = np.mean(time_series_data['I'][bin_start:bin_end, :], axis=0)
 					q_avg = np.mean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
@@ -2428,34 +2491,25 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 					u_avg = np.mean(time_series_data['U'][:, bin_start:bin_end], axis=1)
 					v_avg = np.mean(time_series_data['V'][:, bin_start:bin_end], axis=1) if 'V' in time_series_data else None
 				
-				# Fit RM for this bin using RM synthesis
 				fitter = RMFitter(freq_hz, i_avg, q_avg, u_avg, v_avg)
 				result = fitter._fit_rm_with_rmtools(rm_range=(-1000, 1000), n_rm=500,
 													 noise_i=noise_i_tmp,
 													 noise_q=noise_q_tmp, noise_u=noise_u_tmp)
 				rm_fit = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
-				# Estimate error from RM-CLEAN if available, otherwise use noise-estimate fallback
 				rm_err = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
-				
 				binned_rm.append(rm_fit)
 				binned_rm_err.append(rm_err)
 				binned_time.append(time_array[(bin_start + bin_end) // 2])
 			
-			# Plot binned RM on secondary y-axis (right axis)
 			ax_top_twin.errorbar(np.array(binned_time) * 1e3, binned_rm, yerr=binned_rm_err,
 								 fmt='o-', color='red', markersize=5, linewidth=2, capsize=3,
 								 label=f'Binned RM ({n_bins_actual} bins)')
 			ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='red')
-			ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'])
+			ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'], length=TICK_LENGTH)
 		
-		ax_top.set_xlabel('Time (ms)', fontsize=style['label'])
 		if n_peaks > 1:
 			ax_top.set_title(f'Peak {peak_idx+1}: Pulse Profile & RM', fontsize=style['title'], fontweight='bold')
-		#else:
-		#    ax_top.set_title('Pulse Profile & Rotation Measure', fontsize=14, fontweight='bold')
 		ax_top.grid(True, alpha=0.3)
-		# Combine legends from both axes
-		# remove any existing legends on either axis to avoid duplicate boxes
 		if ax_top.get_legend() is not None:
 			ax_top.get_legend().remove()
 		if ax_top_twin.get_legend() is not None:
@@ -2464,8 +2518,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 		handles1, labels1 = ax_top.get_legend_handles_labels()
 		handles2, labels2 = ax_top_twin.get_legend_handles_labels()
 		if peak_idx == 0:
-			# Merge legends from profile (left axis) and RM (right axis),
-			# but prefer a single RM entry: keep only the magenta 'RM' handle
 			all_handles = list(handles1) + list(handles2)
 			all_labels = list(labels1) + list(labels2)
 			final_handles = []
@@ -2474,24 +2526,22 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			for h, lab in zip(all_handles, all_labels):
 				if not lab or lab in seen:
 					continue
-				# skip binned RM entries to avoid duplicate RM-type labels
 				if 'Binned RM' in lab or 'Binned' in lab:
 					continue
-				# if this is the generic 'RM' label, ensure it's the magenta one
 				if lab.strip() == 'RM':
 					keep = False
 					try:
 						col = getattr(h, 'get_color', lambda: None)()
 					except Exception:
 						col = None
-					if isinstance(col, str) and col.lower() in ('m', 'magenta'):
+					if isinstance(col, str) and col.lower() in ('lawngreen',):
 						keep = True
 					else:
 						try:
-							# handle RGBA tuples
 							import numpy as _np
 							colarr = _np.asarray(col)
-							if colarr.size >= 3 and _np.allclose(colarr[:3], _np.array([1.0, 0.0, 1.0]), atol=0.08):
+							# lawngreen = #7CFC00 = (0.486, 0.988, 0.0)
+							if colarr.size >= 3 and _np.allclose(colarr[:3], _np.array([0.486, 0.988, 0.0]), atol=0.05):
 								keep = True
 						except Exception:
 							keep = False
@@ -2502,106 +2552,69 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				seen.add(lab)
 			if final_handles:
 				ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best')
-		ax_top.tick_params(axis='x', labelsize=style['tick'])
-		
-		# Plot 2 (bottom row): Polarisation fractions vs time
-		ax3 = axes[1, peak_idx]
+		# Suppress x tick labels — not the bottom panel
+		ax_top.tick_params(axis='x', labelbottom=False, length=TICK_LENGTH)
+
+
+		# ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
+		ax3 = axes[2, peak_idx]
 		
 		if time_series_data is not None and full_time is not None:
-			# Plot full-resolution polarisation fractions with error bands
-			# compute noise estimate based on off-pulse I
-			# estimate noise using first N samples of Stokes I
 			n_frac = max(1, int(len(I_full) * noise_fraction))
 			noise_est = np.nanstd(I_full[:n_frac])
 			if noise_est <= 0:
-				# fallback to robust MAD or small fraction
 				mad = np.nanmedian(np.abs(I_full - np.nanmedian(I_full)))
 				if mad > 0:
 					noise_est = mad / 0.6745
 				else:
 					noise_est = max(np.nanmedian(I_full) * 0.1, 1e-10)
-			# fractional uncertainty for all fractions
 			err_frac = noise_est / (I_full + 1e-10)
 
 			times_ms = full_time[full_mask] * 1e3
-			# determine bins with poor total‑intensity S/N using the full set
-			# rather than the already-cropped slices (avoids mismatched shapes)
 			snr_i_full = I_full / (noise_est + 1e-10)
 			badi_full = snr_i_full < 2.0
-			# apply masking globally; NaNs propagate automatically when we later
-			# slice by full_mask for plotting
 			P_frac_full[badi_full] = np.nan
 			L_frac_full[badi_full] = np.nan
 			V_frac_full[badi_full] = np.nan
 
-			# boolean mask for plotted subset (crop & good S/N)
 			signal_mask = ~badi_full[full_mask]
 			if not np.any(signal_mask):
 				signal_mask = np.ones_like(signal_mask, dtype=bool)
-			# compute rm_mask for informational purposes (not applied)
 			rm_mask = np.ones_like(times_ms, dtype=bool)
 			if np.any(good_signal_peak):
 				good_times = time_peak[good_signal_peak] * 1e3
 				dt = np.median(np.diff(time_peak)) * 1e3 if len(time_peak) > 1 else 0
 				tol = dt/2 + 1e-9
 				rm_mask = np.array([np.any(np.abs(t - good_times) <= tol) for t in times_ms])
-			combined = signal_mask  # only mask on I S/N
+			combined = signal_mask
 
-			def plot_runs(x, y, axis, **kwargs):
-				if len(x) == 0:
-					return
-				idx = np.arange(len(x))
-				splits = np.where(np.diff(idx) != 1)[0] + 1
-				for seg in np.split(idx, splits):
-					if len(seg) > 0:
-						axis.plot(x[seg], y[seg], **kwargs)
-
-			# plot P, L, (V) only where both masks true, but split into contiguous
-			# segments in the original time-series so gaps are not connected
 			full_indices = np.where(full_mask)[0]
 
-
-			# overlay binned fractions produced during fitting (always in
-			# rm_results when time-binning was requested).  this avoids the
-			# earlier manual averaging, which sometimes produced nan values.
 			if 'P_frac_bin' in rm_results:
 				bt = np.asarray(rm_results['time']) * 1e3
 				pf_bin = np.asarray(rm_results['P_frac_bin'])
 				lf_bin = np.asarray(rm_results['L_frac_bin'])
 				vf_bin = np.asarray(rm_results.get('V_frac_bin', []))
 
-				# apply the same mask that was used for the full-resolution
-				# fractions panel.  the fitter stored a boolean array indicating
-				# which bins passed the I‑S/N cut; fall back to nearest‑sample
-				# mapping if it's not available.
 				if 'valid_bins' in rm_results:
 					bin_mask = np.asarray(rm_results['valid_bins'], dtype=bool)
 				else:
-					# map each binned time to the closest full-time sample and
-					# use the previously computed `combined` mask if present
 					if 'combined' in locals() and full_time is not None:
-						# full_time indices corresponding to the crop
 						idx = np.argmin(np.abs(full_time[:, None] - (bt/1e3)[None, :]), axis=0)
 						bin_mask = combined[idx]
 					else:
 						bin_mask = np.ones_like(bt, dtype=bool)
 
 				if np.any(bin_mask):
-					ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1,
-							 label='P/I')
-					#ax3.scatter(bt[bin_mask], pf_bin[bin_mask], 25, 'k', label=None, zorder=20)
-					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1,
-							 label='L/I')
+					ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1, label='P/I')
+					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1, label='L/I')
 					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
 					if 'V_frac_bin' in rm_results and vf_bin.size:
-						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1,
-								 label='V/I')
+						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1, label='V/I')
 						ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
 				else:
 					combined_idx = full_indices[combined]
-
 					if combined_idx.size > 0:
-						# find splits where indices are not consecutive
 						seg_splits = np.where(np.diff(combined_idx) != 1)[0] + 1
 						segs = np.split(combined_idx, seg_splits) if len(seg_splits) > 0 else [combined_idx]
 						for seg in segs:
@@ -2611,13 +2624,11 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 							ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='r', linewidth=1.5)
 							if 'V' in time_series_data:
 								ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='b', linewidth=1.5)
-						# add legend entries
 						ax3.plot([], [], color='k', linewidth=1.5)
 						ax3.plot([], [], color='r', linewidth=1.5)
 						if 'V' in time_series_data:
 							ax3.plot([], [], color='b', linewidth=1.5)
 
-			# adjust y limits based on plotted data (use signal_mask within full_mask)
 			try:
 				sig_idx = full_indices[signal_mask]
 				max_frac = np.nanmax([P_frac_full[sig_idx].max(),
@@ -2629,7 +2640,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			except Exception:
 				max_frac = np.nanmax([P_frac_full[full_mask].max(), L_frac_full[full_mask].max(), V_frac_full[full_mask].max() if 'V' in time_series_data else 0])
 				min_frac = np.nanmin([P_frac_full[full_mask].min(), L_frac_full[full_mask].min(), V_frac_full[full_mask].min() if 'V' in time_series_data else 0])
-			# consider binned data as well (from fit results)
 			if 'P_frac_bin' in rm_results:
 				max_frac = max(max_frac,
 							   np.nanmax(rm_results['P_frac_bin']),
@@ -2639,7 +2649,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 							   np.nanmin(rm_results['P_frac_bin']),
 							   np.nanmin(rm_results['L_frac_bin']),
 							   np.nanmin(rm_results.get('V_frac_bin', [])) if 'V' in time_series_data else 0)
-			# constrain limits within [-1,1]
 			lower = max(-1.0, min_frac * 1.1)
 			upper = min(1.0, max_frac * 1.1)
 			ax3.set_ylim(lower, upper)
@@ -2650,96 +2659,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
 		ax3.grid(True, alpha=0.3)
 		ax3.legend(loc='best', fontsize=style['legend'])
-		ax3.tick_params(axis='both', labelsize=style['tick'])
-
-		# Plot 3 (bottom row): Polarisation Angle (PA) and Ellipticity Angle (EA)
-		ax_pa = axes[2, peak_idx]
-		if time_series_data is not None and full_time is not None:
-			# compute angles from full-resolution Q,U,V
-			Q_vals = Q_full[full_mask]
-			U_vals = U_full[full_mask]
-			V_vals = V_full[full_mask] if 'V' in time_series_data else np.zeros_like(Q_vals)
-			times_ms = full_time[full_mask] * 1e3
-
-			# polarisation angle (radians) = 0.5 * atan2(U, Q)
-			pa_rad = 0.5 * np.arctan2(U_vals, Q_vals)
-			# unwrap then convert to degrees
-			pa_deg = np.degrees(np.unwrap(pa_rad))
-
-			# ellipticity angle (radians) = 0.5 * arcsin(V / P)
-			P_amp = np.sqrt(Q_vals**2 + U_vals**2 + V_vals**2) + 1e-10
-			sin_arg = np.clip(V_vals / P_amp, -1.0, 1.0)
-			ea_rad = 0.5 * np.arcsin(sin_arg)
-			ea_deg = np.degrees(ea_rad)
-
-			# Estimate Q/U/V noise from off-pulse region (same fraction used for I)
-			n_frac_pa = max(1, int(len(I_full) * noise_fraction))
-			sigma_Q = np.nanstd(Q_full[:n_frac_pa])
-			sigma_U = np.nanstd(U_full[:n_frac_pa])
-			sigma_V = np.nanstd(V_full[:n_frac_pa]) if 'V' in time_series_data else 0.0
-			# fallback robustly to MAD-derived sigma
-			if sigma_Q <= 0:
-				mad_q = np.nanmedian(np.abs(Q_full - np.nanmedian(Q_full)))
-				sigma_Q = mad_q / 0.6745 if mad_q > 0 else 1e-10
-			if sigma_U <= 0:
-				mad_u = np.nanmedian(np.abs(U_full - np.nanmedian(U_full)))
-				sigma_U = mad_u / 0.6745 if mad_u > 0 else 1e-10
-			if sigma_V <= 0 and 'V' in time_series_data:
-				mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
-				sigma_V = mad_v / 0.6745 if mad_v > 0 else 1e-10
-
-			# PA uncertainty propagation (radians): var(PA) = 1/4 * (U^2*sigma_Q^2 + Q^2*sigma_U^2) / (Q^2+U^2)^2
-			P_lin_sq = Q_vals**2 + U_vals**2 + 1e-20
-			pa_sigma_rad = 0.5 * np.sqrt((U_vals**2 * sigma_Q**2 + Q_vals**2 * sigma_U**2) / (P_lin_sq**2))
-			pa_sigma_deg = np.degrees(pa_sigma_rad)
-
-			# EA uncertainty propagation
-			# sigma_P approximated from Q,U uncertainties
-			sigma_P = np.sqrt((Q_vals**2 * sigma_Q**2 + U_vals**2 * sigma_U**2)) / (P_amp + 1e-10)
-			sigma_VoverP = np.sqrt((sigma_V**2 / (P_amp**2)) + ((V_vals**2) * (sigma_P**2) / (P_amp**2 + 1e-20)))
-			denom = np.sqrt(1.0 - (V_vals / P_amp)**2 + 1e-20)
-			ea_sigma_rad = 0.5 * (sigma_VoverP / denom)
-			ea_sigma_deg = np.degrees(ea_sigma_rad)
-
-			# construct a mask for PA/EA that also removes points with large
-			# angle uncertainty, mimicking the ``nongoodphi``/``nongoodpsi``
-			# logic from the example.  here we treat either PA or EA error
-			# exceeding 50° as bad.
-			bad_pa = pa_sigma_deg > 50.0
-			bad_ea = ea_sigma_deg > 50.0
-			# begin with the I‑S/N mask (``badi`` above, expressed as good=True)
-			try:
-				mask_pa = combined.copy()
-			except Exception:
-				mask_pa = np.ones_like(times_ms, dtype=bool)
-			mask_pa &= ~bad_pa
-			mask_pa &= ~bad_ea
-
-			# plot PA and EA without connecting gaps (small markers)
-			def scatter_runs(x, y, axis, **kwargs):
-				if len(x) == 0:
-					return
-				idx = np.arange(len(x))
-				splits = np.where(np.diff(idx) != 1)[0] + 1
-				for seg in np.split(idx, splits):
-					if len(seg) > 0:
-						axis.scatter(x[seg], y[seg], **kwargs)
-
-			scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2)
-			scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2)
-
-			# add pointwise error bars for PA and EA
-			if np.any(mask_pa):
-				ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa], fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
-				ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa], fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
-
-		ax_pa.set_xlabel('Time (ms)', fontsize=style['label'])
-		ax_pa.set_ylabel('Angle (deg)', fontsize=style['label'])
-		if n_peaks > 1:
-			ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
-		ax_pa.grid(True, alpha=0.3)
-		ax_pa.legend(loc='best', fontsize=style['legend'])
-		ax_pa.tick_params(axis='both', labelsize=style['tick'])
+		ax3.tick_params(axis='both', labelsize=style['tick'], length=TICK_LENGTH)
 	
 	plt.tight_layout()
 	
@@ -3545,7 +3465,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 	if burn_popt is not None and best_linear_model == 'P_Burn':
 		y_burn = burn_model(x_model, *burn_popt)
 		burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
-		ax.plot(freq_model_mhz, y_burn, color='tab:purple', linewidth=2, label=burn_label)
+		ax.plot(freq_model_mhz, y_burn, color='tab:darkorange', linewidth=2, label=burn_label)
 
 	if mod_popt is not None and best_linear_model == 'P_mod-Burn':
 		y_mod = modified_burn_model(x_model, *mod_popt)
