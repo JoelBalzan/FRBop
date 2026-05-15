@@ -14,6 +14,7 @@ import os
 import warnings
 from typing import Dict, List, Optional, Tuple
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import numpy as np
@@ -22,7 +23,7 @@ from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.constants import c
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import publication_plot_style, savefig_rasterized, apply_cm_math_style
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
@@ -41,7 +42,26 @@ def _pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[f
 
 def _plot_style() -> Dict[str, float]:
 	"""Compatibility wrapper for plotting style used by RM plotting functions."""
-	return publication_plot_style()
+	base_font_size = float(plt.rcParams.get("font.size", 10))
+	font_scalings = mpl.font_manager.font_scalings
+
+	def _resolve_font_size(value: object, fallback: float) -> float:
+		if isinstance(value, (int, float)):
+			return float(value)
+		if isinstance(value, str):
+			scale = font_scalings.get(value.lower())
+			if scale is not None:
+				return float(base_font_size * scale)
+		return float(fallback)
+
+	return {
+		"title": _resolve_font_size(plt.rcParams.get("axes.titlesize", 11), 11.0),
+		"label": _resolve_font_size(plt.rcParams.get("axes.labelsize", 10), 10.0),
+		"tick": _resolve_font_size(plt.rcParams.get("xtick.labelsize", 10), 10.0),
+		"legend": _resolve_font_size(plt.rcParams.get("legend.fontsize", 10), 10.0),
+		"annotation": base_font_size,
+		"line": float(plt.rcParams.get("lines.linewidth", 1.4)),
+	}
 
 
 def _savefig_rasterized(save_path: str,
@@ -1392,6 +1412,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
 	bad_pa = pa_err_array > 50.0
 	bad_ea = ea_err_array > 50.0
 	bad_bins = (~valid_bins) | bad_pa | bad_ea
+	pa_ea_valid = ~bad_bins
 
 	# apply mask by inserting NaNs into the PA/EA arrays returned to the caller
 	pa_array[bad_bins] = np.nan
@@ -1421,6 +1442,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
 		'time_bin_count': n_bins_actual,
 		'i_snr': i_snr_array,
 		'valid_bins': valid_bins,
+		'pa_ea_valid': pa_ea_valid,
 	}
 	
 	return results
@@ -1491,16 +1513,20 @@ def plot_poincare_sphere(
 		orig_idx = np.arange(q_norm.size, dtype=int)
 		# override local lists used later
 		pol_list = np.sqrt(q_norm**2 + u_norm**2)
-		# if the fitter supplied a mask, apply it now so that subsequent
+		# if the fitter supplied masks, apply them now so that subsequent
 		# SNR-based gating only considers the surviving bins
+		mask = np.ones(q_norm.size, dtype=bool)
 		if 'valid_bins' in rm_results:
-			valid = np.asarray(rm_results['valid_bins'], dtype=bool)
-			q_norm = q_norm[valid]
-			u_norm = u_norm[valid]
-			v_norm = v_norm[valid]
-			color_axis = color_axis[valid]
-			pol_list = pol_list[valid]
-			orig_idx = orig_idx[valid]
+			mask &= np.asarray(rm_results['valid_bins'], dtype=bool)
+		if 'pa_ea_valid' in rm_results:
+			mask &= np.asarray(rm_results['pa_ea_valid'], dtype=bool)
+		if not np.all(mask):
+			q_norm = q_norm[mask]
+			u_norm = u_norm[mask]
+			v_norm = v_norm[mask]
+			color_axis = color_axis[mask]
+			pol_list = pol_list[mask]
+			orig_idx = orig_idx[mask]
 		# remove any points that were explicitly set to NaN (e.g. from bad
 		# PA/EA or other quality cuts).  these would otherwise produce NaNs in
 		# pol_list and later kill the SNR mask below.
@@ -1857,12 +1883,16 @@ def plot_poincare_projections(
 		color_axis = np.array(rm_results['time'])
 		orig_idx = np.arange(q_norm.size, dtype=int)
 		pol_list   = np.sqrt(q_norm**2 + u_norm**2)
+		mask = np.ones(q_norm.size, dtype=bool)
 		if 'valid_bins' in rm_results:
-			valid  = np.asarray(rm_results['valid_bins'], dtype=bool)
-			q_norm, u_norm, v_norm = q_norm[valid], u_norm[valid], v_norm[valid]
-			color_axis = color_axis[valid]
-			pol_list   = pol_list[valid]
-			orig_idx = orig_idx[valid]
+			mask &= np.asarray(rm_results['valid_bins'], dtype=bool)
+		if 'pa_ea_valid' in rm_results:
+			mask &= np.asarray(rm_results['pa_ea_valid'], dtype=bool)
+		if not np.all(mask):
+			q_norm, u_norm, v_norm = q_norm[mask], u_norm[mask], v_norm[mask]
+			color_axis = color_axis[mask]
+			pol_list   = pol_list[mask]
+			orig_idx = orig_idx[mask]
 		notnan = (~np.isnan(q_norm)) & (~np.isnan(u_norm)) & (~np.isnan(v_norm))
 		q_norm, u_norm, v_norm = q_norm[notnan], u_norm[notnan], v_norm[notnan]
 		color_axis = color_axis[notnan]
@@ -2370,11 +2400,17 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				pa_be = np.array(pa_binned_err)
 				ea_b = np.array(ea_binned)
 				ea_be = np.array(ea_binned_err)
-
-				ax_pa.errorbar(bc, pa_b, yerr=pa_be, fmt='o', color='r',
-							   markersize=4, capsize=2, label='PA', zorder=2)
-				ax_pa.errorbar(bc, ea_b, yerr=ea_be, fmt='s', color='b',
-							   markersize=4, capsize=2, label='EA', zorder=2)
+				bin_ok = (
+					np.isfinite(bc)
+					& np.isfinite(pa_b) & np.isfinite(pa_be)
+					& np.isfinite(ea_b) & np.isfinite(ea_be)
+					& (pa_be <= 50.0) & (ea_be <= 50.0)
+				)
+				if np.any(bin_ok):
+					ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='s', color='b',
+								   markersize=4, capsize=2, label='EA', zorder=2)
+					ax_pa.errorbar(bc[bin_ok], pa_b[bin_ok], yerr=pa_be[bin_ok], fmt='o', color='r',
+								   markersize=4, capsize=2, label='PA', zorder=2)
 			else:
 				# Full-resolution scatter (original behaviour)
 				def scatter_runs(x, y, axis, **kwargs):
@@ -2389,10 +2425,11 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2)
 				scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2)
 				if np.any(mask_pa):
-					ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
-								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
 					ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa],
 								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
+					ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
+								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
+
 
 		ax_pa.set_ylabel('Angle (deg)', fontsize=style['label'])
 		if n_peaks > 1:
@@ -2589,6 +2626,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 			combined = signal_mask
 
 			full_indices = np.where(full_mask)[0]
+			bin_mask = None
 
 			if 'P_frac_bin' in rm_results:
 				bt = np.asarray(rm_results['time']) * 1e3
@@ -2629,29 +2667,35 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 						if 'V' in time_series_data:
 							ax3.plot([], [], color='b', linewidth=1.5)
 
-			try:
+			def _finite_minmax(arrs: List[np.ndarray]) -> Optional[Tuple[float, float]]:
+				vals = []
+				for arr in arrs:
+					arr = np.asarray(arr, dtype=float)
+					if arr.size == 0:
+						continue
+					finite = arr[np.isfinite(arr)]
+					if finite.size:
+						vals.append(finite)
+				if not vals:
+					return None
+				flat = np.concatenate(vals)
+				return float(np.nanmin(flat)), float(np.nanmax(flat))
+
+			use_arrays: List[np.ndarray] = []
+			if bin_mask is not None and np.any(bin_mask):
+				use_arrays.extend([pf_bin[bin_mask], lf_bin[bin_mask]])
+				if 'V_frac_bin' in rm_results and vf_bin.size:
+					use_arrays.append(vf_bin[bin_mask])
+			else:
 				sig_idx = full_indices[signal_mask]
-				max_frac = np.nanmax([P_frac_full[sig_idx].max(),
-									   L_frac_full[sig_idx].max(),
-									   V_frac_full[sig_idx].max() if 'V' in time_series_data else 0])
-				min_frac = np.nanmin([P_frac_full[sig_idx].min(),
-									   L_frac_full[sig_idx].min(),
-									   V_frac_full[sig_idx].min() if 'V' in time_series_data else 0])
-			except Exception:
-				max_frac = np.nanmax([P_frac_full[full_mask].max(), L_frac_full[full_mask].max(), V_frac_full[full_mask].max() if 'V' in time_series_data else 0])
-				min_frac = np.nanmin([P_frac_full[full_mask].min(), L_frac_full[full_mask].min(), V_frac_full[full_mask].min() if 'V' in time_series_data else 0])
-			if 'P_frac_bin' in rm_results:
-				max_frac = max(max_frac,
-							   np.nanmax(rm_results['P_frac_bin']),
-							   np.nanmax(rm_results['L_frac_bin']),
-							   np.nanmax(rm_results.get('V_frac_bin', [])) if 'V' in time_series_data else 0)
-				min_frac = min(min_frac,
-							   np.nanmin(rm_results['P_frac_bin']),
-							   np.nanmin(rm_results['L_frac_bin']),
-							   np.nanmin(rm_results.get('V_frac_bin', [])) if 'V' in time_series_data else 0)
-			lower = max(-1.0, min_frac * 1.1)
-			upper = min(1.0, max_frac * 1.1)
-			ax3.set_ylim(lower, upper)
+				use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
+				if 'V' in time_series_data:
+					use_arrays.append(V_frac_full[sig_idx])
+
+			minmax = _finite_minmax(use_arrays)
+			if minmax is not None:
+				min_frac, max_frac = minmax
+				ax3.set_ylim(min_frac - 0.05, max_frac + 0.05)
 			
 		ax3.set_xlabel('Time (ms)', fontsize=style['label'])
 		ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
@@ -3070,7 +3114,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 		return 'decisive'
 
 	p0_guess = float(np.nanmax(y)) if np.nanmax(y) > 0 else 0.1
-	p0_guess = min(max(p0_guess, 1e-6), 1.5)
+	p0_guess = min(max(p0_guess, 1e-6), 1.0)
 	sigma_guess = 10.0
 
 	burn_popt = None
@@ -3105,7 +3149,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			x,
 			y,
 			p0=[p0_guess, sigma_guess],
-			bounds=([0.0, 0.0], [2.0, 1e5]),
+			bounds=([0.0, 0.0], [1.02, 1e5]),
 			maxfev=30000,
 		)
 		mod_perr = np.sqrt(np.diag(mod_pcov))
@@ -3118,7 +3162,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			x,
 			y,
 			p0=[p0_guess],
-			bounds=([0.0], [2.0]),
+			bounds=([0.0], [1.02]),
 			maxfev=10000,
 		)
 		const_perr = np.sqrt(np.diag(const_pcov))
@@ -3454,7 +3498,8 @@ def plot_burns_law_fits(fitter: RMFitter,
 	freq_model_hz = freq_model_mhz * 1e6
 	x_model = (c / freq_model_hz) ** 2
 
-	fig, ax = plt.subplots(1, 1, figsize=_pub_figsize(height_ratio=0.62, min_height=4.2))
+	fig_height = max(3.2, SINGLE_COLUMN_WIDTH_IN * 0.75)
+	fig, ax = plt.subplots(1, 1, figsize=(SINGLE_COLUMN_WIDTH_IN, fig_height))
 	if yerr is not None:
 		ax.errorbar(freq_mhz, y, yerr=yerr, fmt='o', markersize=4,
 					color='tab:red', marker='s', ecolor='gray', elinewidth=1, capsize=2,
@@ -3465,7 +3510,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 	if burn_popt is not None and best_linear_model == 'P_Burn':
 		y_burn = burn_model(x_model, *burn_popt)
 		burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
-		ax.plot(freq_model_mhz, y_burn, color='tab:darkorange', linewidth=2, label=burn_label)
+		ax.plot(freq_model_mhz, y_burn, color='tab:cyan', linewidth=2, label=burn_label)
 
 	if mod_popt is not None and best_linear_model == 'P_mod-Burn':
 		y_mod = modified_burn_model(x_model, *mod_popt)
@@ -3679,7 +3724,9 @@ Examples:
 				args.poincare_circle_segments[0::2],
 				args.poincare_circle_segments[1::2]
 			))
-	
+
+	set_pub_style(use_latex=False)
+
 	print("="*60)
 	print("RM FITTING FOR STOKES IQUV DATA")
 	print("Using RM-Tools library for RM synthesis")
@@ -4056,16 +4103,6 @@ Examples:
 			#print(f"\nRM spectrum saved to {output_txt}")
 			
 			# Plotting
-			styles = publication_plot_style()
-			apply_cm_math_style(font_size=float(styles.get('label', 10)))
-			plt.rcParams.update({
-				'axes.titlesize': styles['title'],
-				'axes.labelsize': styles['label'],
-				'xtick.labelsize': styles['tick'],
-				'ytick.labelsize': styles['tick'],
-				'legend.fontsize': styles['legend'],
-				'lines.linewidth': styles['line'],
-			})
 			if not args.no_plot:
 				plot_rm_results(
 					fitter,
@@ -4404,7 +4441,6 @@ Examples:
 			print(f"  Mean EA = {np.nanmean(rm_results['ea_deg']):.2f} deg")
 		
 		# Save results
-		output_txt = args.output + '_time_series.txt'
 		header = 'Time(s) RM(rad/m2)'
 		data = np.column_stack([rm_results['time'], rm_results['rm']])
 		
@@ -4428,8 +4464,6 @@ Examples:
 			header += ' EA_err(deg)'
 			data = np.column_stack([data, rm_results['ea_err_deg']])
 		
-		np.savetxt(output_txt, data, header=header, fmt='%.6f')
-		print(f"\nTime series data saved to {output_txt}")
 		
 		# Plot time series
 		if not args.no_plot:

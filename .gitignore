@@ -19,7 +19,7 @@ __pycache__/
 simfrbs/
 plots/
 output/
-
+shrine_logs/
 # Local/editor/tooling files
 .vscode/
 .aider*
