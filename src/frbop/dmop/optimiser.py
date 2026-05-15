@@ -186,12 +186,34 @@ class DMOptimiser:
             dm, self.freq_mhz, self.time_ms, self.reference_freq, self.input_dm
         )
 
-    def _qu_rms(self, data_q: np.ndarray, data_u: np.ndarray):
-        """Return per-channel Q/U RMS from pre-computed full-array statistics."""
+    def _qu_rms(
+        self,
+        data_q: np.ndarray,
+        data_u: np.ndarray,
+        use_data_rms: bool = False,
+    ):
+        """Return per-channel Q/U RMS for a chosen noise reference.
+
+        Parameters
+        ----------
+        use_data_rms:
+            If True, estimate RMS directly from ``data_q``/``data_u`` (used by
+            PA methods when operating on kc-smoothed data). If False, use the
+            pre-computed unsmoothed full-array RMS (used by L/I masking).
+
+        Always returns scalars for 1-D inputs and (n_freq, 1) arrays for 2-D
+        inputs so that downstream broadcasting in debiased_linear_from_qu is
+        correct.
+        """
+        if use_data_rms:
+            return _pol.qu_noise_rms(data_q, data_u)
+
         if data_q.ndim == 1:
             if self.full_q_time_noise_std is not None:
                 return float(self.full_q_time_noise_std), float(self.full_u_time_noise_std)
             return _pol.qu_noise_rms(data_q, data_u)
+
+        # 2-D unsmoothed input: use pre-computed full-array per-channel RMS.
         if (self.full_q_noise_rms is not None
                 and self.full_q_noise_rms.shape[0] == data_q.shape[0]):
             return self.full_q_noise_rms, self.full_u_noise_rms
@@ -204,8 +226,10 @@ class DMOptimiser:
             enabled=self.nonshrine_kc_smooth,
         )
 
-    def _pa_series(self, data_q, data_u, data_i=None):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
+    def _pa_series(self, data_q, data_u, data_i=None, use_data_rms: Optional[bool] = None):
+        if use_data_rms is None:
+            use_data_rms = self.nonshrine_kc_smooth
+        q_rms, u_rms = self._qu_rms(data_q, data_u, use_data_rms=use_data_rms)
         return _pol.pa_series_deg(
             data_q, data_u, data_i, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
@@ -216,8 +240,12 @@ class DMOptimiser:
         )
 
     def _pa_smoothed_and_fit(self, data_q, data_u, data_i, time_axis):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
-        return _pol.get_pa_smoothed_and_fit(
+        q_rms, u_rms = self._qu_rms(
+            data_q,
+            data_u,
+            use_data_rms=self.nonshrine_kc_smooth,
+        )
+        return _pol.get_pa_masked_and_fit(
             data_q, data_u, data_i, time_axis, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
             noise_std_i=self.full_i_noise_std,
@@ -229,7 +257,11 @@ class DMOptimiser:
         )
 
     def _pa_shrine_smoothed_and_fit(self, data_q, data_u, data_i, time_axis, force_kc=None):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
+        q_rms, u_rms = self._qu_rms(
+            data_q,
+            data_u,
+            use_data_rms=self.nonshrine_kc_smooth,
+        )
         return _pol.get_pa_shrine_smoothed_and_fit(
             data_q, data_u, data_i, time_axis, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
@@ -245,7 +277,11 @@ class DMOptimiser:
         )
 
     def _pa_slope(self, data_q, data_u, data_i, time_axis):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
+        q_rms, u_rms = self._qu_rms(
+            data_q,
+            data_u,
+            use_data_rms=self.nonshrine_kc_smooth,
+        )
         return _pol.pa_slope_metric(
             data_q, data_u, data_i, time_axis, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
@@ -258,7 +294,11 @@ class DMOptimiser:
         )
 
     def _pa_slope_shrine(self, data_q, data_u, data_i, time_axis):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
+        q_rms, u_rms = self._qu_rms(
+            data_q,
+            data_u,
+            use_data_rms=self.nonshrine_kc_smooth,
+        )
         return _pol.pa_slope_metric_shrine(
             data_q, data_u, data_i, time_axis, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
@@ -273,7 +313,7 @@ class DMOptimiser:
         )
 
     def _li_metric(self, data_q, data_u, data_i, mode):
-        q_rms, u_rms = self._qu_rms(data_q, data_u)
+        q_rms, u_rms = self._qu_rms(data_q, data_u, use_data_rms=False)
         return _pol.linear_to_stokes_i_metric(
             data_q, data_u, data_i, q_rms, u_rms,
             noise_median_i=self.full_i_noise_median,
@@ -624,8 +664,9 @@ class DMOptimiser:
         best_du = self._dedisperse(data_u, optimal_dm, output_size)
         best_di = self._dedisperse(data_i, optimal_dm, output_size) if data_i is not None else None
         _, best_sm_q, best_sm_u = self._maybe_smooth(best_di, best_dq, best_du)
-        pa_sm, fit_line = self._pa_smoothed_and_fit(best_sm_q, best_sm_u, best_di or best_dq, time_axis)
-        best_pa_deg = self._pa_series(best_sm_q, best_sm_u, best_di)
+        pa_i = best_di if best_di is not None else best_dq
+        pa_sm, fit_line = self._pa_smoothed_and_fit(best_sm_q, best_sm_u, pa_i, time_axis)
+        best_pa_deg = self._pa_series(best_dq, best_du, best_di)
 
         unc = self._uncertainty(dm_values, pa_values, max_idx, profiles=unc_profiles,
                                 kc=self._kc_resolver.resolved)
@@ -686,11 +727,12 @@ class DMOptimiser:
         best_du = self._dedisperse(data_u, optimal_dm, output_size)
         best_di = self._dedisperse(data_i, optimal_dm, output_size) if data_i is not None else None
         _, best_sm_q, best_sm_u = self._maybe_smooth(best_di, best_dq, best_du)
+        pa_i = best_di if best_di is not None else best_dq
         pa_sm, fit_line = self._pa_shrine_smoothed_and_fit(
-            best_sm_q, best_sm_u, best_di or best_dq, time_axis,
+            best_sm_q, best_sm_u, pa_i, time_axis,
             force_kc=self._kc_resolver.resolved,
         )
-        best_pa_deg = self._pa_series(best_sm_q, best_sm_u, best_di)
+        best_pa_deg = self._pa_series(best_dq, best_du, best_di)
 
         unc = self._uncertainty(dm_values, pa_shrine_values, max_idx, profiles=unc_profiles,
                                 kc=self._kc_resolver.resolved)
@@ -875,7 +917,7 @@ class DMOptimiser:
                                            shrine_get_ranges_above_max=_shrine.get_ranges_above_max)
             r = {
                 "dm": odm, "metric": float(sv[mi]),
-                "dedispersed": self._dedisperse(data, odm),
+                "dedispersed": self._dedisperse(data, odm, output_size),
                 "method": "Structure Maximising (SHRINE)", "kc": kc,
                 "run_dir": str(run_dir),
                 "dm_values": dm_values.copy(), "metric_values": np.asarray(sv, dtype=float).copy(),
@@ -885,6 +927,22 @@ class DMOptimiser:
                 n_t = r["dedispersed"].shape[1]
                 r["dedispersed_q"] = self._dedisperse(data_q, odm, n_t)
                 r["dedispersed_u"] = self._dedisperse(data_u, odm, n_t)
+                sm_i, sm_q, sm_u = self._maybe_smooth(
+                    r["dedispersed"],
+                    r["dedispersed_q"],
+                    r["dedispersed_u"]
+                )
+
+                pa_sm, fit_line = self._pa_smoothed_and_fit(sm_q, sm_u, sm_i, time_axis)
+
+                r["pa_plot_kind"] = "raw"
+                r["pa_plot_series"] = self._pa_series(
+                    r["dedispersed_q"],
+                    r["dedispersed_u"],
+                    r["dedispersed"],
+                )
+                r["pa_plot_smooth"] = pa_sm
+                r["pa_plot_fit"] = fit_line
             results["structure"] = r
 
         # ---- S/N ----
@@ -902,7 +960,7 @@ class DMOptimiser:
             unc = _unc.from_snr_drop(dm_values, sv, mi, drop=1.0)
             r = {
                 "dm": odm, "metric": float(sv[mi]),
-                "dedispersed": self._dedisperse(data, odm),
+                "dedispersed": self._dedisperse(data, odm, output_size),
                 "method": "S/N Maximising (SHRINE)",
                 "run_dir": str(run_dir),
                 "dm_values": dm_values.copy(), "metric_values": np.asarray(sv, dtype=float).copy(),
@@ -912,6 +970,22 @@ class DMOptimiser:
                 n_t = r["dedispersed"].shape[1]
                 r["dedispersed_q"] = self._dedisperse(data_q, odm, n_t)
                 r["dedispersed_u"] = self._dedisperse(data_u, odm, n_t)
+                sm_i, sm_q, sm_u = self._maybe_smooth(
+                    r["dedispersed"],
+                    r["dedispersed_q"],
+                    r["dedispersed_u"]
+                )
+                
+                pa_sm, fit_line = self._pa_smoothed_and_fit(sm_q, sm_u, sm_i, time_axis)
+                
+                r["pa_plot_kind"] = "raw"
+                r["pa_plot_series"] = self._pa_series(
+                    r["dedispersed_q"],
+                    r["dedispersed_u"],
+                    r["dedispersed"],
+                )
+                r["pa_plot_smooth"] = pa_sm
+                r["pa_plot_fit"] = fit_line
             results["snr"] = r
 
         if not run_qu:
@@ -928,7 +1002,7 @@ class DMOptimiser:
             best_du = self._dedisperse(data_u, odm, output_size)
             _, sm_q, sm_u = self._maybe_smooth(best_di, best_dq, best_du)
             pa_sm, fit_line = self._pa_smoothed_and_fit(sm_q, sm_u, best_di, time_axis)
-            best_pa_deg = self._pa_series(sm_q, sm_u, best_di)
+            best_pa_deg = self._pa_series(best_dq, best_du, best_di)
             unc = self._uncertainty(dm_values, pa_values, mi, pa_unc_profiles,
                                     kc=self._kc_resolver.resolved)
             run_prefix = f"{label}_{segment_tag}_pa_slope"
@@ -958,7 +1032,7 @@ class DMOptimiser:
             pa_sm, fit_line = self._pa_shrine_smoothed_and_fit(
                 sm_q, sm_u, best_di, time_axis, force_kc=self._kc_resolver.resolved
             )
-            best_pa_deg = self._pa_series(sm_q, sm_u, best_di)
+            best_pa_deg = self._pa_series(best_dq, best_du, best_di)
             unc = self._uncertainty(dm_values, pa_shrine_values, mi, pa_unc_profiles,
                                     kc=self._kc_resolver.resolved)
             run_prefix = f"{label}_{segment_tag}_pa_slope_shrine"
@@ -1001,6 +1075,23 @@ class DMOptimiser:
                 "dm_values": dm_values.copy(), "metric_values": li_mean_values.copy(),
                 **unc,
             }
+            pa_sm, fit_line = self._pa_smoothed_and_fit(
+                best_dq,
+                best_du,
+                best_di,
+                time_axis,
+            )
+            
+            results["l_i_mean"]["pa_plot_kind"] = "raw"
+            
+            results["l_i_mean"]["pa_plot_series"] = self._pa_series(
+                best_dq,
+                best_du,
+                best_di,
+            )
+            
+            results["l_i_mean"]["pa_plot_smooth"] = pa_sm
+            results["l_i_mean"]["pa_plot_fit"] = fit_line
 
         return results
 

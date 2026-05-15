@@ -57,6 +57,10 @@ def debiased_linear_from_qu(
     bias subtraction is applied.  When *debias* is True, the standard
     Rice-distribution correction ``L_debias = sqrt(L² - σ_L²)`` is used.
     """
+    if data_q.ndim == 1:
+        q_rms = float(np.nanmedian(q_rms)) if np.ndim(q_rms) > 0 else float(q_rms)
+        u_rms = float(np.nanmedian(u_rms)) if np.ndim(u_rms) > 0 else float(u_rms)
+        
     L_meas = np.sqrt(data_q ** 2 + data_u ** 2)
     sigma_L = (
         np.sqrt(data_q ** 2 * q_rms ** 2 + data_u ** 2 * u_rms ** 2)
@@ -354,7 +358,7 @@ def pa_slope_metric_shrine(
 # Smoothed PA profile + fit line (for plotting)
 # ---------------------------------------------------------------------------
 
-def get_pa_smoothed_and_fit(
+def get_pa_masked_and_fit(
     data_q: np.ndarray,
     data_u: np.ndarray,
     data_i: Optional[np.ndarray],
@@ -437,7 +441,7 @@ def get_pa_shrine_smoothed_and_fit(
     force_kc: Optional[int] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    SHRINE-smoothed variant of :func:`get_pa_smoothed_and_fit`.
+    SHRINE-smoothed variant of :func:`get_pa_masked_and_fit`.
 
     Returns ``(pa_shrine_smooth, fit_line)``.
     """

@@ -232,18 +232,20 @@ def plot_comparison(
             n_edge = max(1, int(0.05 * len(L_s)))
             axes[idx, 1].plot(tr_d, L_s - float(np.median(L_s[:n_edge])), "r", linewidth=1, label="L")
 
-            if mname in ("pa_slope", "pa_slope_shrine") and result.get("pa_plot_series") is not None:
+            if "pa_plot_series" in result:
                 pa_deg = np.asarray(result["pa_plot_series"])
-                pa_sm = np.asarray(result["pa_plot_smooth"])
-                fit = np.asarray(result["pa_plot_fit"])
-            elif mname == "pa_slope_shrine":
-                pa_deg = pa_series_fn(dq, du, result["dedispersed"])
+            else:
+                pa_deg = np.asarray(pa_series_fn(dq, du, result["dedispersed"], use_data_rms=False))
+
+            if mname == "pa_slope_shrine" and "pa_plot_fit" not in result:
                 pa_sm, fit = pa_shrine_smoothed_and_fit_fn(
                     dq, du, result["dedispersed"], tr_d, force_kc=result.get("kc")
                 )
-            else:
-                pa_deg = pa_series_fn(dq, du, result["dedispersed"])
+            elif mname == "pa_slope" and "pa_plot_fit" not in result:
                 pa_sm, fit = pa_smoothed_and_fit_fn(dq, du, result["dedispersed"], tr_d)
+            else:
+                pa_sm = np.asarray(result.get("pa_plot_smooth", pa_deg))
+                fit = np.asarray(result.get("pa_plot_fit", np.full_like(pa_deg, np.nan)))
 
             axr.plot(tr_d, pa_deg, color="silver", linewidth=1, alpha=0.9, label="PA")
             suffix = "(S)" if mname == "pa_slope_shrine" else ""
