@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
 
 def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
@@ -41,16 +41,7 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=No
     """Return (lg_peak_kpc, cn2_peak, lg_eff_kpc) from an NE2025 Cn2 profile."""
     s, cn2 = get_cn2_profile(ldeg, bdeg, da_kpc=max_dist_kpc)
 
-    styles = publication_plot_style()
-    apply_cm_math_style(font_size=float(styles.get('label', 10)))
-    plt.rcParams.update({
-        'axes.titlesize': styles['title'],
-        'axes.labelsize': styles['label'],
-        'xtick.labelsize': styles['tick'],
-        'ytick.labelsize': styles['tick'],
-        'legend.fontsize': styles['legend'],
-        'lines.linewidth': styles['line'],
-    })
+    set_pub_style(use_latex=False)
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')

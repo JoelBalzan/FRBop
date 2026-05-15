@@ -8,7 +8,7 @@ from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
 
 def _pub_figsize(*, single_column: bool = True) -> tuple[float, float]:
@@ -222,16 +222,7 @@ def main():
 
             # Optional plot with FWHM markers (publication style)
             if args.output:
-                styles = publication_plot_style()
-                apply_cm_math_style(font_size=float(styles.get('label', 10)))
-                plt.rcParams.update({
-                    'axes.titlesize': styles['title'],
-                    'axes.labelsize': styles['label'],
-                    'xtick.labelsize': styles['tick'],
-                    'ytick.labelsize': styles['tick'],
-                    'legend.fontsize': styles['legend'],
-                    'lines.linewidth': styles['line'],
-                })
+                set_pub_style(use_latex=False)
 
                 # Use single-column width by default so figure fits in a 2-col LaTeX layout
                 fig, ax = plt.subplots(figsize=_pub_figsize(single_column=True))

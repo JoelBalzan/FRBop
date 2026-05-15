@@ -35,7 +35,7 @@ from frbop.scop.plotting import (
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
 from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs
 
-from frbop.utils.plotting import (publication_plot_style, apply_cm_math_style, savefig_rasterized)
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
 
 # ---------------------------------------------------------------------------
@@ -891,16 +891,7 @@ def main():
     # Spectrum + normalised ACF
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
-    styles = publication_plot_style()
-    apply_cm_math_style(font_size=float(styles.get('label', 10)))
-    plt.rcParams.update({
-        'axes.titlesize': styles['title'],
-        'axes.labelsize': styles['label'],
-        'xtick.labelsize': styles['tick'],
-        'ytick.labelsize': styles['tick'],
-        'legend.fontsize': styles['legend'],
-        'lines.linewidth': styles['line'],
-    })
+    set_pub_style(use_latex=False)
 
     xabs = np.abs(lags_plot_sym)
 

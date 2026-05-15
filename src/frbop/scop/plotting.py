@@ -7,21 +7,18 @@ import numpy as np
 
 from frbop.scop.fit_utils import _decode_lorentzian_components
 from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c
-from frbop.utils.plotting import apply_cm_math_style, publication_plot_style, savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
 
 def _apply_publication_style() -> dict:
-    styles = publication_plot_style()
-    apply_cm_math_style(font_size=float(styles.get("label", 10)))
-    plt.rcParams.update({
-        "axes.titlesize": styles["title"],
-        "axes.labelsize": styles["label"],
-        "xtick.labelsize": styles["tick"],
-        "ytick.labelsize": styles["tick"],
-        "legend.fontsize": styles["legend"],
-        "lines.linewidth": styles["line"],
-    })
-    return styles
+    set_pub_style(use_latex=True)
+    return {
+        "title": float(plt.rcParams.get("axes.titlesize", 11)),
+        "label": float(plt.rcParams.get("axes.labelsize", 10)),
+        "tick": float(plt.rcParams.get("xtick.labelsize", 10)),
+        "legend": float(plt.rcParams.get("legend.fontsize", 10)),
+        "line": float(plt.rcParams.get("lines.linewidth", 1.4)),
+    }
 
 def plot_spectrum_powerlaw_fit(
     freq_mhz,
