@@ -248,9 +248,11 @@ def plot_comparison(
                 fit = np.asarray(result.get("pa_plot_fit", np.full_like(pa_deg, np.nan)))
 
             axr.plot(tr_d, pa_deg, color="silver", linewidth=1, alpha=0.9, label="PA")
-            suffix = "(S)" if mname == "pa_slope_shrine" else ""
-            axr.plot(tr_d, pa_sm, color="tab:purple", linewidth=2, alpha=0.8, label=f"PA sm{suffix}")
-            axr.plot(tr_d, fit, color="tab:orange", linewidth=1.5, linestyle="--", alpha=0.7, label=f"PA fit{suffix}")
+            # Only plot smoothed PA and fit for PA-specific methods
+            if mname in ("pa_slope", "pa_slope_shrine"):
+                suffix = "(S)" if mname == "pa_slope_shrine" else ""
+                axr.plot(tr_d, pa_sm, color="tab:purple", linewidth=2, alpha=0.8, label=f"PA sm{suffix}")
+                axr.plot(tr_d, fit, color="tab:orange", linewidth=1.5, linestyle="--", alpha=0.7, label=f"PA fit{suffix}")
             axr.set_ylabel("PA (deg)", fontsize=fs_label, labelpad=fs_lpad)
             axr.tick_params(axis="y", labelsize=fs_tick)
             if pa_limits:
