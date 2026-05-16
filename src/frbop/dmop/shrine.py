@@ -1,201 +1,239 @@
-"""
-SHRINE integration layer.
-
-Handles:
-- Loading SHRINE Python helpers from the embedded subpackage.
-- kc low-pass filtering via DCT.
-- Running SHRINE scripts (maximise_structure.py, maximise_sn.py, etc.) in
-  isolated working directories.
-- Auto/manual kc resolution for non-SHRINE methods.
-"""
-
-from __future__ import annotations
+"""SHRINE integration and kc smoothing helpers."""
 
 import contextlib
 import io
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.fftpack import dct
 
-# ---------------------------------------------------------------------------
-# Load SHRINE helpers from the embedded subpackage at import time
-# ---------------------------------------------------------------------------
+from frbop.utils.plotting import savefig_rasterized
 
-_SHRINE_PATH = Path(__file__).resolve().parent / "SHRINE" / "python"
-sys.path.insert(0, str(_SHRINE_PATH))
+from .common import shrine_get_kc, shrine_lowpass_smooth
 
-_dm_processing_path = _SHRINE_PATH / "dm_processing.py"
-import importlib.util as _ilu
+class ShrineMixin:
+	def _apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
+		"""
+		Apply SHRINE low-pass filter using the shared SHRINE implementation.
+		"""
+		if data_2d.ndim != 2:
+			raise ValueError("data_2d must be 2D (freq x time)")
+		if kc <= 0:
+			return data_2d.copy()
 
-_spec = _ilu.spec_from_file_location("shrine_dm_processing", _dm_processing_path)
-assert _spec is not None and _spec.loader is not None
-_dm_processing_mod = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_dm_processing_mod)
+		ci_data = dct(data_2d, norm='ortho')
+		k_length = ci_data.shape[1]
+		kc_eff = max(1, min(int(kc), k_length))
+		i_smooth, _, _, _ = shrine_lowpass_smooth(ci_data, kc_eff, order=3)
+		return i_smooth
 
-get_kc = _dm_processing_mod.get_kc
-lowpass_smooth = _dm_processing_mod.lowpass_smooth
-get_ranges_above_max = _dm_processing_mod.get_ranges_above_max
-uncertainty_calc = _dm_processing_mod.uncertainty_calc
+	def _resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
+		if self._nonshrine_resolved_kc is not None:
+			if not self._nonshrine_kc_printed:
+				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				self._nonshrine_kc_printed = True
+			return int(self._nonshrine_resolved_kc)
+
+		if self.nonshrine_kc is not None:
+			self._nonshrine_resolved_kc = int(self.nonshrine_kc)
+			if not self._nonshrine_kc_printed:
+				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				self._nonshrine_kc_printed = True
+			return self._nonshrine_resolved_kc
+
+		if self.nonshrine_kc_minimise_uncertainty:
+			reference = np.asarray(reference_data_2d, dtype=float)
+			if reference.ndim == 1:
+				reference = reference[np.newaxis, :]
+			ci_data = dct(reference, norm='ortho')
+			with contextlib.redirect_stdout(io.StringIO()):
+				seed_kc = int(shrine_get_kc(ci_data))
+			dm_values = np.arange(reference.shape[0], dtype=float)
+			run_prefix = "nonshrine_kc_min_unc"
+			run_dir = self._run_shrine_method(
+				script_name="minimise_uncertainty.py",
+				run_prefix=run_prefix,
+				dm_values=dm_values,
+				i_data=reference,
+				include_input_dm=False,
+				force_kc=seed_kc,
+				save_all=False,
+			)
+			kc_path = run_dir / "kc.txt"
+			if not kc_path.exists():
+				raise RuntimeError(f"Expected kc output not found: {kc_path}")
+			kc_text = kc_path.read_text().strip()
+			self._nonshrine_resolved_kc = int(float(kc_text))
+			if self._nonshrine_resolved_kc <= 0:
+				raise RuntimeError(f"Invalid kc from minimise_uncertainty: {self._nonshrine_resolved_kc}")
+			if not self._nonshrine_kc_printed:
+				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				self._nonshrine_kc_printed = True
+			return self._nonshrine_resolved_kc
+
+		ci_data = dct(reference_data_2d, norm='ortho')
+		with contextlib.redirect_stdout(io.StringIO()):
+			kc = shrine_get_kc(ci_data)
+		self._nonshrine_resolved_kc = int(kc)
+		if not self._nonshrine_kc_printed:
+			print(f"Found kc of: {self._nonshrine_resolved_kc}")
+			self._nonshrine_kc_printed = True
+		return self._nonshrine_resolved_kc
+
+	def _reset_nonshrine_kc_state(self) -> None:
+		self._nonshrine_resolved_kc = None
+		self._nonshrine_kc_printed = False
+
+	def _maybe_kc_smooth_nonshrine(self,
+									   data_i: Optional[np.ndarray],
+									   data_q: Optional[np.ndarray] = None,
+									   data_u: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+		"""
+		Optionally apply kc smoothing to non-SHRINE method inputs.
+		"""
+		if not self.nonshrine_kc_smooth:
+			return data_i, data_q, data_u
+
+		reference = data_i if data_i is not None else data_q
+		if reference is None:
+			return data_i, data_q, data_u
+
+		kc = self._resolve_nonshrine_kc(reference)
+
+		sm_i = self._apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
+		sm_q = self._apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
+		sm_u = self._apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
+		return sm_i, sm_q, sm_u
+
+	def _run_shrine_method(self,
+					   script_name: str,
+					   run_prefix: str,
+					   dm_values: np.ndarray,
+					   i_data: np.ndarray,
+					   include_input_dm: bool = False,
+					   force_kc: Optional[int] = None,
+					   save_all: bool = True) -> Path:
+		"""
+		Run a SHRINE script in an isolated working directory using precomputed DM/I arrays.
+		"""
+		dt_ms = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
+		dt_us = max(1, int(round(dt_ms * 1000.0)))
+
+		run_dir = Path("shrine_logs") / run_prefix
+		run_dir.mkdir(parents=True, exist_ok=True)
+
+		np.save(run_dir / f"{run_prefix}_DMs.npy", dm_values)
+		np.save(run_dir / f"{run_prefix}_I_{dt_us}us.npy", i_data)
+
+		module_name = script_name[:-3] if script_name.endswith(".py") else script_name
+		cmd = [
+			sys.executable,
+			"-m",
+			f"frbop.dmop.SHRINE.python.{module_name}",
+			"-l", run_prefix,
+			"-t", str(dt_us),
+		]
+		if include_input_dm:
+			cmd.extend(["-d", str(self.input_dm)])
+		if save_all:
+			cmd.append("-s")
+		if force_kc is not None:
+			cmd.extend(["-kc", str(force_kc)])
+
+		subprocess.run(cmd, cwd=str(run_dir), check=True)
+		return run_dir
+
+	def _save_nonshrine_run_outputs(self,
+								   run_prefix: str,
+								   method_label: str,
+								   dm_values: np.ndarray,
+								   metric_values: np.ndarray,
+								   metric_name: str,
+								   dedispersed_i: np.ndarray,
+								   optimal_dm: float,
+								   optimal_metric: float,
+								   uncertainty: Optional[Dict[str, Optional[float]]] = None) -> Path:
+		"""
+		Save non-SHRINE method logs/plots in a SHRINE-like run directory.
+		"""
+		run_dir = Path("shrine_logs") / run_prefix
+		run_dir.mkdir(parents=True, exist_ok=True)
+
+		max_idx = int(np.argmax(metric_values))
+		np.save(run_dir / f"{run_prefix}_DMs.npy", dm_values)
+		np.savetxt(run_dir / f"{run_prefix}_{metric_name}.dat", np.asarray(metric_values, dtype=float))
+		np.save(run_dir / f"{run_prefix}_I_at_max.npy", dedispersed_i)
+
+		# Metric-vs-DM plot
+		plt.figure(figsize=(8, 4))
+		plt.plot(dm_values, metric_values, '-', color='tab:blue', linewidth=1.8)
+		if uncertainty is not None:
+			low_dm = uncertainty.get('uncertainty_low_dm')
+			high_dm = uncertainty.get('uncertainty_high_dm')
+			dm_left = float(np.min(dm_values))
+			dm_right = float(np.max(dm_values))
+			shade_low = dm_left if low_dm is None else float(low_dm)
+			shade_high = dm_right if high_dm is None else float(high_dm)
+			if shade_low <= shade_high:
+				plt.axvspan(shade_low, shade_high, color='tab:orange', alpha=0.18, label='DM uncertainty')
+		plt.axvline(optimal_dm, color='tab:red', linestyle='--', linewidth=1.2,
+					label=f"max DM={optimal_dm:.6f}")
+		if uncertainty is not None:
+			minus = uncertainty.get('uncertainty_minus')
+			plus = uncertainty.get('uncertainty_plus')
+			unc_text = self._format_uncertainty(optimal_dm, minus, plus)
+			plt.title(rf"{method_label}: {metric_name} vs DM\nDM = {unc_text} pc cm$^{{-3}}$")
+		else:
+			plt.title(rf"{method_label}: {metric_name} vs DM")
+		plt.xlabel(rf"DM (pc cm$^{{-3}}$)")
+		plt.ylabel(metric_name)
+		plt.grid(True, alpha=0.3)
+		plt.legend(loc='best')
+		plt.tight_layout()
+		savefig_rasterized(run_dir / f"{run_prefix}_{metric_name}_v_DM.png", dpi=150, bbox_inches='tight')
+		plt.close()
+
+		# I profile at best DM
+		time_series = np.mean(dedispersed_i, axis=0)
+		plt.figure(figsize=(8, 4))
+		plt.plot(time_series, color='k', linewidth=1.3)
+		plt.xlabel('Time index')
+		plt.ylabel('Stokes I (arb.)')
+		plt.title(f"{method_label}: I at best DM")
+		plt.grid(True, alpha=0.3)
+		plt.tight_layout()
+		savefig_rasterized(run_dir / f"{run_prefix}_I_at_max.png", dpi=150, bbox_inches='tight')
+		plt.close()
+
+		with open(run_dir / f"{run_prefix}_summaryfile.txt", "w") as summary_file:
+			summary_file.write(f"//begin {run_prefix} summary//\n/*\n")
+			summary_file.write(f"Method: {method_label}\n")
+			summary_file.write(f"Metric name: {metric_name}\n")
+			summary_file.write(f"Input DM: {self.input_dm}\n")
+			summary_file.write(f"Best metric index: {max_idx}\n")
+			summary_file.write(f"Best DM: {optimal_dm}\n")
+			summary_file.write(f"Best metric: {optimal_metric}\n")
+			if uncertainty is not None:
+				summary_file.write(f"Uncertainty method: {uncertainty.get('uncertainty_method', 'unknown')}\n")
+				summary_file.write(f"Uncertainty lower DM: {uncertainty.get('uncertainty_low_dm', 'unknown')}\n")
+				summary_file.write(f"Uncertainty upper DM: {uncertainty.get('uncertainty_high_dm', 'unknown')}\n")
+				summary_file.write(f"Uncertainty -DM: {uncertainty.get('uncertainty_minus', 'unknown')}\n")
+				summary_file.write(f"Uncertainty +DM: {uncertainty.get('uncertainty_plus', 'unknown')}\n")
+			if self.nonshrine_kc_smooth:
+				summary_file.write(f"kc smoothing enabled: True\n")
+				if self._nonshrine_resolved_kc is not None:
+					summary_file.write(f"kc: {self._nonshrine_resolved_kc}\n")
+			else:
+				summary_file.write(f"kc smoothing enabled: False\n")
+			summary_file.write("*/\n//end summary//\n")
+
+		with open(run_dir / "DM.txt", "w") as dm_file:
+			dm_file.write(str(max_idx))
+
+		return run_dir
 
 
-# ---------------------------------------------------------------------------
-# kc low-pass filter
-# ---------------------------------------------------------------------------
-
-def apply_kc_lowpass_2d(data_2d: np.ndarray, kc: int) -> np.ndarray:
-    """
-    Apply the SHRINE DCT low-pass filter to *data_2d* (freq × time or 1 × time).
-
-    Returns a smoothed array of the same shape.
-    """
-    if data_2d.ndim != 2:
-        raise ValueError("data_2d must be 2D (freq × time)")
-    if kc <= 0:
-        return data_2d.copy()
-
-    ci_data = dct(data_2d, norm="ortho")
-    k_length = ci_data.shape[1]
-    kc_eff = max(1, min(int(kc), k_length))
-    i_smooth, _, _, _ = lowpass_smooth(ci_data, kc_eff, order=3)
-    return i_smooth
-
-
-# ---------------------------------------------------------------------------
-# kc resolution (non-SHRINE methods)
-# ---------------------------------------------------------------------------
-
-class KcResolver:
-    """
-    Manages kc resolution state for a single DM optimisation run.
-
-    One instance per ``compare_methods`` / ``optimise_dm_*`` call so that kc
-    is computed once and reused, matching the original behaviour.
-    """
-
-    def __init__(
-        self,
-        fixed_kc: Optional[int] = None,
-        use_minimise_uncertainty: bool = False,
-    ) -> None:
-        self._fixed_kc = fixed_kc
-        self._use_minimise_uncertainty = use_minimise_uncertainty
-        self._resolved: Optional[int] = None
-        self._printed = False
-
-    def reset(self) -> None:
-        self._resolved = None
-        self._printed = False
-
-    @property
-    def resolved(self) -> Optional[int]:
-        return self._resolved
-
-    def resolve(self, reference_data_2d: np.ndarray) -> int:
-        """
-        Return the kc value to use, computing it if necessary.
-        """
-        if self._resolved is not None:
-            if not self._printed:
-                print(f"Found kc of: {self._resolved}")
-                self._printed = True
-            return self._resolved
-
-        if self._fixed_kc is not None:
-            self._resolved = int(self._fixed_kc)
-            if not self._printed:
-                print(f"Found kc of: {self._resolved}")
-                self._printed = True
-            return self._resolved
-
-        ci_data = dct(reference_data_2d, norm="ortho")
-        with contextlib.redirect_stdout(io.StringIO()):
-            kc = int(get_kc(ci_data))
-        self._resolved = kc
-        if not self._printed:
-            print(f"Found kc of: {self._resolved}")
-            self._printed = True
-        return self._resolved
-
-
-# ---------------------------------------------------------------------------
-# Subprocess runner
-# ---------------------------------------------------------------------------
-
-def run_shrine_script(
-    script_name: str,
-    run_prefix: str,
-    dm_values: np.ndarray,
-    i_data: np.ndarray,
-    time_ms: np.ndarray,
-    input_dm: float = 0.0,
-    include_input_dm: bool = False,
-    force_kc: Optional[int] = None,
-    save_all: bool = True,
-) -> Path:
-    """
-    Run a SHRINE script in an isolated working directory.
-
-    Writes ``{run_prefix}_DMs.npy`` and ``{run_prefix}_I_{dt_us}us.npy``
-    before invoking the script via ``python -m``.
-
-    Returns the run directory path.
-    """
-    dt_ms = float(np.median(np.diff(time_ms))) if len(time_ms) > 1 else 1.0
-    dt_us = max(1, int(round(dt_ms * 1000.0)))
-
-    run_dir = Path("shrine_logs") / run_prefix
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    np.save(run_dir / f"{run_prefix}_DMs.npy", dm_values)
-    np.save(run_dir / f"{run_prefix}_I_{dt_us}us.npy", i_data)
-
-    module_name = script_name[:-3] if script_name.endswith(".py") else script_name
-    cmd = [
-        sys.executable,
-        "-m",
-        f"frbop.dmop.SHRINE.python.{module_name}",
-        "-l", run_prefix,
-        "-t", str(dt_us),
-    ]
-    if include_input_dm:
-        cmd.extend(["-d", str(input_dm)])
-    if save_all:
-        cmd.append("-s")
-    if force_kc is not None:
-        cmd.extend(["-kc", str(force_kc)])
-
-    subprocess.run(cmd, cwd=str(run_dir), check=True)
-    return run_dir
-
-
-# ---------------------------------------------------------------------------
-# Convenience: maybe apply kc smoothing to a set of Stokes arrays
-# ---------------------------------------------------------------------------
-
-def maybe_kc_smooth(
-    data_i: Optional[np.ndarray],
-    data_q: Optional[np.ndarray],
-    data_u: Optional[np.ndarray],
-    kc_resolver: KcResolver,
-    enabled: bool,
-) -> tuple:
-    """
-    Return ``(sm_i, sm_q, sm_u)``, applying the kc low-pass filter when
-    *enabled* is True.  If disabled, returns the inputs unchanged.
-    """
-    if not enabled:
-        return data_i, data_q, data_u
-
-    reference = data_i if data_i is not None else data_q
-    if reference is None:
-        return data_i, data_q, data_u
-
-    kc = kc_resolver.resolve(reference)
-    sm_i = apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
-    sm_q = apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
-    sm_u = apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
-    return sm_i, sm_q, sm_u

@@ -1,8 +1,4 @@
-"""
-Visualisation for DM optimisation results.
-"""
-
-from __future__ import annotations
+"""Plotting and DM-space scanning utilities."""
 
 from typing import Dict, List, Optional, Tuple
 
@@ -10,475 +6,582 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 
-from frbop.utils.plotting import savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
-from .noise import robust_vmin_vmax
-from .uncertainty import format_dm, format_uncertainty
+class PlottingMixin:
+	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
+					   peak_region: Optional[Tuple[int, int]] = None,
+					   save_path: Optional[str] = None):
+		"""
+		Create visualization comparing all methods.
+		
+		Parameters:
+		-----------
+		results : dict
+			Results dictionary from compare_methods
+		dm_range : tuple
+			DM range used for optimisation
+		peak_region : tuple, optional
+			(start_idx, end_idx) of the region analyzed
+		save_path : str, optional
+			Path to save figure. If None, displays instead.
+		"""
+		n_methods = len(results)
+		has_qu = self.stokes_q is not None and self.stokes_u is not None
+		fig_width = 15.5
+		row_height = 2.7
+		fig_height = max(11.0, row_height * (n_methods + 1))
+		fig, axes = plt.subplots(
+			n_methods + 1,
+			5,
+			figsize=(fig_width, fig_height),
+			gridspec_kw={'width_ratios': [0.85, 0.11, 0.85, 0.32, 0.85]},
+		)
+		if n_methods == 0:
+			axes = np.atleast_2d(axes)
+
+		# Remove spacer-column axes and remap remaining columns to [left, middle, right]
+		for spacer_ax in axes[:, 1]:
+			fig.delaxes(spacer_ax)
+		for spacer_ax in axes[:, 3]:
+			fig.delaxes(spacer_ax)
+		axes = np.stack((axes[:, 0], axes[:, 2], axes[:, 4]), axis=1)
+		original_highlight_bg = '#FFF7D6'
+		original_highlight_edge = '#C88A00'
+		scan_colors = {
+			'structure': 'tab:blue',
+			'snr': 'tab:red',
+			'pa_slope': 'tab:green',
+			'pa_slope_shrine': 'tab:cyan',
+			'l_i_mean': 'tab:purple',
+		}
+		scan_labels = {
+			'structure': 'Structure',
+			'snr': 'S/N',
+			'pa_slope': 'PA',
+			'pa_slope_shrine': 'PA (SHRINE)',
+			'l_i_mean': 'L/I mean',
+		}
+		fs_title = 16
+		fs_label = 14
+		fs_tick = 12
+		fs_legend = 11
+		fs_overlay = 12
+		fs_labelpad = 2
+		
+		# Plot original data
+		if peak_region is not None:
+			original_data = self.stokes_i[:, peak_region[0]:peak_region[1]]
+			time_range = self.time_ms[peak_region[0]:peak_region[1]]
+		else:
+			original_data = self.stokes_i
+			time_range = self.time_ms
+
+		pa_limits = None
+		q_region = None
+		u_region = None
+		if has_qu:
+			if peak_region is not None:
+				q_region = self.stokes_q[:, peak_region[0]:peak_region[1]]
+				u_region = self.stokes_u[:, peak_region[0]:peak_region[1]]
+			else:
+				q_region = self.stokes_q
+				u_region = self.stokes_u
+			pa_series = [self._pa_series_deg(q_region, u_region, original_data)]
+			for result in results.values():
+				n_time_out = result['dedispersed'].shape[1]
+				dedisp_q = result.get('dedispersed_q')
+				dedisp_u = result.get('dedispersed_u')
+				if dedisp_q is None or dedisp_u is None:
+					dedisp_q = self.dedisperse(q_region, result['dm'], output_size=n_time_out, mode=self.dedisp_mode)
+					dedisp_u = self.dedisperse(u_region, result['dm'], output_size=n_time_out, mode=self.dedisp_mode)
+				pa_series.append(self._pa_series_deg(dedisp_q, dedisp_u, result['dedispersed']))
+			pa_all = np.concatenate([p[np.isfinite(p)] for p in pa_series if p is not None])
+			if pa_all.size > 0:
+				pa_min = float(np.nanmin(pa_all)) - 10.0
+				pa_max = float(np.nanmax(pa_all)) + 10.0
+				pa_limits = (pa_min, pa_max)
+		
+		# Original waterfall
+		vmin0, vmax0 = self._robust_vmin_vmax(original_data)
+		im0 = axes[0, 0].imshow(
+			original_data,
+			aspect='auto',
+			extent=[time_range[0], time_range[-1], self.freq_mhz[0], self.freq_mhz[-1]],
+			cmap='viridis',
+			origin='lower',
+			vmin=vmin0,
+			vmax=vmax0,
+		)
+		axes[0, 0].set_title("Original Data (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc cm$^{{-3}}$")
+		axes[0, 0].set_ylabel('Frequency (MHz)')
+		axes[0, 0].set_xlabel('Time (ms)')
+		axes[0, 0].title.set_fontsize(fs_title)
+		axes[0, 0].xaxis.label.set_size(fs_label)
+		axes[0, 0].yaxis.label.set_size(fs_label)
+		axes[0, 0].xaxis.labelpad = fs_labelpad
+		axes[0, 0].yaxis.labelpad = fs_labelpad
+		axes[0, 0].tick_params(axis='both', labelsize=fs_tick)
+
+		# Original time series
+		time_series_orig = np.mean(original_data, axis=0)
+		axes[0, 1].plot(time_range, time_series_orig, 'k-', linewidth=1, label='I')
+		ax0r = None
+		if has_qu:
+			ax0r = axes[0, 1].twinx()
+			L_series = np.mean(np.sqrt(q_region**2 + u_region**2), axis=0)
+			if self.full_L_noise_median is not None:
+				L_baseline = self.full_L_noise_median
+			else:
+				n_edge = max(1, int(0.05 * len(L_series)))
+				L_baseline = np.median(L_series[:n_edge])
+			L_plot = L_series - L_baseline
+			axes[0, 1].plot(time_range, L_plot, 'r', linewidth=1, label='L')
+			pa_deg = self._pa_series_deg(q_region, u_region, original_data)
+			pa_smooth, fit_line, _ = self._get_pa_smoothed_and_fit(q_region, u_region, original_data, time_range)
+			ax0r.plot(time_range, pa_deg, color='silver', linewidth=1, alpha=0.9)#, label='PA')
+			ax0r.plot(time_range, pa_smooth, color='tab:purple', linewidth=2, alpha=0.8, label='PA')
+			ax0r.plot(time_range, fit_line, color='tab:orange', linewidth=1.5, linestyle='--', alpha=0.7, label='PA fit')
+
+		if ax0r is not None:
+			h1, l1 = axes[0, 1].get_legend_handles_labels()
+			h2, l2 = ax0r.get_legend_handles_labels()
+			axes[0, 1].legend(h1 + h2, l1 + l2, loc='best', fontsize=fs_legend)
+			ax0r.set_ylabel('PA (deg)')
+			ax0r.yaxis.label.set_size(fs_label)
+			ax0r.yaxis.labelpad = fs_labelpad
+			ax0r.tick_params(axis='y', labelsize=fs_tick)
+			if pa_limits is not None:
+				ax0r.set_ylim(pa_limits)
+		else:
+			axes[0, 1].legend(loc='best', fontsize=fs_legend)
+		axes[0, 1].set_title('Original Time Series')
+		axes[0, 1].set_ylabel('Flux')
+		axes[0, 1].set_xlabel('Time (ms)')
+		axes[0, 1].grid(True, alpha=0.3)
+		axes[0, 1].title.set_fontsize(fs_title)
+		axes[0, 1].xaxis.label.set_size(fs_label)
+		axes[0, 1].yaxis.label.set_size(fs_label)
+		axes[0, 1].xaxis.labelpad = fs_labelpad
+		axes[0, 1].yaxis.labelpad = fs_labelpad
+		axes[0, 1].tick_params(axis='both', labelsize=fs_tick)
+
+		# Top-right panel: compact summary of best DM and uncertainty per method.
+		all_scan_ax = axes[0, 2]
+		method_names = list(results.keys())
+		if len(method_names) > 0:
+			y_pos = np.arange(len(method_names), dtype=float)
+			y_labels = [scan_labels.get(name, name) for name in method_names]
+
+			for j, method_name in enumerate(method_names):
+				result = results[method_name]
+				dm_best = float(result['dm'])
+				minus = result.get('uncertainty_minus')
+				plus = result.get('uncertainty_plus')
+				xerr = np.array([
+					[0.0 if minus is None else float(minus)],
+					[0.0 if plus is None else float(plus)],
+				])
+				all_scan_ax.errorbar(
+					x=[dm_best],
+					y=[y_pos[j]],
+					xerr=xerr,
+					fmt='o',
+					markersize=5,
+					capsize=3,
+					elinewidth=1.8,
+					color=scan_colors.get(method_name, 'black'),
+				)
+
+			all_scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.5, alpha=0.9)
+			all_scan_ax.set_xlim(dm_range[0], dm_range[1])
+			all_scan_ax.set_yticks(y_pos)
+			all_scan_ax.set_yticklabels(y_labels)
+			all_scan_ax.invert_yaxis()
+			all_scan_ax.set_title('Best DM Summary')
+			all_scan_ax.set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+			all_scan_ax.set_ylabel('')
+			all_scan_ax.grid(True, axis='x', alpha=0.3)
+			all_scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+			all_scan_ax.title.set_fontsize(fs_title)
+			all_scan_ax.xaxis.label.set_size(fs_label)
+			all_scan_ax.yaxis.label.set_size(fs_label)
+			all_scan_ax.xaxis.labelpad = fs_labelpad
+			all_scan_ax.yaxis.labelpad = fs_labelpad
+			all_scan_ax.tick_params(axis='both', labelsize=fs_tick)
+		else:
+			all_scan_ax.text(0.5, 0.5, 'No method results', ha='center', va='center', transform=all_scan_ax.transAxes)
+			all_scan_ax.set_axis_off()
+
+		# Highlight the top row (original data) with a distinct background color and border
+		#for ax in (axes[0, 0], axes[0, 1]):
+		#	ax.set_facecolor(original_highlight_bg)
+		#	for spine in ax.spines.values():
+		#		spine.set_edgecolor(original_highlight_edge)
+		#		spine.set_linewidth(2.5)
+
+		# Plot each method's result (one row per method)
+		show_time_legend = False
+		show_scan_legend = True
+		for idx, (method_name, result) in enumerate(results.items(), start=1):
+			# Create time axis for dedispersed data (may be longer due to expansion)
+			n_time_dedisp = result['dedispersed'].shape[1]
+			dt = float(np.median(np.diff(time_range))) if len(time_range) > 1 else 1.0
+			delay_samples = self._get_delay_samples(result['dm'])
+			if self.dedisp_mode == 'crop':
+				start_shift = int(np.max(delay_samples))
+			else:
+				start_shift = int(np.min(delay_samples))
+			time_range_dedisp = time_range[0] + start_shift * dt + np.arange(n_time_dedisp) * dt
+
+			vmin, vmax = self._robust_vmin_vmax(result['dedispersed'])
+			im = axes[idx, 0].imshow(
+				result['dedispersed'],
+				aspect='auto',
+				extent=[time_range_dedisp[0], time_range_dedisp[-1], self.freq_mhz[0], self.freq_mhz[-1]],
+				cmap='viridis',
+				origin='lower',
+				vmin=vmin,
+				vmax=vmax,
+			)
+			axes[idx, 0].set_title(f"{result['method']}")
+			axes[idx, 0].set_ylabel('Frequency (MHz)')
+			axes[idx, 0].set_xlabel('Time (ms)')
+			axes[idx, 0].title.set_fontsize(fs_title)
+			axes[idx, 0].xaxis.label.set_size(fs_label)
+			axes[idx, 0].yaxis.label.set_size(fs_label)
+			axes[idx, 0].xaxis.labelpad = fs_labelpad
+			axes[idx, 0].yaxis.labelpad = fs_labelpad
+			axes[idx, 0].tick_params(axis='both', labelsize=fs_tick)
+			axes[idx, 0].text(
+				0.98,
+				0.98,
+				(
+					"DM="
+					+ self._format_uncertainty(
+						result['dm'],
+						result.get('uncertainty_minus'),
+						result.get('uncertainty_plus'),
+						precision=3,
+					)
+					+ rf" pc cm$^{{-3}}$"
+				),
+				transform=axes[idx, 0].transAxes,
+				ha='right',
+				va='top',
+				color='white',
+				fontsize=fs_overlay,
+				bbox=dict(facecolor='black', edgecolor='none', alpha=0.35, pad=2.0),
+			)
+
+			time_series = np.mean(result['dedispersed'], axis=0)
+			axes[idx, 1].plot(time_range_dedisp, time_series, 'k-', linewidth=1, label='I')
+			axr = None
+
+			if has_qu:
+				axr = axes[idx, 1].twinx()
+				dedisp_q = result.get('dedispersed_q')
+				dedisp_u = result.get('dedispersed_u')
+				if dedisp_q is None or dedisp_u is None:
+					dedisp_q = self.dedisperse(q_region, result['dm'], output_size=n_time_dedisp, mode=self.dedisp_mode)
+					dedisp_u = self.dedisperse(u_region, result['dm'], output_size=n_time_dedisp, mode=self.dedisp_mode)
+				L_series = np.mean(np.sqrt(dedisp_q**2 + dedisp_u**2), axis=0)
+				if self.full_L_noise_median is not None:
+					L_baseline = self.full_L_noise_median
+				else:
+					n_edge = max(1, int(0.05 * len(L_series)))
+					L_baseline = np.median(L_series[:n_edge])
+				L_plot = L_series - L_baseline
+				axes[idx, 1].plot(time_range_dedisp, L_plot, 'r', linewidth=1, label='L')
+
+				if (
+					method_name in ('pa_slope', 'pa_slope_shrine')
+					and result.get('pa_plot_series') is not None
+					and result.get('pa_plot_smooth') is not None
+					and result.get('pa_plot_fit') is not None
+				):
+					pa_deg = np.asarray(result['pa_plot_series'])
+					pa_smooth_plot = np.asarray(result['pa_plot_smooth'])
+					fit_plot = np.asarray(result['pa_plot_fit'])
+				else:
+					pa_deg = self._pa_series_deg(dedisp_q, dedisp_u, result['dedispersed'])
+					if method_name == 'pa_slope_shrine':
+						result_kc = result.get('kc', None)
+						pa_smooth_plot, fit_plot, _ = self._get_pa_shrine_smoothed_and_fit(
+							dedisp_q, dedisp_u, result['dedispersed'], time_range_dedisp, force_kc=result_kc
+						)
+					else:
+						pa_smooth_plot, fit_plot, _ = self._get_pa_smoothed_and_fit(dedisp_q, dedisp_u, result['dedispersed'], time_range_dedisp)
+
+				axr.plot(time_range_dedisp, pa_deg, color='silver', linewidth=1, alpha=0.9, label='PA')
+				if method_name == 'pa_slope_shrine':
+					text = "(S)"
+				else:
+					text = None
+				axr.plot(time_range_dedisp, pa_smooth_plot, color='tab:purple', linewidth=2, alpha=0.8, label='PA sm' + (text if text else ''))
+				axr.plot(time_range_dedisp, fit_plot, color='tab:orange', linewidth=1.5, linestyle='--', alpha=0.7, label='PA fit' + (text if text else ''))
+
+				if show_time_legend:
+					h1, l1 = axes[idx, 1].get_legend_handles_labels()
+					h2, l2 = axr.get_legend_handles_labels()
+					axes[idx, 1].legend(h1 + h2, l1 + l2, loc='best', fontsize=fs_legend)
+					show_time_legend = False
+				axr.set_ylabel('PA (deg)')
+				axr.yaxis.label.set_size(fs_label)
+				axr.yaxis.labelpad = fs_labelpad
+				axr.tick_params(axis='y', labelsize=fs_tick)
+				if pa_limits is not None:
+					axr.set_ylim(pa_limits)
+			else:
+				if show_time_legend:
+					axes[idx, 1].legend(loc='best', fontsize=fs_legend)
+					show_time_legend = False
+
+			axes[idx, 1].set_title(f"Metric = {result['metric']:.6f}")
+			axes[idx, 1].set_ylabel('Flux')
+			axes[idx, 1].set_xlabel('Time (ms)')
+			axes[idx, 1].grid(True, alpha=0.3)
+			axes[idx, 1].title.set_fontsize(fs_title)
+			axes[idx, 1].xaxis.label.set_size(fs_label)
+			axes[idx, 1].yaxis.label.set_size(fs_label)
+			axes[idx, 1].xaxis.labelpad = fs_labelpad
+			axes[idx, 1].yaxis.labelpad = fs_labelpad
+			axes[idx, 1].tick_params(axis='both', labelsize=fs_tick)
+
+			# Right column: per-method DM scan curve
+			scan_ax = axes[idx, 2]
+			dm_vals = result.get('dm_values')
+			metric_vals = result.get('metric_values')
+			if dm_vals is not None and metric_vals is not None:
+				low_dm = result.get('uncertainty_low_dm')
+				high_dm = result.get('uncertainty_high_dm')
+				dm_left = float(dm_range[0])
+				dm_right = float(dm_range[1])
+				shade_low = dm_left if low_dm is None else float(low_dm)
+				shade_high = dm_right if high_dm is None else float(high_dm)
+				if shade_low <= shade_high:
+					scan_ax.axvspan(
+						shade_low,
+						shade_high,
+						color='tab:orange',
+						alpha=0.18,
+						label='DM uncertainty' if show_scan_legend else None,
+					)
+				scan_ax.plot(
+					dm_vals,
+					metric_vals,
+					linewidth=2.0,
+					color=scan_colors.get(method_name, 'black'),
+				)
+				scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.4,
+							alpha=0.9,
+							label=(f'Input DM'))#={self._format_dm(self.input_dm, 3)}' if show_scan_legend else None))
+				scan_ax.axvline(result['dm'], color='red', linestyle='--', linewidth=1.4,
+							alpha=0.9,
+							label=(
+								(
+									"Best DM"
+									#+ " = "
+									#+ self._format_uncertainty(
+									#	result['dm'],
+									#	result.get('uncertainty_minus'),
+									#	result.get('uncertainty_plus'),
+									#	precision=3,
+									#)
+								)
+								if show_scan_legend else None
+							)
+						)
+				scan_ax.set_xlim(dm_range[0], dm_range[1])
+				scan_ax.set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+				scan_ax.set_ylabel('Metric')
+				scan_ax.grid(True, alpha=0.3)
+				scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+				scan_ax.xaxis.label.set_size(fs_label)
+				scan_ax.yaxis.label.set_size(fs_label)
+				scan_ax.xaxis.labelpad = fs_labelpad
+				scan_ax.yaxis.labelpad = fs_labelpad
+				scan_ax.tick_params(axis='both', labelsize=fs_tick)
+				if show_scan_legend:
+					scan_ax.legend(loc='upper left', fontsize=fs_legend)
+					show_scan_legend = False
+			else:
+				scan_ax.text(0.5, 0.5, 'No scan data', ha='center', va='center', transform=scan_ax.transAxes)
+				scan_ax.set_axis_off()
+		
+		plt.tight_layout(rect=[0.02, 0.02, 0.995, 0.995])
+		fig.subplots_adjust(wspace=0.04, hspace=0.5)
+		
+		if save_path:
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			print(f"\nFigure saved to: {save_path}")
+		else:
+			plt.show()
+	
+	def scan_dm_space(self, dm_range: Tuple[float, float], n_points: int = 100,
+					 data: Optional[np.ndarray] = None, dm_step: Optional[float] = None,
+					 data_q: Optional[np.ndarray] = None, data_u: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict]:
+		"""
+		Scan through DM space and calculate metrics.
+		
+		Parameters:
+		-----------
+		dm_range : tuple
+			(min_dm, max_dm) range to scan
+		n_points : int
+			Number of DM values to test (ignored if dm_step is provided)
+		data : np.ndarray, optional
+			Stokes I data to scan. If None, uses self.stokes_i
+		dm_step : float, optional
+			Step size between DMs. When provided, overrides n_points sampling.
+		data_q : np.ndarray, optional
+			Stokes Q data aligned with `data`. If None, uses self.stokes_q (if available).
+		data_u : np.ndarray, optional
+			Stokes U data aligned with `data`. If None, uses self.stokes_u (if available).
+			
+		Returns:
+		--------
+		dm_values : np.ndarray
+			Array of DM values tested
+		metrics : dict
+			Dictionary of metric arrays for each method
+		"""
+		if data is None:
+			data = self.stokes_i
+		if data_q is None:
+			data_q = self.stokes_q
+		if data_u is None:
+			data_u = self.stokes_u
+		self._reset_nonshrine_kc_state()
+		
+		dm_values = self._build_dm_values(dm_range, n_points=n_points, dm_step=dm_step)
+		
+		# Calculate max output size to ensure consistent shapes
+		output_size = self._max_output_size_for_dm_range(data, dm_range)
+		
+		structure_values = np.zeros(len(dm_values))
+		snr_values = np.zeros(len(dm_values))
+		pa_slope_values = np.zeros(len(dm_values)) if (data_q is not None and data_u is not None) else None
+		l_i_mean_values = np.zeros(len(dm_values)) if (data_q is not None and data_u is not None) else None
+		i_data = np.zeros((len(dm_values), output_size))
+		
+		print(f"Scanning {len(dm_values)} DM values...")
+		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
+		time_axis = np.arange(output_size) * dt
+		for i, dm in enumerate(dm_values):
+			if i % 20 == 0:
+				print(f"\r  Progress: {i}/{len(dm_values)}", end='', flush=True)
+			
+			dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
+			i_data[i] = np.nanmean(dedispersed, axis=0)
+			if pa_slope_values is not None:
+				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
+				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
+				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
+				pa_slope_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
+				if l_i_mean_values is not None:
+					l_i_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean')
+
+		run_tag = f"scan_{int(np.round(dm_values[0] * 1000))}_{int(np.round(dm_values[-1] * 1000))}_{len(dm_values)}"
+
+		run_prefix_structure = f"{run_tag}_structure"
+		run_dir_structure = self._run_shrine_method(
+			script_name="maximise_structure.py",
+			run_prefix=run_prefix_structure,
+			dm_values=dm_values,
+			i_data=i_data,
+			include_input_dm=True,
+			save_all=True,
+		)
+		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
+
+		run_prefix_snr = f"{run_tag}_snr"
+		run_dir_snr = self._run_shrine_method(
+			script_name="maximise_sn.py",
+			run_prefix=run_prefix_snr,
+			dm_values=dm_values,
+			i_data=i_data,
+			include_input_dm=False,
+			save_all=True,
+		)
+		sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
+		if not sn_path.exists():
+			raise FileNotFoundError(f"Expected SHRINE S/N output not found: {sn_path}")
+		snr_values = np.loadtxt(sn_path)
+		
+		metrics = {
+			'structure': structure_values,
+			'snr': snr_values
+		}
+		if pa_slope_values is not None:
+			metrics['pa_slope'] = pa_slope_values
+			pa_slope_shrine_values = np.zeros(len(dm_values))
+			for i, dm in enumerate(dm_values):
+				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
+				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
+				dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
+				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+				pa_slope_shrine_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
+			metrics['pa_slope_shrine'] = pa_slope_shrine_values
+		if l_i_mean_values is not None:
+			metrics['l_i_mean'] = l_i_mean_values
+		
+		return dm_values, metrics
+	
+	def plot_dm_scan(self, dm_values: np.ndarray, metrics: Dict,
+					save_path: Optional[str] = None):
+		"""
+		Plot metric values across DM space.
+		
+		Parameters:
+		-----------
+		dm_values : np.ndarray
+			Array of DM values
+		metrics : dict
+			Dictionary of metric arrays
+		save_path : str, optional
+			Path to save figure
+		"""
+		fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 3*len(metrics)))
+		
+		if len(metrics) == 1:
+			axes = [axes]
+		
+		colors = {'structure': 'blue', 'snr': 'red', 'pa_slope': 'green', 'pa_slope_shrine': 'teal',
+				  'l_i_mean': 'purple'}
+		labels = {
+			'structure': 'Structure Metric (SHRINE)',
+			'snr': 'S/N',
+			'pa_slope': "Weighted PA Slope magnitude",
+			'pa_slope_shrine': "Weighted PA Slope magnitude (SHRINE-smoothed PA)",
+			'l_i_mean': "L/I (mean)"
+		}
+		
+		for idx, (metric_name, metric_values) in enumerate(metrics.items()):
+			axes[idx].plot(dm_values, metric_values, 
+						  color=colors.get(metric_name, 'black'),
+						  linewidth=2)
+			axes[idx].set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+			axes[idx].set_ylabel('Metric Value')
+			axes[idx].set_title(labels.get(metric_name, metric_name))
+			axes[idx].grid(True, alpha=0.3)
+			
+			# Mark input DM
+			axes[idx].axvline(self.input_dm, color='gray', 
+							linestyle=':', alpha=1, linewidth=2, label=f'Input DM={self._format_dm(self.input_dm, 3)}')
+			
+			# Mark maximum
+			max_idx = np.argmax(metric_values)
+			axes[idx].axvline(dm_values[max_idx], color='red', 
+							linestyle='--', alpha=1, label=f'Max at DM={self._format_dm(dm_values[max_idx], 3)}')
+			axes[idx].legend()
+		
+		plt.tight_layout()
+		
+		if save_path:
+			savefig_rasterized(save_path, dpi=150, bbox_inches='tight')
+			print(f"DM scan plot saved to: {save_path}")
+		else:
+			plt.show()
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-_SCAN_COLORS = {
-    "structure": "tab:blue",
-    "snr": "tab:red",
-    "pa_slope": "tab:green",
-    "pa_slope_shrine": "tab:cyan",
-    "l_i_mean": "tab:purple",
-}
-_SCAN_LABELS = {
-    "structure": "Structure",
-    "snr": "S/N",
-    "pa_slope": "PA",
-    "pa_slope_shrine": "PA (SHRINE)",
-    "l_i_mean": "L/I mean",
-}
-
-
-# ---------------------------------------------------------------------------
-# Main comparison figure
-# ---------------------------------------------------------------------------
-
-def plot_comparison(
-    results: Dict,
-    stokes_i: np.ndarray,
-    freq_mhz: np.ndarray,
-    time_ms: np.ndarray,
-    input_dm: float,
-    dm_range: Tuple[float, float],
-    dedisp_mode: str,
-    get_delay_samples_fn,
-    pa_series_fn,
-    pa_smoothed_and_fit_fn,
-    pa_shrine_smoothed_and_fit_fn,
-    stokes_q: Optional[np.ndarray] = None,
-    stokes_u: Optional[np.ndarray] = None,
-    peak_region: Optional[Tuple[int, int]] = None,
-    save_path: Optional[str] = None,
-) -> None:
-    """
-    Multi-panel comparison figure: one row per method plus an original-data row.
-
-    Callable arguments (*_fn) are thin closures supplied by DMOptimiser so
-    this module stays decoupled from the optimiser internals.
-    """
-    n_methods = len(results)
-    has_qu = stokes_q is not None and stokes_u is not None
-
-    fig_width = 15.5
-    row_height = 2.7
-    fig_height = max(11.0, row_height * (n_methods + 1))
-    fig, axes = plt.subplots(
-        n_methods + 1,
-        5,
-        figsize=(fig_width, fig_height),
-        gridspec_kw={"width_ratios": [0.85, 0.11, 0.85, 0.32, 0.85]},
-    )
-    if n_methods == 0:
-        axes = np.atleast_2d(axes)
-
-    for spacer_ax in axes[:, 1]:
-        fig.delaxes(spacer_ax)
-    for spacer_ax in axes[:, 3]:
-        fig.delaxes(spacer_ax)
-    axes = np.stack((axes[:, 0], axes[:, 2], axes[:, 4]), axis=1)
-
-    fs_title, fs_label, fs_tick = 16, 14, 12
-    fs_legend, fs_overlay, fs_lpad = 11, 12, 2
-
-    # ---- original data region ----
-    if peak_region is not None:
-        orig_data = stokes_i[:, peak_region[0]:peak_region[1]]
-        time_range = time_ms[peak_region[0]:peak_region[1]]
-        q_region = None if not has_qu else stokes_q[:, peak_region[0]:peak_region[1]]
-        u_region = None if not has_qu else stokes_u[:, peak_region[0]:peak_region[1]]
-    else:
-        orig_data = stokes_i
-        time_range = time_ms
-        q_region = stokes_q
-        u_region = stokes_u
-
-    # Pre-compute shared PA y-limits
-    pa_limits = None
-    if has_qu:
-        pa_series_all = [pa_series_fn(q_region, u_region, orig_data)]
-        for result in results.values():
-            n_t = result["dedispersed"].shape[1]
-            dq = result.get("dedispersed_q")
-            du = result.get("dedispersed_u")
-            if dq is None or du is None:
-                continue
-            pa_series_all.append(pa_series_fn(dq, du, result["dedispersed"]))
-        pa_all = np.concatenate([p[np.isfinite(p)] for p in pa_series_all if p is not None])
-        if pa_all.size > 0:
-            pa_limits = (float(np.nanmin(pa_all)) - 10.0, float(np.nanmax(pa_all)) + 10.0)
-
-    def _label_ax(ax, title, xlabel, ylabel):
-        ax.set_title(title, fontsize=fs_title)
-        ax.set_xlabel(xlabel, fontsize=fs_label, labelpad=fs_lpad)
-        ax.set_ylabel(ylabel, fontsize=fs_label, labelpad=fs_lpad)
-        ax.tick_params(axis="both", labelsize=fs_tick)
-
-    # ---- Row 0: original data ----
-    vmin0, vmax0 = robust_vmin_vmax(orig_data)
-    axes[0, 0].imshow(
-        orig_data, aspect="auto",
-        extent=[time_range[0], time_range[-1], freq_mhz[0], freq_mhz[-1]],
-        cmap="viridis", origin="lower", vmin=vmin0, vmax=vmax0,
-    )
-    _label_ax(
-        axes[0, 0],
-        f"Original Data (SHRINE structure-maximised)\n"+rf"Input DM = {format_dm(input_dm, 3)} pc cm$^{{-3}}$",
-        "Time (ms)", "Frequency (MHz)",
-    )
-
-    ts_orig = np.mean(orig_data, axis=0)
-    axes[0, 1].plot(time_range, ts_orig, "k-", linewidth=1, label="I")
-    ax0r = None
-    if has_qu:
-        ax0r = axes[0, 1].twinx()
-        L0 = np.mean(np.sqrt(q_region ** 2 + u_region ** 2), axis=0)
-        n_edge = max(1, int(0.05 * len(L0)))
-        L0_plot = L0 - float(np.median(L0[:n_edge]))
-        axes[0, 1].plot(time_range, L0_plot, "r", linewidth=1, label="L")
-        pa_deg0 = pa_series_fn(q_region, u_region, orig_data)
-        pa_sm0, fit0 = pa_smoothed_and_fit_fn(q_region, u_region, orig_data, time_range)
-        ax0r.plot(time_range, pa_deg0, color="silver", linewidth=1, alpha=0.9)
-        ax0r.plot(time_range, pa_sm0, color="tab:purple", linewidth=2, alpha=0.8, label="PA")
-        ax0r.plot(time_range, fit0, color="tab:orange", linewidth=1.5, linestyle="--", alpha=0.7, label="PA fit")
-        h1, l1 = axes[0, 1].get_legend_handles_labels()
-        h2, l2 = ax0r.get_legend_handles_labels()
-        axes[0, 1].legend(h1 + h2, l1 + l2, loc="best", fontsize=fs_legend)
-        ax0r.set_ylabel("PA (deg)", fontsize=fs_label, labelpad=fs_lpad)
-        ax0r.tick_params(axis="y", labelsize=fs_tick)
-        if pa_limits:
-            ax0r.set_ylim(pa_limits)
-    else:
-        axes[0, 1].legend(loc="best", fontsize=fs_legend)
-    _label_ax(axes[0, 1], "Original Time Series", "Time (ms)", "Flux")
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # Top-right: DM summary error-bar chart
-    all_scan_ax = axes[0, 2]
-    if results:
-        method_names = list(results.keys())
-        y_pos = np.arange(len(method_names), dtype=float)
-        for j, mname in enumerate(method_names):
-            r = results[mname]
-            minus = r.get("uncertainty_minus")
-            plus = r.get("uncertainty_plus")
-            xerr = np.array([
-                [0.0 if minus is None else float(minus)],
-                [0.0 if plus is None else float(plus)],
-            ])
-            all_scan_ax.errorbar(
-                x=[r["dm"]], y=[y_pos[j]], xerr=xerr,
-                fmt="o", markersize=5, capsize=3, elinewidth=1.8,
-                color=_SCAN_COLORS.get(mname, "black"),
-            )
-        all_scan_ax.axvline(input_dm, color="gray", linestyle=":", linewidth=1.5, alpha=0.9)
-        all_scan_ax.set_xlim(dm_range)
-        all_scan_ax.set_yticks(y_pos)
-        all_scan_ax.set_yticklabels([_SCAN_LABELS.get(n, n) for n in method_names])
-        all_scan_ax.invert_yaxis()
-        all_scan_ax.grid(True, axis="x", alpha=0.3)
-        all_scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-        _label_ax(all_scan_ax, rf"Best DM Summary", "DM (pc cm$^{{-3}}$)", "")
-    else:
-        all_scan_ax.text(0.5, 0.5, "No method results", ha="center", va="center",
-                         transform=all_scan_ax.transAxes)
-        all_scan_ax.set_axis_off()
-
-    # ---- Per-method rows ----
-    show_scan_legend = True
-    for idx, (mname, result) in enumerate(results.items(), start=1):
-        n_t = result["dedispersed"].shape[1]
-        dt = float(np.median(np.diff(time_range))) if len(time_range) > 1 else 1.0
-        delay_samples = get_delay_samples_fn(result["dm"])
-        if dedisp_mode == "crop":
-            start_shift = int(np.max(delay_samples))
-        else:
-            start_shift = int(np.min(delay_samples))
-        tr_d = time_range[0] + start_shift * dt + np.arange(n_t) * dt
-
-        vmin, vmax = robust_vmin_vmax(result["dedispersed"])
-        axes[idx, 0].imshow(
-            result["dedispersed"], aspect="auto",
-            extent=[tr_d[0], tr_d[-1], freq_mhz[0], freq_mhz[-1]],
-            cmap="viridis", origin="lower", vmin=vmin, vmax=vmax,
-        )
-        _label_ax(axes[idx, 0], result["method"], "Time (ms)", "Frequency (MHz)")
-        axes[idx, 0].text(
-            0.98, 0.98,
-            "DM=" + format_uncertainty(result["dm"], result.get("uncertainty_minus"),
-                                       result.get("uncertainty_plus"), precision=3) + rf" pc cm$^{{-3}}$",
-            transform=axes[idx, 0].transAxes, ha="right", va="top",
-            color="white", fontsize=fs_overlay,
-            bbox=dict(facecolor="black", edgecolor="none", alpha=0.35, pad=2.0),
-        )
-
-        ts = np.mean(result["dedispersed"], axis=0)
-        axes[idx, 1].plot(tr_d, ts, "k-", linewidth=1, label="I")
-        axr = None
-        if has_qu:
-            axr = axes[idx, 1].twinx()
-            dq = result.get("dedispersed_q")
-            du = result.get("dedispersed_u")
-            if dq is None or du is None:
-                dq = result.get("_dq_fallback")
-                du = result.get("_du_fallback")
-            L_s = np.mean(np.sqrt(dq ** 2 + du ** 2), axis=0)
-            n_edge = max(1, int(0.05 * len(L_s)))
-            axes[idx, 1].plot(tr_d, L_s - float(np.median(L_s[:n_edge])), "r", linewidth=1, label="L")
-
-            if "pa_plot_series" in result:
-                pa_deg = np.asarray(result["pa_plot_series"])
-            else:
-                pa_deg = np.asarray(pa_series_fn(dq, du, result["dedispersed"], use_data_rms=False))
-
-            if mname == "pa_slope_shrine" and "pa_plot_fit" not in result:
-                pa_sm, fit = pa_shrine_smoothed_and_fit_fn(
-                    dq, du, result["dedispersed"], tr_d, force_kc=result.get("kc")
-                )
-            elif mname == "pa_slope" and "pa_plot_fit" not in result:
-                pa_sm, fit = pa_smoothed_and_fit_fn(dq, du, result["dedispersed"], tr_d)
-            else:
-                pa_sm = np.asarray(result.get("pa_plot_smooth", pa_deg))
-                fit = np.asarray(result.get("pa_plot_fit", np.full_like(pa_deg, np.nan)))
-
-            axr.plot(tr_d, pa_deg, color="silver", linewidth=1, alpha=0.9, label="PA")
-            # Only plot smoothed PA and fit for PA-specific methods
-            if mname in ("pa_slope", "pa_slope_shrine"):
-                suffix = "(S)" if mname == "pa_slope_shrine" else ""
-                axr.plot(tr_d, pa_sm, color="tab:purple", linewidth=2, alpha=0.8, label=f"PA sm{suffix}")
-                axr.plot(tr_d, fit, color="tab:orange", linewidth=1.5, linestyle="--", alpha=0.7, label=f"PA fit{suffix}")
-            axr.set_ylabel("PA (deg)", fontsize=fs_label, labelpad=fs_lpad)
-            axr.tick_params(axis="y", labelsize=fs_tick)
-            if pa_limits:
-                axr.set_ylim(pa_limits)
-
-        _label_ax(axes[idx, 1], f"Metric = {result['metric']:.6f}", "Time (ms)", "Flux")
-        axes[idx, 1].grid(True, alpha=0.3)
-
-        # DM scan curve
-        scan_ax = axes[idx, 2]
-        dm_vals = result.get("dm_values")
-        metric_vals = result.get("metric_values")
-        if dm_vals is not None and metric_vals is not None:
-            low_dm = result.get("uncertainty_low_dm")
-            high_dm = result.get("uncertainty_high_dm")
-            shade_low = float(dm_range[0]) if low_dm is None else float(low_dm)
-            shade_high = float(dm_range[1]) if high_dm is None else float(high_dm)
-            if shade_low <= shade_high:
-                scan_ax.axvspan(shade_low, shade_high, color="tab:orange", alpha=0.18,
-                                label="DM uncertainty" if show_scan_legend else None)
-            scan_ax.plot(dm_vals, metric_vals, linewidth=2.0, color=_SCAN_COLORS.get(mname, "black"))
-            scan_ax.axvline(input_dm, color="gray", linestyle=":", linewidth=1.4, alpha=0.9,
-                            label="Input DM" if show_scan_legend else None)
-            scan_ax.axvline(result["dm"], color="red", linestyle="--", linewidth=1.4, alpha=0.9,
-                            label="Best DM" if show_scan_legend else None)
-            scan_ax.set_xlim(dm_range)
-            scan_ax.grid(True, alpha=0.3)
-            scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-            _label_ax(scan_ax, "", r"DM (pc cm$^{{-3}}$)", "Metric")
-            if show_scan_legend:
-                scan_ax.legend(loc="upper left", fontsize=fs_legend)
-                show_scan_legend = False
-        else:
-            scan_ax.text(0.5, 0.5, "No scan data", ha="center", va="center",
-                         transform=scan_ax.transAxes)
-            scan_ax.set_axis_off()
-
-    plt.tight_layout(rect=[0.02, 0.02, 0.995, 0.995])
-    fig.subplots_adjust(wspace=0.04, hspace=0.5)
-
-    if save_path:
-        savefig_rasterized(save_path, dpi=600, bbox_inches="tight")
-        print(f"\nFigure saved to: {save_path}")
-    else:
-        plt.show()
-
-
-# ---------------------------------------------------------------------------
-# DM scan overview
-# ---------------------------------------------------------------------------
-
-def plot_dm_scan(
-    dm_values: np.ndarray,
-    metrics: Dict,
-    input_dm: float,
-    save_path: Optional[str] = None,
-) -> None:
-    """Plot per-method metric curves across a DM grid."""
-    labels = {
-        "structure": "Structure Metric (SHRINE)",
-        "snr": "S/N",
-        "pa_slope": "Weighted PA Slope magnitude",
-        "pa_slope_shrine": "Weighted PA Slope magnitude (SHRINE-smoothed PA)",
-        "l_i_mean": "L/I (mean)",
-    }
-    fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 3 * len(metrics)))
-    if len(metrics) == 1:
-        axes = [axes]
-
-    for ax, (mname, mvals) in zip(axes, metrics.items()):
-        ax.plot(dm_values, mvals, color=_SCAN_COLORS.get(mname, "black"), linewidth=2)
-        ax.set_xlabel(r"DM (pc cm$^{{-3}}$)")
-        ax.set_ylabel("Metric Value")
-        ax.set_title(labels.get(mname, mname))
-        ax.grid(True, alpha=0.3)
-        ax.axvline(input_dm, color="gray", linestyle=":", linewidth=2, alpha=1,
-                   label=f"Input DM={format_dm(input_dm, 3)}")
-        max_idx = int(np.argmax(mvals))
-        ax.axvline(dm_values[max_idx], color="red", linestyle="--", alpha=1,
-                   label=f"Max at DM={format_dm(dm_values[max_idx], 3)}")
-        ax.legend()
-
-    plt.tight_layout()
-    if save_path:
-        savefig_rasterized(save_path, dpi=150, bbox_inches="tight")
-        print(f"DM scan plot saved to: {save_path}")
-    else:
-        plt.show()
-
-
-# ---------------------------------------------------------------------------
-# Component DM diagnostics
-# ---------------------------------------------------------------------------
-
-def plot_component_dm_diagnostics(
-    all_results: List[Dict],
-    component_ids: Optional[np.ndarray] = None,
-    save_path: Optional[str] = None,
-) -> None:
-    """Best-DM per component for each method with asymmetric error bars."""
-    n_components = len(all_results)
-    if n_components < 2:
-        print("Component DM diagnostics skipped (need ≥ 2 components).")
-        return
-
-    if component_ids is None:
-        component_ids = np.arange(1, n_components + 1, dtype=int)
-    else:
-        component_ids = np.asarray(component_ids, dtype=int)
-
-    preferred = ["structure", "snr", "pa_slope", "pa_slope_shrine", "l_i_mean"]
-    first = list(all_results[0].keys())
-    common = [m for m in first if all(m in c for c in all_results)]
-    if not common:
-        print("Component DM diagnostics skipped (no common methods).")
-        return
-
-    ordered = [m for m in preferred if m in common] + [m for m in common if m not in preferred]
-    comp_idx = np.arange(1, n_components + 1)
-    dm_mat = np.zeros((len(ordered), n_components))
-    dm_minus = np.zeros_like(dm_mat)
-    dm_plus = np.zeros_like(dm_mat)
-
-    for i, mname in enumerate(ordered):
-        for j, comp in enumerate(all_results):
-            r = comp[mname]
-            dm_mat[i, j] = float(r["dm"])
-            dm_minus[i, j] = max(0.0, float(r.get("uncertainty_minus") or 0.0))
-            dm_plus[i, j] = max(0.0, float(r.get("uncertainty_plus") or 0.0))
-
-    draw_order = list(np.argsort(-(dm_minus + dm_plus).mean(axis=1)))
-    fig, ax = plt.subplots(1, 1, figsize=(3.4, 2.8))
-    for rank, i in enumerate(draw_order):
-        mname = ordered[i]
-        ax.errorbar(
-            comp_idx, dm_mat[i],
-            yerr=np.vstack((dm_minus[i], dm_plus[i])),
-            fmt="o-", linewidth=1.8, capsize=2.5, elinewidth=1.1,
-            label=_SCAN_LABELS.get(mname, mname),
-            color=_SCAN_COLORS.get(mname),
-            zorder=2 + rank,
-        )
-
-    ax.set_ylabel("Best DM (pc cm⁻³)", fontsize=8)
-    ax.grid(True, alpha=0.3)
-    ax.tick_params(axis="both", labelsize=7)
-    ax.legend(fontsize=8)
-    ax.set_xticks(comp_idx)
-
-    component_names = []
-    for cid in component_ids:
-        cid_int = int(cid)
-        if cid_int == 1:
-            component_names.append("Main component")
-        elif cid_int == 2:
-            component_names.append("Precursor")
-        else:
-            component_names.append(f"Precursor {cid_int - 1}")
-    ax.set_xticklabels(component_names, fontsize=7)
-    x_pad = 0.2
-    ax.set_xlim(1 - x_pad, n_components + x_pad)
-
-    plt.tight_layout(rect=[0.0, 0.0, 1.0, 0.93])
-    if save_path:
-        savefig_rasterized(save_path, dpi=600, bbox_inches="tight")
-        print(f"Component DM diagnostics saved to: {save_path}")
-    else:
-        plt.show()
-
-
-# ---------------------------------------------------------------------------
-# Component dn_e diagnostics
-# ---------------------------------------------------------------------------
-
-def plot_component_dne_diagnostics(
-    dne_diag: Dict,
-    save_path: Optional[str] = None,
-) -> None:
-    """dn_e between component pairs for all methods."""
-    pair_labels = dne_diag.get("pair_labels", [])
-    methods = dne_diag.get("methods", {})
-    if not pair_labels or not methods:
-        print("dn_e diagnostics plot skipped (no data).")
-        return
-
-    preferred = ["structure", "snr", "pa_slope", "pa_slope_shrine", "l_i_mean"]
-    method_names = [m for m in preferred if m in methods] + [m for m in methods if m not in preferred]
-    n_methods = len(method_names)
-
-    x = np.arange(len(pair_labels), dtype=float)
-    fig, ax = plt.subplots(1, 1, figsize=(3.4, 2.8))
-
-    offset_span = 0.18
-    offsets = np.array([0.0]) if n_methods == 1 else np.linspace(-offset_span, offset_span, n_methods)
-    all_abs = []
-
-    for i, mname in enumerate(method_names):
-        vals = methods[mname]
-        y = np.asarray(vals.get("dn_e", np.zeros_like(x)), dtype=float)
-        y_low = np.asarray(vals.get("dn_e_low", y), dtype=float)
-        y_high = np.asarray(vals.get("dn_e_high", y), dtype=float)
-        yerr = np.vstack((np.abs(y - y_low), np.abs(y_high - y)))
-
-        all_abs.extend(np.abs(y[np.isfinite(y)]).tolist())
-        all_abs.extend(np.abs(y_low[np.isfinite(y_low)]).tolist())
-        all_abs.extend(np.abs(y_high[np.isfinite(y_high)]).tolist())
-
-        ax.errorbar(
-            x + offsets[i], y, yerr=yerr, fmt="o", capsize=3, elinewidth=1.3, markersize=5,
-            label=_SCAN_LABELS.get(mname, mname), color=_SCAN_COLORS.get(mname),
-        )
-
-    ax.axhline(0.0, color="0.35", linewidth=1.0, linestyle="--", alpha=0.8)
-    ax.set_xticks(x)
-    ax.set_xticklabels([])
-    ax.set_ylabel(r"$\Delta n_e$ (cm$^{-3}$)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=8)
-
-    finite_abs = np.asarray([v for v in all_abs if np.isfinite(v) and v > 0])
-    if finite_abs.size > 1 and float(np.max(finite_abs) / np.min(finite_abs)) > 100.0:
-        ax.set_yscale("symlog", linthresh=max(1.0, float(np.min(finite_abs))))
-
-    plt.tight_layout()
-    if save_path:
-        savefig_rasterized(save_path, dpi=600, bbox_inches="tight")
-        print(f"Component dn_e diagnostics saved to: {save_path}")
-    else:
-        plt.show()
