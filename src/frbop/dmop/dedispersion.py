@@ -97,7 +97,8 @@ class DedispersionMixin:
 		output_size : int, optional
 			Desired output time axis size. If None, calculated based on mode.
 		mode : str, optional
-			Dedispersion mode: 'expand' (fill edges with noise, default) or 'crop' (trim to common valid region)
+			Dedispersion mode: 'expand' (fill edges with noise, default),
+			'expand_zero' (expand with zero fill), or 'crop' (trim to common valid region)
 			
 		Returns:
 		--------
@@ -108,6 +109,9 @@ class DedispersionMixin:
 			reference_freq = self.reference_freq if self.reference_freq is not None else np.max(self.freq_mhz)
 		
 		delay_samples = self._get_delay_samples(dm, reference_freq=reference_freq)
+		valid_modes = {'expand', 'expand_zero', 'crop'}
+		if mode not in valid_modes:
+			raise ValueError(f"Unknown dedispersion mode '{mode}'. Expected one of {sorted(valid_modes)}")
 		
 		if mode == 'crop':
 			# Crop mode: return only the common valid region
@@ -119,13 +123,12 @@ class DedispersionMixin:
 
 			# Generate noise fill using full dynamic spectrum noise statistics
 			noise_ref = self._full_noise_reference_data(data)
+			# Always use per-channel mean/std from the early (off-pulse) samples
 			n_edge_full = max(1, int(0.05 * noise_ref.shape[1]))
-			noise_fill = np.empty((data.shape[0], n_time_out), dtype=data.dtype)
-			for i in range(data.shape[0]):
-				# Use noise from full dynamic spectrum for this frequency channel
-				noise_std = np.std(noise_ref[i, :n_edge_full])
-				noise_mean = np.mean(noise_ref[i, :n_edge_full])
-				noise_fill[i] = self.rng.normal(noise_mean, noise_std, n_time_out)
+			# Estimate per-channel mean/std from data edges and draw vectorised over time
+			noise_std = np.std(noise_ref[:, :n_edge_full], axis=1)
+			noise_mean = np.mean(noise_ref[:, :n_edge_full], axis=1)
+			noise_fill = self.rng.normal(noise_mean[:, None], noise_std[:, None], size=(data.shape[0], n_time_out))
 
 			# Apply shifts and crop to common region
 			if _NUMBA_AVAILABLE:
@@ -138,7 +141,8 @@ class DedispersionMixin:
 						if 0 <= t_out < n_time_out:
 							dedispersed[i, t_out] = data[i, t]
 		else:
-			# Expand mode: extend time axis and fill with noise (default)
+			# Expand-like modes: extend time axis and fill with noise (expand)
+			# or zeros (expand_zero).
 			min_shift = int(np.min(delay_samples))
 			max_shift = int(np.max(delay_samples))
 			if output_size is None:
@@ -146,15 +150,15 @@ class DedispersionMixin:
 			else:
 				n_time_out = output_size
 
-			# Generate noise to fill expanded regions using full dynamic spectrum noise statistics
-			noise_ref = self._full_noise_reference_data(data)
-			n_edge_full = max(1, int(0.05 * noise_ref.shape[1]))
-			noise_fill = np.empty((data.shape[0], n_time_out), dtype=data.dtype)
-			for i in range(data.shape[0]):
-				# Use noise from full dynamic spectrum for this frequency channel
-				noise_std = np.std(noise_ref[i, :n_edge_full])
-				noise_mean = np.mean(noise_ref[i, :n_edge_full])
-				noise_fill[i] = self.rng.normal(noise_mean, noise_std, n_time_out)
+			if mode == 'expand_zero':
+				noise_fill = np.zeros((data.shape[0], n_time_out), dtype=float)
+			else:
+				# Use per-channel mean/std from the early (off-pulse) samples to generate noise
+				noise_ref = self._full_noise_reference_data(data)
+				n_edge_full = max(1, int(0.05 * noise_ref.shape[1]))
+				noise_std = np.std(noise_ref[:, :n_edge_full], axis=1)
+				noise_mean = np.mean(noise_ref[:, :n_edge_full], axis=1)
+				noise_fill = self.rng.normal(noise_mean[:, None], noise_std[:, None], size=(data.shape[0], n_time_out))
 
 			# Apply dedispersion by shifting each frequency channel
 			if _NUMBA_AVAILABLE:

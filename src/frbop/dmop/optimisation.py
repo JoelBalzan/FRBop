@@ -326,7 +326,7 @@ class OptimisationMixin:
 
 		for i, dm in enumerate(dm_values):
 			dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nanmean(dedispersed, axis=0)
+			i_data[i] = np.nansum(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_structure"
 		run_dir = self._run_shrine_method(
@@ -406,7 +406,7 @@ class OptimisationMixin:
 
 		for i, dm in enumerate(dm_values):
 			dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nanmean(dedispersed, axis=0)
+			i_data[i] = np.nansum(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_snr"
 		run_dir = self._run_shrine_method(

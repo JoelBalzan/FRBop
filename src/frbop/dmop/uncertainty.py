@@ -287,14 +287,14 @@ class UncertaintyMixin:
 		Build a per-DM reference time profile for SHRINE-style uncertainty.
 		"""
 		if data_i is not None:
-			return np.nanmean(data_i, axis=0)
+			return np.nansum(data_i, axis=0)
 		if data_q is not None and data_u is not None:
 			linear = np.sqrt(data_q**2 + data_u**2)
-			return np.nanmean(linear, axis=0)
+			return np.nansum(linear, axis=0)
 		if data_q is not None:
-			return np.nanmean(data_q, axis=0)
+			return np.nansum(data_q, axis=0)
 		if data_u is not None:
-			return np.nanmean(data_u, axis=0)
+			return np.nansum(data_u, axis=0)
 		raise ValueError("At least one of data_i/data_q/data_u must be provided")
 
 	def _li_uncertainty_reference_profile(self,

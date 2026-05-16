@@ -198,7 +198,7 @@ class ShrineMixin:
 		plt.close()
 
 		# I profile at best DM
-		time_series = np.mean(dedispersed_i, axis=0)
+		time_series = np.nansum(dedispersed_i, axis=0)
 		plt.figure(figsize=(8, 4))
 		plt.plot(time_series, color='k', linewidth=1.3)
 		plt.xlabel('Time index')

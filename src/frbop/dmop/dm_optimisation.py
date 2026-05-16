@@ -101,9 +101,9 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--dedisp-mode",
 		type=str,
-		choices=["expand", "crop"],
+		choices=["expand", "expand_zero", "crop"],
 		default="expand",
-		help="Dedispersion mode: 'expand' (fill edges with noise) or 'crop' (trim to common valid region)",
+		help="Dedispersion mode: 'expand' (fill edges with noise), 'expand_zero' (zero-fill new bins), or 'crop' (trim to common valid region)",
 	)
 	parser.add_argument(
 		"--fast",
@@ -460,7 +460,7 @@ def main():
 			start_clamped = min(max(start_idx, 0), stokes_i.shape[1] - 1)
 			end_exclusive = min(max(end_idx, start_clamped + 1), stokes_i.shape[1])
 			window_i = stokes_i[:, start_clamped:end_exclusive]
-			window_profile = np.mean(window_i, axis=0)
+			window_profile = np.nansum(window_i, axis=0)
 			peak_local = int(np.argmax(window_profile))
 			peak_global = start_clamped + peak_local
 			component_peak_times_ms[i] = float(time_ms[peak_global])

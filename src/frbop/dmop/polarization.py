@@ -43,8 +43,8 @@ class PolarizationMixin:
 		"""
 		PA slope metric where PA is SHRINE-smoothed before fitting.
 		"""
-		q_ts = np.mean(data_q, axis=0)
-		u_ts = np.mean(data_u, axis=0)
+		q_ts = np.nanmean(data_q, axis=0)
+		u_ts = np.nanmean(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
@@ -81,7 +81,7 @@ class PolarizationMixin:
 		weights = w_l
 
 		if data_i is not None:
-			i_ts = np.mean(data_i, axis=0)
+			i_ts = np.nansum(data_i, axis=0)
 			i_noise_std = float(self.full_i_noise_std)
 			i_noise_med = float(self.full_i_noise_median)
 			if i_noise_std > 0:
@@ -157,8 +157,8 @@ class PolarizationMixin:
 		return L_out, sigma_L, det
 
 	def _pa_series_deg(self, data_q: np.ndarray, data_u: np.ndarray, data_i: Optional[np.ndarray] = None) -> np.ndarray:
-		q_ts = np.mean(data_q, axis=0)
-		u_ts = np.mean(data_u, axis=0)
+		q_ts = np.nanmean(data_q, axis=0)
+		u_ts = np.nanmean(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 		pa = 0.5 * np.arctan2(u_ts, q_ts)
@@ -169,7 +169,7 @@ class PolarizationMixin:
 		
 		# Apply Stokes I significance cutoff; optionally also restrict to >= peak
 		if data_i is not None:
-			i_ts = np.mean(data_i, axis=0)
+			i_ts = np.nansum(data_i, axis=0)
 			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
 			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
 			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
@@ -215,8 +215,8 @@ class PolarizationMixin:
 		time_axis : np.ndarray
 			Time axis for the data
 		"""
-		q_ts = np.mean(data_q, axis=0)
-		u_ts = np.mean(data_u, axis=0)
+		q_ts = np.nanmean(data_q, axis=0)
+		u_ts = np.nanmean(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 		
@@ -230,7 +230,7 @@ class PolarizationMixin:
 		
 		# Apply Stokes I significance cutoff; optionally also restrict to >= peak
 		if data_i is not None:
-			i_ts = np.mean(data_i, axis=0)
+			i_ts = np.nansum(data_i, axis=0)
 			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
 			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
 			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
@@ -283,8 +283,8 @@ class PolarizationMixin:
 		Get SHRINE-smoothed PA profile and best fit line for plotting.
 		The smoothing is applied to the PA time series itself, then fitting is done on the SHRINE-smoothed PA.
 		"""
-		q_ts = np.mean(data_q, axis=0)
-		u_ts = np.mean(data_u, axis=0)
+		q_ts = np.nanmean(data_q, axis=0)
+		u_ts = np.nanmean(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
@@ -295,7 +295,7 @@ class PolarizationMixin:
 
 		mask = L_debias >= (2.0 * sigma_L)
 		if data_i is not None:
-			i_ts = np.mean(data_i, axis=0)
+			i_ts = np.nansum(data_i, axis=0)
 			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
 			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
 			threshold_i = med_i + self.li_i_sigma_cut * sigma_i

@@ -96,7 +96,7 @@ class ComparisonMixin:
 				print(f"\r    Progress: {i}/{len(dm_values)}", end='', flush=True)
 
 			dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nanmean(dedisp_i, axis=0)
+			i_data[i] = np.nansum(dedisp_i, axis=0)
 
 			if run_qu_methods:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)

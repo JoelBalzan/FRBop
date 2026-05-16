@@ -124,18 +124,16 @@ class PlottingMixin:
 		axes[0, 0].tick_params(axis='both', labelsize=fs_tick)
 
 		# Original time series
-		time_series_orig = np.mean(original_data, axis=0)
+		time_series_orig = np.nansum(original_data, axis=0)
 		axes[0, 1].plot(time_range, time_series_orig, 'k-', linewidth=1, label='I')
 		ax0r = None
 		if has_qu:
 			ax0r = axes[0, 1].twinx()
-			L_series = np.mean(np.sqrt(q_region**2 + u_region**2), axis=0)
-			if self.full_L_noise_median is not None:
-				L_baseline = self.full_L_noise_median
-			else:
-				n_edge = max(1, int(0.05 * len(L_series)))
-				L_baseline = np.median(L_series[:n_edge])
-			L_plot = L_series - L_baseline
+			q_time = np.nansum(q_region, axis=0)
+			u_time = np.nansum(u_region, axis=0)
+			L_series = np.sqrt(q_time**2 + u_time**2)
+			# Plot the linear polarization magnitude directly; it is intrinsically non-negative.
+			L_plot = L_series
 			axes[0, 1].plot(time_range, L_plot, 'r', linewidth=1, label='L')
 			pa_deg = self._pa_series_deg(q_region, u_region, original_data)
 			pa_smooth, fit_line, _ = self._get_pa_smoothed_and_fit(q_region, u_region, original_data, time_range)
@@ -226,7 +224,7 @@ class PlottingMixin:
 		for idx, (method_name, result) in enumerate(results.items(), start=1):
 			# Create time axis for dedispersed data (may be longer due to expansion)
 			n_time_dedisp = result['dedispersed'].shape[1]
-			dt = float(np.median(np.diff(time_range))) if len(time_range) > 1 else 1.0
+			dt = float(np.nanmedian(np.diff(time_range))) if len(time_range) > 1 else 1.0
 			delay_samples = self._get_delay_samples(result['dm'])
 			if self.dedisp_mode == 'crop':
 				start_shift = int(np.max(delay_samples))
@@ -234,9 +232,20 @@ class PlottingMixin:
 				start_shift = int(np.min(delay_samples))
 			time_range_dedisp = time_range[0] + start_shift * dt + np.arange(n_time_dedisp) * dt
 
-			vmin, vmax = self._robust_vmin_vmax(result['dedispersed'])
+			# In expand_zero mode, trim all-zero padding from the display only.
+			display_slice = slice(None)
+			if self.dedisp_mode == 'expand_zero':
+				nonzero_cols = np.any(np.isfinite(result['dedispersed']) & (result['dedispersed'] != 0.0), axis=0)
+				if np.any(nonzero_cols):
+					first_valid = int(np.argmax(nonzero_cols))
+					last_valid = int(len(nonzero_cols) - np.argmax(nonzero_cols[::-1]))
+					display_slice = slice(first_valid, last_valid)
+					time_range_dedisp = time_range_dedisp[display_slice]
+
+			plot_dedispersed = result['dedispersed'][:, display_slice]
+			vmin, vmax = self._robust_vmin_vmax(plot_dedispersed)
 			im = axes[idx, 0].imshow(
-				result['dedispersed'],
+				plot_dedispersed,
 				aspect='auto',
 				extent=[time_range_dedisp[0], time_range_dedisp[-1], self.freq_mhz[0], self.freq_mhz[-1]],
 				cmap='viridis',
@@ -274,7 +283,7 @@ class PlottingMixin:
 				bbox=dict(facecolor='black', edgecolor='none', alpha=0.35, pad=2.0),
 			)
 
-			time_series = np.mean(result['dedispersed'], axis=0)
+			time_series = np.nansum(result['dedispersed'], axis=0)[display_slice]
 			axes[idx, 1].plot(time_range_dedisp, time_series, 'k-', linewidth=1, label='I')
 			axr = None
 
@@ -285,13 +294,11 @@ class PlottingMixin:
 				if dedisp_q is None or dedisp_u is None:
 					dedisp_q = self.dedisperse(q_region, result['dm'], output_size=n_time_dedisp, mode=self.dedisp_mode)
 					dedisp_u = self.dedisperse(u_region, result['dm'], output_size=n_time_dedisp, mode=self.dedisp_mode)
-				L_series = np.mean(np.sqrt(dedisp_q**2 + dedisp_u**2), axis=0)
-				if self.full_L_noise_median is not None:
-					L_baseline = self.full_L_noise_median
-				else:
-					n_edge = max(1, int(0.05 * len(L_series)))
-					L_baseline = np.median(L_series[:n_edge])
-				L_plot = L_series - L_baseline
+				q_time = np.nansum(dedisp_q, axis=0)[display_slice]
+				u_time = np.nansum(dedisp_u, axis=0)[display_slice]
+				L_series = np.sqrt(q_time**2 + u_time**2)
+				# Plot the linear polarization magnitude directly; it is intrinsically non-negative.
+				L_plot = L_series
 				axes[idx, 1].plot(time_range_dedisp, L_plot, 'r', linewidth=1, label='L')
 
 				if (
@@ -300,18 +307,18 @@ class PlottingMixin:
 					and result.get('pa_plot_smooth') is not None
 					and result.get('pa_plot_fit') is not None
 				):
-					pa_deg = np.asarray(result['pa_plot_series'])
-					pa_smooth_plot = np.asarray(result['pa_plot_smooth'])
-					fit_plot = np.asarray(result['pa_plot_fit'])
+					pa_deg = np.asarray(result['pa_plot_series'])[display_slice]
+					pa_smooth_plot = np.asarray(result['pa_plot_smooth'])[display_slice]
+					fit_plot = np.asarray(result['pa_plot_fit'])[display_slice]
 				else:
-					pa_deg = self._pa_series_deg(dedisp_q, dedisp_u, result['dedispersed'])
+					pa_deg = self._pa_series_deg(dedisp_q[:, display_slice], dedisp_u[:, display_slice], plot_dedispersed)
 					if method_name == 'pa_slope_shrine':
 						result_kc = result.get('kc', None)
 						pa_smooth_plot, fit_plot, _ = self._get_pa_shrine_smoothed_and_fit(
-							dedisp_q, dedisp_u, result['dedispersed'], time_range_dedisp, force_kc=result_kc
+							dedisp_q[:, display_slice], dedisp_u[:, display_slice], plot_dedispersed, time_range_dedisp, force_kc=result_kc
 						)
 					else:
-						pa_smooth_plot, fit_plot, _ = self._get_pa_smoothed_and_fit(dedisp_q, dedisp_u, result['dedispersed'], time_range_dedisp)
+						pa_smooth_plot, fit_plot, _ = self._get_pa_smoothed_and_fit(dedisp_q[:, display_slice], dedisp_u[:, display_slice], plot_dedispersed, time_range_dedisp)
 
 				axr.plot(time_range_dedisp, pa_deg, color='silver', linewidth=1, alpha=0.9, label='PA')
 				if method_name == 'pa_slope_shrine':
@@ -338,7 +345,7 @@ class PlottingMixin:
 					show_time_legend = False
 
 			axes[idx, 1].set_title(f"Metric = {result['metric']:.6f}")
-			axes[idx, 1].set_ylabel('Flux')
+			axes[idx, 1].set_ylabel(rf'S')
 			axes[idx, 1].set_xlabel('Time (ms)')
 			axes[idx, 1].grid(True, alpha=0.3)
 			axes[idx, 1].title.set_fontsize(fs_title)
@@ -347,6 +354,7 @@ class PlottingMixin:
 			axes[idx, 1].xaxis.labelpad = fs_labelpad
 			axes[idx, 1].yaxis.labelpad = fs_labelpad
 			axes[idx, 1].tick_params(axis='both', labelsize=fs_tick)
+			axes[idx, 1].set_xticklabels([])
 
 			# Right column: per-method DM scan curve
 			scan_ax = axes[idx, 2]
@@ -466,14 +474,14 @@ class PlottingMixin:
 		i_data = np.zeros((len(dm_values), output_size))
 		
 		print(f"Scanning {len(dm_values)} DM values...")
-		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
+		dt = float(np.nanmedian(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 		time_axis = np.arange(output_size) * dt
 		for i, dm in enumerate(dm_values):
 			if i % 20 == 0:
 				print(f"\r  Progress: {i}/{len(dm_values)}", end='', flush=True)
 			
 			dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nanmean(dedispersed, axis=0)
+			i_data[i] = np.nansum(dedispersed, axis=0)
 			if pa_slope_values is not None:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
@@ -571,7 +579,10 @@ class PlottingMixin:
 							linestyle=':', alpha=1, linewidth=2, label=f'Input DM={self._format_dm(self.input_dm, 3)}')
 			
 			# Mark maximum
-			max_idx = np.argmax(metric_values)
+			if np.any(np.isfinite(metric_values)):
+				max_idx = int(np.nanargmax(metric_values))
+			else:
+				max_idx = 0
 			axes[idx].axvline(dm_values[max_idx], color='red', 
 							linestyle='--', alpha=1, label=f'Max at DM={self._format_dm(dm_values[max_idx], 3)}')
 			axes[idx].legend()

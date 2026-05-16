@@ -27,7 +27,7 @@ class PeaksMixin:
 			List of (start_idx, end_idx) for each peak region
 		"""
 		# Collapse to time series
-		time_series = np.mean(self.stokes_i, axis=0)
+		time_series = np.nansum(self.stokes_i, axis=0)
 		
 		# Smooth to find peaks
 		smoothed = gaussian_filter1d(time_series, sigma=4)
@@ -80,7 +80,7 @@ class PeaksMixin:
 
 	def select_peaks_manual(self) -> List[Tuple[int, int]]:
 		"""Manually select peak bounds by clicking on the pulse profile."""
-		time_series = np.nanmean(self.stokes_i, axis=0)
+		time_series = np.nansum(self.stokes_i, axis=0)
 		return shared_select_peaks_manual(
 			self.time_ms,
 			time_series,

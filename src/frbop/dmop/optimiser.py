@@ -48,7 +48,13 @@ class DMOptimiser(
                  nonshrine_kc: Optional[int] = None,
                  li_i_sigma_cut: float = 2.0,
                  debias_linear: bool = False,
-                 random_seed: Optional[int] = None):
+                 random_seed: Optional[int] = None,
+                 # Optional radiometer noise parameters (if provided, use radiometer eqn noise)
+                 sefd: Optional[float] = None,
+                 f_res: Optional[float] = None,
+                 t_res: Optional[float] = None,
+                 n_pol: int = 2,
+                 stokes_scale: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)):
         """
         Initialize the DM optimiser.
         
@@ -69,6 +75,9 @@ class DMOptimiser(
         self.n_freq, self.n_time = stokes_i.shape
         self.reference_freq = reference_freq if reference_freq is not None else np.max(freq_mhz)
         self.input_dm = float(input_dm)
+        valid_dedisp_modes = {'expand', 'expand_zero', 'crop'}
+        if dedisp_mode not in valid_dedisp_modes:
+            raise ValueError(f"dedisp_mode must be one of {sorted(valid_dedisp_modes)}, got {dedisp_mode!r}")
         self.dedisp_mode = dedisp_mode
         self.pa_fit_degree = int(pa_fit_degree)
         self.pa_weight_strength = float(pa_weight_strength)
@@ -93,14 +102,22 @@ class DMOptimiser(
         self.random_seed = random_seed
         self.rng = np.random.default_rng(random_seed)
 
-        self.full_i_time_series = np.mean(self.stokes_i, axis=0)
+        # Radiometer/noise configuration (optional)
+        self.sefd = None if sefd is None else float(sefd)
+        self.f_res = None if f_res is None else np.asarray(f_res, dtype=float)
+        self.t_res = None if t_res is None else float(t_res)
+        self.n_pol = int(n_pol)
+        self.stokes_scale = tuple(float(x) for x in stokes_scale)
+
+        self.full_i_time_series = np.nansum(self.stokes_i, axis=0)
         self.full_i_noise_median, self.full_i_noise_std = self._noise_stats_from_series(self.full_i_time_series)
         if self.stokes_q is not None and self.stokes_u is not None:
-            full_L = np.sqrt(self.stokes_q**2 + self.stokes_u**2)
-            self.full_L_time = np.mean(full_L, axis=0)
+            full_q_time = np.nansum(self.stokes_q, axis=0)
+            full_u_time = np.nansum(self.stokes_u, axis=0)
+            self.full_L_time = np.sqrt(full_q_time**2 + full_u_time**2)
             self.full_L_noise_median, self.full_L_noise_std = self._noise_stats_from_series(self.full_L_time)
-            self.full_q_time_series = np.mean(self.stokes_q, axis=0)
-            self.full_u_time_series = np.mean(self.stokes_u, axis=0)
+            self.full_q_time_series = np.nanmean(self.stokes_q, axis=0)
+            self.full_u_time_series = np.nanmean(self.stokes_u, axis=0)
             _, self.full_q_time_noise_std = self._noise_stats_from_series(self.full_q_time_series)
             _, self.full_u_time_noise_std = self._noise_stats_from_series(self.full_u_time_series)
             n_edge_full = max(1, int(0.05 * self.stokes_q.shape[1]))
