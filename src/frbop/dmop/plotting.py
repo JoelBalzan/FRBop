@@ -1,6 +1,6 @@
 """Plotting and DM-space scanning utilities."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +11,11 @@ from frbop.utils.plotting import savefig_rasterized, set_pub_style
 class PlottingMixin:
 	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
 					   peak_region: Optional[Tuple[int, int]] = None,
-					   save_path: Optional[str] = None):
+					   save_path: Optional[str] = None,
+					   show_summary_errors: bool = True,
+					   show_scan_uncertainty: bool = True,
+					   show_overlay_uncertainty: bool = True,
+					   disabled_error_methods: Optional[Set[str]] = None):
 		"""
 		Create visualization comparing all methods.
 		
@@ -171,25 +175,36 @@ class PlottingMixin:
 			y_pos = np.arange(len(method_names), dtype=float)
 			y_labels = [scan_labels.get(name, name) for name in method_names]
 
+			disabled = disabled_error_methods or set()
 			for j, method_name in enumerate(method_names):
 				result = results[method_name]
 				dm_best = float(result['dm'])
-				minus = result.get('uncertainty_minus')
-				plus = result.get('uncertainty_plus')
-				xerr = np.array([
-					[0.0 if minus is None else float(minus)],
-					[0.0 if plus is None else float(plus)],
-				])
-				all_scan_ax.errorbar(
-					x=[dm_best],
-					y=[y_pos[j]],
-					xerr=xerr,
-					fmt='o',
-					markersize=5,
-					capsize=3,
-					elinewidth=1.8,
-					color=scan_colors.get(method_name, 'black'),
-				)
+				show_summary_for_method = show_summary_errors and (method_name not in disabled)
+				if show_summary_for_method:
+					minus = result.get('uncertainty_minus')
+					plus = result.get('uncertainty_plus')
+					xerr = np.array([
+						[0.0 if minus is None else float(minus)],
+						[0.0 if plus is None else float(plus)],
+					])
+					all_scan_ax.errorbar(
+						x=[dm_best],
+						y=[y_pos[j]],
+						xerr=xerr,
+						fmt='o',
+						markersize=5,
+						capsize=3,
+						elinewidth=1.8,
+						color=scan_colors.get(method_name, 'black'),
+					)
+				else:
+					all_scan_ax.plot(
+						dm_best,
+						y_pos[j],
+						'o',
+						markersize=5,
+						color=scan_colors.get(method_name, 'black'),
+					)
 
 			all_scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.5, alpha=0.9)
 			all_scan_ax.set_xlim(dm_range[0], dm_range[1])
@@ -262,19 +277,21 @@ class PlottingMixin:
 			axes[idx, 0].xaxis.labelpad = fs_labelpad
 			axes[idx, 0].yaxis.labelpad = fs_labelpad
 			axes[idx, 0].tick_params(axis='both', labelsize=fs_tick)
+			show_overlay_for_method = show_overlay_uncertainty and (method_name not in disabled)
+			if show_overlay_for_method:
+				dm_text = self._format_uncertainty(
+					result['dm'],
+					result.get('uncertainty_minus'),
+					result.get('uncertainty_plus'),
+					precision=3,
+				)
+			else:
+				dm_text = self._format_dm(result['dm'], 3)
+
 			axes[idx, 0].text(
 				0.98,
 				0.98,
-				(
-					"DM="
-					+ self._format_uncertainty(
-						result['dm'],
-						result.get('uncertainty_minus'),
-						result.get('uncertainty_plus'),
-						precision=3,
-					)
-					+ rf" pc cm$^{{-3}}$"
-				),
+				rf"DM={dm_text} pc cm$^{{-3}}$",
 				transform=axes[idx, 0].transAxes,
 				ha='right',
 				va='top',
@@ -354,27 +371,29 @@ class PlottingMixin:
 			axes[idx, 1].xaxis.labelpad = fs_labelpad
 			axes[idx, 1].yaxis.labelpad = fs_labelpad
 			axes[idx, 1].tick_params(axis='both', labelsize=fs_tick)
-			axes[idx, 1].set_xticklabels([])
+			axes[idx, 1].set_yticklabels([])
 
 			# Right column: per-method DM scan curve
 			scan_ax = axes[idx, 2]
 			dm_vals = result.get('dm_values')
 			metric_vals = result.get('metric_values')
 			if dm_vals is not None and metric_vals is not None:
-				low_dm = result.get('uncertainty_low_dm')
-				high_dm = result.get('uncertainty_high_dm')
-				dm_left = float(dm_range[0])
-				dm_right = float(dm_range[1])
-				shade_low = dm_left if low_dm is None else float(low_dm)
-				shade_high = dm_right if high_dm is None else float(high_dm)
-				if shade_low <= shade_high:
-					scan_ax.axvspan(
-						shade_low,
-						shade_high,
-						color='tab:orange',
-						alpha=0.18,
-						label='DM uncertainty' if show_scan_legend else None,
-					)
+				show_scan_for_method = show_scan_uncertainty and (method_name not in disabled)
+				if show_scan_for_method:
+					low_dm = result.get('uncertainty_low_dm')
+					high_dm = result.get('uncertainty_high_dm')
+					dm_left = float(dm_range[0])
+					dm_right = float(dm_range[1])
+					shade_low = dm_left if low_dm is None else float(low_dm)
+					shade_high = dm_right if high_dm is None else float(high_dm)
+					if shade_low <= shade_high:
+						scan_ax.axvspan(
+							shade_low,
+							shade_high,
+							color='tab:orange',
+							alpha=0.18,
+							label='DM uncertainty' if show_scan_legend else None,
+						)
 				scan_ax.plot(
 					dm_vals,
 					metric_vals,

@@ -179,6 +179,13 @@ def parse_args() -> argparse.Namespace:
 		help="Methods to exclude from run/plots/analysis",
 	)
 	parser.add_argument(
+		"--disable-method-errors",
+		nargs="+",
+		choices=["structure", "snr", "pa", "pa-shrine", "li"],
+		default=None,
+		help="Disable error/uncertainty overlays for specified methods in comparison plots (use aliases: structure,snr,pa,pa-shrine,li)",
+	)
+	parser.add_argument(
 		"--label",
 		type=str,
 		default="frb",
@@ -196,6 +203,24 @@ def parse_args() -> argparse.Namespace:
 		default="png",
 		help="Figure extension for saved plots (e.g. png, pdf, svg). Default: png",
 	)
+	parser.add_argument(
+		"--error-plots",
+		nargs="+",
+		choices=[
+			"comparison-summary",
+			"comparison-scan",
+			"comparison-overlay",
+			"component-dm",
+			"component-dne",
+			"none",
+		],
+		default=None,
+		help=(
+			"Select which plots show uncertainty/errors. "
+			"Choices: comparison-summary, comparison-scan, comparison-overlay, "
+			"component-dm, component-dne, none. Default: all enabled."
+		),
+	)
 	return parser.parse_args()
 
 
@@ -210,6 +235,28 @@ def main():
 	print("="*70)
 
 	args = parse_args()
+
+	all_error_plot_targets = {
+		"comparison-summary",
+		"comparison-scan",
+		"comparison-overlay",
+		"component-dm",
+		"component-dne",
+	}
+	if args.error_plots is None:
+		error_plot_targets = set(all_error_plot_targets)
+	else:
+		requested_error_targets = set(args.error_plots)
+		if "none" in requested_error_targets:
+			error_plot_targets = set()
+		else:
+			error_plot_targets = requested_error_targets
+
+	show_comparison_summary_errors = "comparison-summary" in error_plot_targets
+	show_comparison_scan_uncertainty = "comparison-scan" in error_plot_targets
+	show_comparison_overlay_uncertainty = "comparison-overlay" in error_plot_targets
+	show_component_dm_errors = "component-dm" in error_plot_targets
+	show_component_dne_errors = "component-dne" in error_plot_targets
 	
 	# Load data
 	print("\nLoading data...")
@@ -242,6 +289,10 @@ def main():
 		print(f"  - Excluded methods (CLI): {', '.join(args.exclude_methods)}")
 	if args.seed is not None:
 		print(f"  - Random seed: {args.seed}")
+	if len(error_plot_targets) == 0:
+		print("  - Error/uncertainty overlays on plots: none")
+	else:
+		print(f"  - Error/uncertainty overlays on plots: {', '.join(sorted(error_plot_targets))}")
 	
 	# Support a combined Stokes cube input if provided
 	if args.stokes_cube:
@@ -305,6 +356,12 @@ def main():
 	if args.exclude_methods is not None:
 		exclude_keys = {method_alias_to_key[alias] for alias in args.exclude_methods}
 		selected_method_keys = [m for m in selected_method_keys if m not in exclude_keys]
+
+	# Map disable-method-errors aliases (if provided) to internal method keys
+	if args.disable_method_errors is None:
+		disabled_method_keys = set()
+	else:
+		disabled_method_keys = {method_alias_to_key[alias] for alias in args.disable_method_errors}
 
 	if (stokes_q is None or stokes_u is None):
 		qu_methods = {'pa_slope', 'pa_slope_shrine', 'l_i_mean'}
@@ -450,8 +507,16 @@ def main():
 		
 		# Plot comparison
 		print(f"\nGenerating comparison plot for {label} {i+1}...")
-		optimiser.plot_comparison(results, dm_range, peak_region, 
-								 save_path=f'dm_comparison_{label.lower()}{i+1}.{fig_ext}')
+		optimiser.plot_comparison(
+			results,
+			dm_range,
+			peak_region,
+			save_path=f'dm_comparison_{label.lower()}{i+1}.{fig_ext}',
+			show_summary_errors=show_comparison_summary_errors,
+			show_scan_uncertainty=show_comparison_scan_uncertainty,
+			show_overlay_uncertainty=show_comparison_overlay_uncertainty,
+			disabled_error_methods=disabled_method_keys,
+		)
 
 	if len(all_results) > 1:
 		# Compute component peak times for physical time ordering and L~c*Delta t.
@@ -477,6 +542,7 @@ def main():
 			component_ids=sorted_component_ids,
 			label=label.lower(),
 			save_path=f'dm_component_dm_diagnostics.{fig_ext}',
+			show_errors=show_component_dm_errors,
 		)
 
 		dne_diag = optimiser.calculate_dn_e_between_components(
@@ -533,6 +599,7 @@ def main():
 			dne_diag,
 			label=label.lower(),
 			save_path=dne_plot_path,
+			show_errors=show_component_dne_errors,
 		)
 	
 	print("\n" + "="*70)

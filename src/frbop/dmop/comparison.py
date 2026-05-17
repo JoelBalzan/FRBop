@@ -215,15 +215,7 @@ class ComparisonMixin:
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
 			metric_pa = float(pa_values[max_idx_pa])
-			if self.use_nonshrine_shrine_like_uncertainty and pa_uncertainty_profiles is not None:
-				pa_uncertainty = self._uncertainty_from_shrine_relative(
-					dm_values,
-					pa_values,
-					pa_uncertainty_profiles,
-					kc=self._nonshrine_resolved_kc,
-				)
-			else:
-				pa_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_values, max_idx_pa)
+			pa_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_values)
 			run_prefix_pa = f"{label}_{segment_tag}_pa_slope"
 			run_dir_pa = self._save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pa,
@@ -271,15 +263,7 @@ class ComparisonMixin:
 			)
 			best_pa_shrine_deg = self._pa_series_deg(best_sm_q_pas, best_sm_u_pas, best_sm_i_pas)
 			metric_pas = float(pa_shrine_values[max_idx_pas])
-			if self.use_nonshrine_shrine_like_uncertainty and pa_uncertainty_profiles is not None:
-				pa_shrine_uncertainty = self._uncertainty_from_shrine_relative(
-					dm_values,
-					pa_shrine_values,
-					pa_uncertainty_profiles,
-					kc=self._nonshrine_resolved_kc,
-				)
-			else:
-				pa_shrine_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_shrine_values, max_idx_pas)
+			pa_shrine_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_shrine_values)
 			run_prefix_pas = f"{label}_{segment_tag}_pa_slope_shrine"
 			run_dir_pas = self._save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pas,
@@ -317,29 +301,7 @@ class ComparisonMixin:
 			optimal_dm_li_mean = float(dm_values[max_idx_li_mean])
 			dedispersed_li_mean = self.dedisperse(data, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode)
 			metric_li_mean = float(li_mean_values[max_idx_li_mean])
-			if self.use_nonshrine_shrine_like_uncertainty and li_uncertainty_profiles is not None:
-				li_mean_uncertainty = self._uncertainty_from_shrine_relative(
-					dm_values,
-					li_mean_values,
-					li_uncertainty_profiles,
-					kc=self._nonshrine_resolved_kc,
-				)
-				if (
-					li_mean_uncertainty.get('uncertainty_low_dm') is None
-					or li_mean_uncertainty.get('uncertainty_high_dm') is None
-				):
-					li_mean_uncertainty = self._uncertainty_from_local_quadratic(
-						dm_values, li_mean_values, max_idx_li_mean
-					)
-					if (
-						li_mean_uncertainty.get('uncertainty_low_dm') is None
-						or li_mean_uncertainty.get('uncertainty_high_dm') is None
-					):
-						li_mean_uncertainty = self._uncertainty_from_half_prominence(
-							dm_values, li_mean_values, max_idx_li_mean
-						)
-			else:
-				li_mean_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_mean_values, max_idx_li_mean)
+			li_mean_uncertainty = self._uncertainty_from_metric_shrine(dm_values, li_mean_values)
 			li_mean_uncertainty = self._clamp_uncertainty_to_dm_bounds(
 				optimal_dm_li_mean,
 				li_mean_uncertainty,

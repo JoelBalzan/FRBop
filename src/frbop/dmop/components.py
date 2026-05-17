@@ -12,7 +12,8 @@ class ComponentsMixin:
 							 all_results: List[Dict],
 							 component_ids: Optional[np.ndarray] = None,
 							 label: str = "segment",
-							 save_path: Optional[str] = None):
+							 save_path: Optional[str] = None,
+							 show_errors: bool = True):
 		"""
 		Plot DM diagnostics across multiple components.
 
@@ -79,16 +80,26 @@ class ComponentsMixin:
 			method_name = ordered_methods[i]
 			disp_name = method_display.get(method_name, method_name)
 			color = colors.get(method_name, None)
-			ax.errorbar(
-				component_idx,
-				dm_matrix[i],
-				yerr=np.vstack((dm_minus[i], dm_plus[i])),
-				fmt='o-',
-				label=disp_name,
-				color=color,
-				zorder=2 + draw_rank,
-                capsize=3,
-			)
+			if show_errors:
+				ax.errorbar(
+					component_idx,
+					dm_matrix[i],
+					yerr=np.vstack((dm_minus[i], dm_plus[i])),
+					fmt='o-',
+					label=disp_name,
+					color=color,
+					zorder=2 + draw_rank,
+					capsize=3,
+				)
+			else:
+				ax.plot(
+					component_idx,
+					dm_matrix[i],
+					'o-',
+					label=disp_name,
+					color=color,
+					zorder=2 + draw_rank,
+				)
 
 		ax.set_ylabel(rf'Best DM (pc cm$^{{-3}}$)')
 		ax.grid(True, alpha=0.3)
@@ -104,6 +115,21 @@ class ComponentsMixin:
 		#		fontsize=8,
 		#		frameon=False,
 		#	)
+
+		# Draw horizontal line at input DM if available
+		if hasattr(self, 'input_dm') and np.isfinite(getattr(self, 'input_dm', np.nan)):
+			try:
+				_input_dm = float(self.input_dm)
+				ax.axhline(
+					_input_dm,
+					color='gray',
+					linestyle=':',
+					linewidth=1.4,
+					alpha=0.9,
+					label=(f'Input DM={_input_dm}' if not hasattr(self, '_format_dm') else f'Input DM={self._format_dm(_input_dm, 3)}'),
+				)
+			except Exception:
+				pass
 
 		ax.set_xticks(component_idx)
 		component_names = []
@@ -273,6 +299,7 @@ class ComponentsMixin:
 		dne_diag: Dict,
 		label: str = "segment",
 		save_path: Optional[str] = None,
+		show_errors: bool = True,
 	):
 		"""
 		Plot dn_e diagnostics between component pairs for all methods.
@@ -338,15 +365,24 @@ class ComponentsMixin:
 			all_abs.extend(np.abs(y_low[np.isfinite(y_low)]).tolist())
 			all_abs.extend(np.abs(y_high[np.isfinite(y_high)]).tolist())
 
-			ax.errorbar(
-				x_plot,
-				y,
-				yerr=yerr,
-				fmt='o',
-				label=method_display.get(method_name, method_name),
-				color=colors.get(method_name, None),
-                capsize=3,
-			)
+			if show_errors:
+				ax.errorbar(
+					x_plot,
+					y,
+					yerr=yerr,
+					fmt='o',
+					label=method_display.get(method_name, method_name),
+					color=colors.get(method_name, None),
+					capsize=3,
+				)
+			else:
+				ax.plot(
+					x_plot,
+					y,
+					'o',
+					label=method_display.get(method_name, method_name),
+					color=colors.get(method_name, None),
+				)
 
 		ax.axhline(0.0, color='0.35', linestyle='--', alpha=0.8)
 		ax.set_xticks(x)
@@ -355,7 +391,7 @@ class ComponentsMixin:
 		ax.set_ylabel(r'$\Delta n_e (\text{cm}^{-3})$')
 		#ax.set_title(f'dn_e between components ({label})')
 		ax.grid(True, alpha=0.3)
-		ax.legend(loc='best')
+		#ax.legend(loc='best')
 
 		all_abs = np.asarray(all_abs, dtype=float)
 		finite_abs = all_abs[np.isfinite(all_abs) & (all_abs > 0)]

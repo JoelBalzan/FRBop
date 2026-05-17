@@ -57,15 +57,7 @@ class OptimisationMixin:
 			mode=self.dedisp_mode,
 		)
 		metric = float(pa_values[max_idx])
-		if self.use_nonshrine_shrine_like_uncertainty:
-			pa_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				pa_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-		else:
-			pa_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_values, max_idx)
+		pa_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_values)
 		run_prefix = f"{label}_{segment or 'segment1'}_pa_slope"
 		dedispersed_i_for_logs = (
 			dedispersed_display
@@ -154,15 +146,7 @@ class OptimisationMixin:
 			mode=self.dedisp_mode,
 		)
 		metric = float(pa_values[max_idx])
-		if self.use_nonshrine_shrine_like_uncertainty:
-			pa_shrine_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				pa_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-		else:
-			pa_shrine_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_values, max_idx)
+		pa_shrine_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_values)
 		run_prefix = f"{label}_{segment or 'segment1'}_pa_slope_shrine"
 		dedispersed_i_for_logs = (
 			dedispersed_display
@@ -237,25 +221,7 @@ class OptimisationMixin:
 		optimal_dm = float(dm_values[max_idx])
 		dedispersed_i = self.dedisperse(data_i, optimal_dm, mode=self.dedisp_mode)
 		metric = float(li_values[max_idx])
-		if self.use_nonshrine_shrine_like_uncertainty:
-			li_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				li_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-			if (
-				li_uncertainty.get('uncertainty_low_dm') is None
-				or li_uncertainty.get('uncertainty_high_dm') is None
-			):
-				li_uncertainty = self._uncertainty_from_local_quadratic(dm_values, li_values, max_idx)
-				if (
-					li_uncertainty.get('uncertainty_low_dm') is None
-					or li_uncertainty.get('uncertainty_high_dm') is None
-				):
-					li_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_values, max_idx)
-		else:
-			li_uncertainty = self._uncertainty_from_half_prominence(dm_values, li_values, max_idx)
+		li_uncertainty = self._uncertainty_from_metric_shrine(dm_values, li_values)
 		li_uncertainty = self._clamp_uncertainty_to_dm_bounds(
 			optimal_dm,
 			li_uncertainty,
