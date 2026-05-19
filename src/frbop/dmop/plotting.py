@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, pub_grid_figsize, colour_manager
 
 class PlottingMixin:
 	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
@@ -30,16 +30,20 @@ class PlottingMixin:
 		save_path : str, optional
 			Path to save figure. If None, displays instead.
 		"""
+		colour_manager.reset()
 		n_methods = len(results)
 		has_qu = self.stokes_q is not None and self.stokes_u is not None
-		base_width, base_height = pub_figsize(single_column=False, height_ratio=0.9, min_height=5.5)
-		fig_width = base_width
-		row_height = 2.7
-		fig_height = max(base_height, row_height * (n_methods + 1))
+
+		figsize = pub_grid_figsize(
+		    n_rows=n_methods + 1,
+		    single_column=False,
+		    row_height=2.7,
+		    width_scale=1.8,
+		)
 		fig, axes = plt.subplots(
 			n_methods + 1,
 			5,
-			figsize=(fig_width, fig_height),
+			figsize=figsize,
 			gridspec_kw={'width_ratios': [0.85, 0.11, 0.85, 0.32, 0.85]},
 		)
 		if n_methods == 0:
@@ -51,15 +55,7 @@ class PlottingMixin:
 		for spacer_ax in axes[:, 3]:
 			fig.delaxes(spacer_ax)
 		axes = np.stack((axes[:, 0], axes[:, 2], axes[:, 4]), axis=1)
-		original_highlight_bg = '#FFF7D6'
-		original_highlight_edge = '#C88A00'
-		scan_colors = {
-			'structure': 'tab:blue',
-			'snr': 'tab:red',
-			'pa_slope': 'tab:green',
-			'pa_slope_shrine': 'tab:cyan',
-			'l_i_mean': 'tab:purple',
-		}
+
 		scan_labels = {
 			'structure': 'Structure',
 			'snr': 'S/N',
@@ -137,9 +133,7 @@ class PlottingMixin:
 			q_time = np.nansum(q_region, axis=0)
 			u_time = np.nansum(u_region, axis=0)
 			L_series = np.sqrt(q_time**2 + u_time**2)
-			# Plot the linear polarization magnitude directly; it is intrinsically non-negative.
-			L_plot = L_series
-			axes[0, 1].plot(time_range, L_plot, 'r', linewidth=1, label='L')
+			axes[0, 1].plot(time_range, L_series, 'r', linewidth=1, label='L')
 			pa_deg = self._pa_series_deg(q_region, u_region, original_data)
 			pa_smooth, fit_line, _ = self._get_pa_smoothed_and_fit(q_region, u_region, original_data, time_range)
 			ax0r.plot(time_range, pa_deg, color='silver', linewidth=1, alpha=0.9)#, label='PA')
@@ -197,7 +191,7 @@ class PlottingMixin:
 						markersize=5,
 						capsize=3,
 						elinewidth=1.8,
-						color=scan_colors.get(method_name, 'black'),
+						color=colour_manager.color(method_name),
 					)
 				else:
 					all_scan_ax.plot(
@@ -205,7 +199,7 @@ class PlottingMixin:
 						y_pos[j],
 						'o',
 						markersize=5,
-						color=scan_colors.get(method_name, 'black'),
+						color=colour_manager.color(method_name),
 					)
 
 			all_scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.5, alpha=0.9)
@@ -316,9 +310,7 @@ class PlottingMixin:
 				q_time = np.nansum(dedisp_q, axis=0)[display_slice]
 				u_time = np.nansum(dedisp_u, axis=0)[display_slice]
 				L_series = np.sqrt(q_time**2 + u_time**2)
-				# Plot the linear polarization magnitude directly; it is intrinsically non-negative.
-				L_plot = L_series
-				axes[idx, 1].plot(time_range_dedisp, L_plot, 'r', linewidth=1, label='L')
+				axes[idx, 1].plot(time_range_dedisp, L_series, 'r', linewidth=1, label='L')
 
 				if (
 					method_name in ('pa_slope', 'pa_slope_shrine')
@@ -400,7 +392,7 @@ class PlottingMixin:
 					dm_vals,
 					metric_vals,
 					linewidth=2.0,
-					color=scan_colors.get(method_name, 'black'),
+					color=colour_manager.color(method_name),
 				)
 				scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.4,
 							alpha=0.9,

@@ -128,8 +128,8 @@ class MetricsMixin:
 							   data_i: np.ndarray, mode: str = 'peak') -> float:
 		"""
 		Calculate debiased L/I ratio metric.
-		Uses noise-debiased linear polarization and calculates fractional
-		polarization using different criteria.
+		Uses noise-debiased linear polarisation and calculates fractional
+		polarisation using different criteria.
 
 		Only samples with Stokes I above the significance threshold are used in the
 		ratio average, which prevents shift-created empty bins from dominating the

@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import savefig_rasterized
+from frbop.utils.plotting import savefig_rasterized, colour_manager, pub_figsize
 
 class ComponentsMixin:
 	def plot_component_dm_diagnostics(self,
@@ -49,13 +49,6 @@ class ComponentsMixin:
 			'pa_slope_shrine': 'PA slope (SHRINE)',
 			'l_i_mean': 'L/I mean',
 		}
-		colors = {
-			'structure': 'tab:blue',
-			'snr': 'tab:red',
-			'pa_slope': 'tab:green',
-			'pa_slope_shrine': 'tab:cyan',
-			'l_i_mean': 'tab:purple',
-		}
 
 		component_idx = np.arange(1, n_components + 1)
 		dm_matrix = np.zeros((len(ordered_methods), n_components), dtype=float)
@@ -79,7 +72,7 @@ class ComponentsMixin:
 		for draw_rank, i in enumerate(draw_order):
 			method_name = ordered_methods[i]
 			disp_name = method_display.get(method_name, method_name)
-			color = colors.get(method_name, None)
+			color = colour_manager.color(method_name)
 			if show_errors:
 				ax.errorbar(
 					component_idx,
@@ -330,13 +323,6 @@ class ComponentsMixin:
 			'pa_slope_shrine': 'PA slope (SHRINE)',
 			'l_i_mean': 'L/I mean',
 		}
-		colors = {
-			'structure': 'tab:blue',
-			'snr': 'tab:red',
-			'pa_slope': 'tab:green',
-			'pa_slope_shrine': 'tab:cyan',
-			'l_i_mean': 'tab:purple',
-		}
 
 		x = np.arange(len(pair_labels), dtype=float)
 		fig, ax = plt.subplots(1, 1)
@@ -372,7 +358,7 @@ class ComponentsMixin:
 					yerr=yerr,
 					fmt='o',
 					label=method_display.get(method_name, method_name),
-					color=colors.get(method_name, None),
+					color=colour_manager.color(method_name),
 					capsize=3,
 				)
 			else:
@@ -381,7 +367,7 @@ class ComponentsMixin:
 					y,
 					'o',
 					label=method_display.get(method_name, method_name),
-					color=colors.get(method_name, None),
+					color=colour_manager.color(method_name),
 				)
 
 		ax.axhline(0.0, color='0.35', linestyle='--', alpha=0.8)

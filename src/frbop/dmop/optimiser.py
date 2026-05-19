@@ -13,7 +13,7 @@ from .metrics import MetricsMixin
 from .optimisation import OptimisationMixin
 from .peaks import PeaksMixin
 from .plotting import PlottingMixin
-from .polarization import PolarizationMixin
+from .polarisation import PolarisationMixin
 from .shrine import ShrineMixin
 from .uncertainty import UncertaintyMixin
 
@@ -22,7 +22,7 @@ class DMOptimiser(
     ShrineMixin,
     UncertaintyMixin,
     DedispersionMixin,
-    PolarizationMixin,
+    PolarisationMixin,
     MetricsMixin,
     OptimisationMixin,
     PeaksMixin,

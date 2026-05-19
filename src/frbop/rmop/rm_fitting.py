@@ -187,7 +187,7 @@ def main() -> None:
         default=None,
         help=(
             "Projection center as a Stokes (Q,U,V) unit vector. "
-            "Defaults to the mean polarization vector of the data."
+            "Defaults to the mean polarisation vector of the data."
         ),
     )
     parser.add_argument(

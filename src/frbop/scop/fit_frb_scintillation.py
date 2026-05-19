@@ -35,7 +35,7 @@ from frbop.scop.plotting import (
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
 from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style, IBM_PALETTE
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +895,7 @@ def main():
 
     xabs = np.abs(lags_plot_sym)
 
-    comp_colors = ['#D81B60', '#1E88E5', '#FFC107', '#004D40']
+    comp_colors = IBM_PALETTE
 
     ax.plot(lags_plot_sym, acf_plot_sym, label="ACF", color="k", lw=2)
     labels = ["Lorentzian", "Double Lorentzian", "Triple Lorentzian"]
@@ -939,6 +939,7 @@ def main():
     ax.set_xlim(-lag_zoom, lag_zoom)
     ax.set_xlabel(rf"Frequency lag (MHz)")
     ax.set_ylabel("ACF power")
+    ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8, loc="upper right")
     plt.tight_layout()
     if args.output:

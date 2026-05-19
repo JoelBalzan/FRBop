@@ -1,4 +1,4 @@
-"""Polarization angle and Stokes Q/U analysis."""
+"""Polarisation angle and Stokes Q/U analysis."""
 
 from typing import Optional, Tuple
 
@@ -8,7 +8,7 @@ from scipy.fftpack import dct
 from .common import shrine_get_kc, shrine_lowpass_smooth
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
-class PolarizationMixin:
+class PolarisationMixin:
 	@staticmethod
 	def _noise_stats_from_series(series: np.ndarray) -> Tuple[float, float]:
 		n_edge = max(1, int(0.05 * len(series)))

@@ -17,8 +17,7 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import pub_figsize as base_pub_figsize
-from frbop.utils.plotting import savefig_rasterized, set_pub_style  # noqa: F401
+from frbop.utils.plotting import savefig_rasterized, pub_figsize 
 
 from .constants import (
     TWO_COLUMN_WIDTH_IN,
@@ -475,7 +474,7 @@ def plot_poincare_sphere(
 
     style = plot_style()
 
-    fig = plt.figure(figsize=base_pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+    fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
     ax  = fig.add_subplot(111, projection='3d')
 
     u_s = np.linspace(0, 2 * np.pi, 100)
@@ -819,7 +818,7 @@ def plot_poincare_projections(
             projection_map['aeqd'],
             projection_map['ortho'],
         ]
-        fig, axes = plt.subplots(2, 2, figsize=base_pub_figsize(single_column=False, height_ratio=1.0, min_height=7.0))
+        fig, axes = plt.subplots(2, 2, figsize=pub_figsize(single_column=False, height_ratio=1.0, min_height=7.0))
         axes = axes.ravel()
         is_all = True
     else:
@@ -828,7 +827,7 @@ def plot_poincare_projections(
                 "Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho"
             )
         projections = [projection_map[proj_key]]
-        fig, ax_single = plt.subplots(1, 1, figsize=base_pub_figsize(single_column=False, height_ratio=0.75, min_height=4.8))
+        fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(single_column=False, height_ratio=0.75, min_height=4.8))
         axes = [ax_single]
         is_all = False
 
@@ -975,7 +974,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 
     rm_ts_height = max(6.8, 2.25 * 3)
     fig = plt.figure(
-        figsize=base_pub_figsize(
+        figsize=pub_figsize(
             single_column=(n_peaks == 1),
             height_ratio=rm_ts_height / (SINGLE_COLUMN_WIDTH_IN if n_peaks == 1 else TWO_COLUMN_WIDTH_IN),
             min_height=rm_ts_height,
@@ -989,8 +988,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 axes[row, col] = fig.add_subplot(gs[row, col])
             else:
                 axes[row, col] = fig.add_subplot(gs[row, col], sharex=axes[0, col])
-
-    TICK_LENGTH = 3
 
     if 'snr' in rm_results and np.any(rm_results['snr'] > 0):
         snr_threshold = 5.0
@@ -1181,15 +1178,25 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
             ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
         ax_pa.grid(True, alpha=0.3)
         ax_pa.legend(loc='best', fontsize=style['legend'])
-        ax_pa.tick_params(axis='both', labelsize=style['tick'], length=TICK_LENGTH, labelbottom=False)
+        ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
 
         # ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
         ax_top = axes[1, peak_idx]
+        #disable global right ticks
+        ax_top.tick_params(right=False, labelright=False)
         ax_top_twin = ax_top.twinx()
+
+        # Prevent doubled borders from twinx()
+        ax_top.spines['right'].set_visible(False)
+
+        ax_top_twin.spines['left'].set_visible(False)
+        ax_top_twin.spines['top'].set_visible(False)
+        ax_top_twin.spines['bottom'].set_visible(False)
+
         ax_top_twin.yaxis.set_label_position('right')
         ax_top_twin.yaxis.tick_right()
-        ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='darkorange')
-        ax_top_twin.tick_params(axis='y', colors='darkorange', labelsize=style['tick'], length=TICK_LENGTH)
+        ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='#FE6100')
+        ax_top_twin.tick_params(axis='y', colors='darkorange', labelsize=style['tick'])
 
         rm_peak = rm_results['rm'][peak_mask]
         tms = time_peak * 1e3
@@ -1197,7 +1204,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         if rm_err_peak is not None:
             rm_err_peak = rm_err_peak[peak_mask]
             ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-                                 fmt='o-', color='darkorange', markersize=3,
+                                 fmt='o-', color='#FE6100', markersize=3,
                                  linewidth=1.5, capsize=2, alpha=1,
                                  label='RM')
         else:
@@ -1205,7 +1212,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 
         ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
         ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
-        ax_top.tick_params(axis='y', labelsize=style['tick'], length=TICK_LENGTH)
+        ax_top.tick_params(axis='y', labelsize=style['tick'])
         ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L')
         ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V')
 
@@ -1282,7 +1289,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                                  fmt='o-', color='red', markersize=5, linewidth=2, capsize=3,
                                  label=f'Binned RM ({n_bins_actual} bins)')
             ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='red')
-            ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'], length=TICK_LENGTH)
+            ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'])
 
         if n_peaks > 1:
             ax_top.set_title(f'Peak {peak_idx+1}: Pulse Profile & RM', fontsize=style['title'], fontweight='bold')
@@ -1328,7 +1335,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 seen.add(lab)
             if final_handles:
                 ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best')
-        ax_top.tick_params(axis='x', labelbottom=False, length=TICK_LENGTH)
+        ax_top.tick_params(axis='x', labelbottom=False)
 
         # ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
         ax3 = axes[2, peak_idx]
@@ -1432,7 +1439,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
             minmax = _finite_minmax(use_arrays)
             if minmax is not None:
                 min_frac, max_frac = minmax
-                ax3.set_ylim(min_frac - 0.05, max_frac + 0.05)
+                ax3.set_ylim(min_frac - 0.1, max_frac + 0.1)
 
         ax3.set_xlabel('Time (ms)', fontsize=style['label'])
         ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
@@ -1440,7 +1447,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
             ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
         ax3.grid(True, alpha=0.3)
         ax3.legend(loc='best', fontsize=style['legend'])
-        ax3.tick_params(axis='both', labelsize=style['tick'], length=TICK_LENGTH)
+        ax3.tick_params(axis='both', labelsize=style['tick'])
 
     plt.tight_layout()
     _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
@@ -1490,7 +1497,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     fig, axes = plt.subplots(
         n_rows,
         1,
-        figsize=base_pub_figsize(
+        figsize=pub_figsize(
             single_column=False,
             height_ratio=fig_height / TWO_COLUMN_WIDTH_IN,
             min_height=fig_height,
@@ -2102,60 +2109,98 @@ def plot_burns_law_fits(fitter: RMFitter,
     freq_model_hz = freq_model_mhz * 1e6
     x_model = (_c / freq_model_hz) ** 2
 
-    fig_height = max(3.2, SINGLE_COLUMN_WIDTH_IN * 0.75)
     fig, ax = plt.subplots(
         1,
         1,
-        figsize=base_pub_figsize(
+        figsize=pub_figsize(
             single_column=True,
-            height_ratio=fig_height / SINGLE_COLUMN_WIDTH_IN,
-            min_height=fig_height,
+            height_ratio=0.75,
+            min_height=3.2,
         ),
     )
+
     if yerr is not None:
-        ax.errorbar(freq_mhz, y, yerr=yerr, fmt='o', markersize=4,
-                    color='tab:red', marker='s', ecolor='gray', elinewidth=1, capsize=2,
-                    alpha=0.8, label=r'$L/I$')
+        ax.errorbar(
+            freq_mhz, y, yerr=yerr,
+            fmt='o', markersize=4,
+            color='r', marker='s',
+            ecolor='gray', elinewidth=1, capsize=2,
+            alpha=1, label=r'$L/I$'
+        )
     else:
-        ax.scatter(freq_mhz, y, s=28, c='tab:red', marker='s', alpha=0.8, label=r'$L/I$')
+        ax.scatter(
+            freq_mhz, y,
+            s=28, c='r',
+            marker='s', alpha=1,
+            label=r'$L/I$'
+        )
 
     if burn_popt is not None and best_linear_model == 'P_Burn':
         y_burn = burn_model(x_model, *burn_popt)
         burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_burn, color='tab:cyan', linewidth=2, label=burn_label)
+        ax.plot(freq_model_mhz, y_burn, color='green', linewidth=2, linestyle='--', label=burn_label, zorder=20)
 
     if mod_popt is not None and best_linear_model == 'P_mod-Burn':
         y_mod = modified_burn_model(x_model, *mod_popt)
-        mod_label = r"$P_{\mathrm{mod-Burn}}(\lambda)=P_i\exp\left(-2\sigma_{\mathrm{RM}}'^{\,2}\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_mod, color='tab:cyan', linewidth=2, linestyle='--', label=mod_label)
+        mod_label = r"$P_{\mathrm{mod-Burn}}(\lambda)=P_i\exp\left(-2\sigma_{\mathrm{RM}}^{\prime\,2}\lambda^4\right)$"
+        ax.plot(freq_model_mhz, y_mod, color='green', linewidth=2, linestyle='--', label=mod_label, zorder=20)
 
     if const_popt is not None and best_linear_model == 'P_const':
         y_const = constant_model(x_model, *const_popt)
-        label_const = r"$P_{\mathrm{const}}(\lambda)=P_i$"
-        ax.plot(freq_model_mhz, y_const, color='0.25', linewidth=2, linestyle=':', label=label_const)
+        ax.plot(
+            freq_model_mhz, y_const,
+            color='0.25', linewidth=2,
+            linestyle='--',
+            label=r"$P_{\mathrm{const}}(\lambda)=P_i$",
+            zorder=20
+        )
 
     if y_c is not None and freq_c is not None:
         if yerr_c is not None:
-            ax.errorbar(freq_c, y_c, yerr=yerr_c, fmt='s', markersize=3,
-                        color='tab:blue', ecolor='tab:blue', elinewidth=0.8,
-                        capsize=2, alpha=0.8, label=r'$V/I$')
+            ax.errorbar(
+                freq_c, y_c, yerr=yerr_c,
+                fmt='s', markersize=4,
+                color='b', ecolor='gray',
+                elinewidth=0.8, capsize=2,
+                alpha=1, label=r'$V/I$'
+            )
         else:
-            ax.scatter(freq_c, y_c, s=16, c='tab:blue', marker='s', alpha=0.8, label=r'$V/I$')
+            ax.scatter(
+                freq_c, y_c,
+                s=28, c='b',
+                marker='s', alpha=1,
+                label=r'$V/I$'
+            )
 
         if circ_lin_popt is not None and best_circular_model == 'mC_linear':
             y_cl = circ_linear_model(x_model, *circ_lin_popt)
-            lbl = r"$m_C(\lambda^2)=C_0 + C_1\lambda^2$"
-            ax.plot(freq_model_mhz, y_cl, color='tab:green', linewidth=1.8, linestyle='--', label=lbl)
+            ax.plot(
+                freq_model_mhz, y_cl,
+                color='#fe6100',
+                linewidth=1.8,
+                linestyle='--',
+                label=r"$m_C(\lambda^2)=C_0 + C_1\lambda^2$", zorder=20
+            )
 
         if circ_sin_popt is not None and best_circular_model == 'mC_sinusoid':
             y_cs = circ_sine_model(x_model, *circ_sin_popt)
-            lbl = r"$m_C(\lambda^2)=C_0 + A\sin\left(2\left(\phi_0 + \beta\lambda^2\right)\right)$"
-            ax.plot(freq_model_mhz, y_cs, color='tab:olive', linewidth=1.8, linestyle='-.', label=lbl)
+            ax.plot(
+                freq_model_mhz, y_cs,
+                color='#fe6100',
+                linewidth=1.8,
+                linestyle='--',
+                label=r"$m_C(\lambda^2)=C_0 + A\sin\left(2\left(\phi_0 + \beta\lambda^2\right)\right)$", zorder=20
+            )
 
         if circ_const_popt is not None and best_circular_model == 'mC_const':
             y_cc = circ_const_model(x_model, *circ_const_popt)
-            lbl = r"$m_C(\lambda^2)=C_0$"
-            ax.plot(freq_model_mhz, y_cc, color='tab:green', linewidth=1.8, linestyle='-', label=lbl)
+            ax.plot(
+                freq_model_mhz, y_cc,
+                color='#fe6100',
+                linewidth=1.8,
+                linestyle='--',
+                label=r"$m_C(\lambda^2)=C_0$", zorder=20
+            )
 
     ax.set_xlabel('Frequency (MHz)', fontsize=style['label'])
     ax.set_ylabel('Polarisation Fraction', fontsize=style['label'])
