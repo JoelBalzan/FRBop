@@ -158,7 +158,7 @@ class PlottingMixin:
 		else:
 			axes[0, 1].legend(loc='best', fontsize=fs_legend)
 		axes[0, 1].set_title('Original Time Series')
-		axes[0, 1].set_ylabel('Flux')
+		axes[0, 1].set_ylabel(rf'S (arb.)')
 		axes[0, 1].set_xlabel('Time (ms)')
 		axes[0, 1].grid(True, alpha=0.3)
 		axes[0, 1].title.set_fontsize(fs_title)
@@ -166,6 +166,7 @@ class PlottingMixin:
 		axes[0, 1].yaxis.label.set_size(fs_label)
 		axes[0, 1].xaxis.labelpad = fs_labelpad
 		axes[0, 1].yaxis.labelpad = fs_labelpad
+		axes[0, 1].set_yticklabels([])
 		axes[0, 1].tick_params(axis='both', labelsize=fs_tick)
 
 		# Top-right panel: compact summary of best DM and uncertainty per method.
@@ -350,7 +351,7 @@ class PlottingMixin:
 					h2, l2 = axr.get_legend_handles_labels()
 					axes[idx, 1].legend(h1 + h2, l1 + l2, loc='best', fontsize=fs_legend)
 					show_time_legend = False
-				axr.set_ylabel('PA (deg)')
+				axr.set_ylabel('PA (deg.)')
 				axr.yaxis.label.set_size(fs_label)
 				axr.yaxis.labelpad = fs_labelpad
 				axr.tick_params(axis='y', labelsize=fs_tick)
@@ -361,8 +362,8 @@ class PlottingMixin:
 					axes[idx, 1].legend(loc='best', fontsize=fs_legend)
 					show_time_legend = False
 
-			axes[idx, 1].set_title(f"Metric = {result['metric']:.6f}")
-			axes[idx, 1].set_ylabel(rf'S')
+			axes[idx, 1].set_title(f"Metric = {result['metric']:.3f}")
+			axes[idx, 1].set_ylabel(rf'S (arb.)')
 			axes[idx, 1].set_xlabel('Time (ms)')
 			axes[idx, 1].grid(True, alpha=0.3)
 			axes[idx, 1].title.set_fontsize(fs_title)

@@ -146,6 +146,21 @@ class UncertaintyMixin:
 		clamped['uncertainty_plus'] = None if high_clamped is None else float(high_clamped - best_dm)
 		return clamped
 
+	@staticmethod
+	def _shrine_bounds_from_ranges(dm_values: np.ndarray,
+						possible_max_ranges: list) -> Tuple[Optional[float], Optional[float]]:
+		dm = np.asarray(dm_values, dtype=float)
+		if len(possible_max_ranges) < 1:
+			return None, None
+		low_idx = int(possible_max_ranges[0][0])
+		low_dm = float(dm[low_idx]) if 0 <= low_idx < len(dm) else None
+		high_dm = None
+		if len(possible_max_ranges[-1]) == 2:
+			high_idx = int(possible_max_ranges[-1][1])
+			if 0 <= high_idx < len(dm):
+				high_dm = float(dm[high_idx])
+		return low_dm, high_dm
+
 	def _uncertainty_from_half_prominence(self,
 							 dm_values: np.ndarray,
 							 metric_values: np.ndarray,
@@ -310,19 +325,7 @@ class UncertaintyMixin:
 		max_structure_parameter = float(sp[max_index])
 		adjusted_sps = sp + (sp * rel)
 		possible_max_ranges = shrine_get_ranges_above_max(max_structure_parameter, adjusted_sps)
-
-		if len(possible_max_ranges) < 1:
-			best_dm = float(dm[max_index])
-			return self._uncertainty_dict(best_dm, None, None, "SHRINE relative uncertainty")
-
-		low_idx = int(possible_max_ranges[0][0])
-		low_dm = float(dm[low_idx]) if 0 <= low_idx < len(dm) else None
-		high_dm = None
-		if len(possible_max_ranges[-1]) == 2:
-			high_idx = int(possible_max_ranges[-1][1])
-			if 0 <= high_idx < len(dm):
-				high_dm = float(dm[high_idx])
-
+		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_index]), low_dm, high_dm, "SHRINE relative uncertainty")
 
 	def _uncertainty_from_metric_shrine(self,
@@ -377,18 +380,7 @@ class UncertaintyMixin:
 		max_metric = float(metric[max_idx])
 		adjusted_metrics = metric + (metric * relative_uncertainty)
 		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
-
-		peak_range = None
-		for r in possible_max_ranges:
-			if len(r) == 2 and r[0] <= max_idx <= r[1]:
-				peak_range = r
-				break
-
-		if peak_range is None:
-			return self._uncertainty_dict(float(dm[max_idx]), None, None, "SHRINE metric uncertainty")
-
-		low_dm = float(dm[int(peak_range[0])]) if 0 <= int(peak_range[0]) < len(dm) else None
-		high_dm = float(dm[int(peak_range[1])]) if 0 <= int(peak_range[1]) < len(dm) else None
+		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE metric uncertainty")
 
 	def _nonshrine_uncertainty_reference_profile(self,
@@ -480,37 +472,7 @@ class UncertaintyMixin:
 		max_metric = float(metric[max_idx])
 		adjusted_metrics = metric + (metric * relative_uncertainty)
 		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
-
-		if len(possible_max_ranges) < 1:
-			return self._uncertainty_dict(float(dm[max_idx]), None, None, "SHRINE relative uncertainty")
-
-		#print(f"kc_use: {kc_use}")
-		#print(f"relative_uncertainty range: {relative_uncertainty.min():.6f} to {relative_uncertainty.max():.6f}")
-		#print(f"adjusted_metrics max: {adjusted_metrics.max():.6f}, at peak: {max_metric:.6f}")
-		#print(f"possible_max_ranges: {possible_max_ranges}")
-		#print(f"metric[0]: {metric[0]:.6f}")
-		#print(f"relative_uncertainty[0]: {relative_uncertainty[0]:.6f}")
-		#print(f"adjusted_metrics[0]: {adjusted_metrics[0]:.6f}")
-		#print(f"np.sum(adjusted_metrics > max_metric): {np.sum(adjusted_metrics > max_metric)}")
-
-		# Find the range containing the peak
-		peak_range = None
-		for r in possible_max_ranges:
-			if len(r) == 2 and r[0] <= max_idx <= r[1]:
-				peak_range = r
-				break
-			elif len(r) == 1 and r[0] == max_idx:
-				peak_range = r
-				break
-			
-		if peak_range is None or len(peak_range) < 2:
-			return self._uncertainty_dict(float(dm[max_idx]), None, None, "SHRINE relative uncertainty")
-		
-		low_idx = int(peak_range[0])
-		high_idx = int(peak_range[1])
-		low_dm = float(dm[low_idx]) if 0 <= low_idx < len(dm) else None
-		high_dm = float(dm[high_idx]) if 0 <= high_idx < len(dm) else None
-
+		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE relative uncertainty")
 
 

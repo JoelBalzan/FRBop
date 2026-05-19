@@ -10,7 +10,7 @@ def select_peaks_manual(
     *,
     title: str = "Click start/end bounds for each peak (close window when done)",
     x_label: str = "Time (ms)",
-    y_label: str = "Flux",
+    y_label: str = rf"S (arb.)",
     exclusive_end: bool = True,
 ) -> List[Tuple[int, int]]:
     """Interactively select peak regions from a 1D profile."""
