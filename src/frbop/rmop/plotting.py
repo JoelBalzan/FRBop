@@ -17,12 +17,12 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.optimize import curve_fit
 
+from frbop.utils.plotting import pub_figsize as base_pub_figsize
 from frbop.utils.plotting import savefig_rasterized, set_pub_style  # noqa: F401
 
 from .constants import (
     TWO_COLUMN_WIDTH_IN,
     SINGLE_COLUMN_WIDTH_IN,
-    pub_figsize,
     plot_style,
 )
 from .fitter import RMFitter
@@ -475,7 +475,7 @@ def plot_poincare_sphere(
 
     style = plot_style()
 
-    fig = plt.figure(figsize=pub_figsize(height_ratio=0.92, min_height=6.2))
+    fig = plt.figure(figsize=base_pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
     ax  = fig.add_subplot(111, projection='3d')
 
     u_s = np.linspace(0, 2 * np.pi, 100)
@@ -819,7 +819,7 @@ def plot_poincare_projections(
             projection_map['aeqd'],
             projection_map['ortho'],
         ]
-        fig, axes = plt.subplots(2, 2, figsize=pub_figsize(height_ratio=1.0, min_height=7.0))
+        fig, axes = plt.subplots(2, 2, figsize=base_pub_figsize(single_column=False, height_ratio=1.0, min_height=7.0))
         axes = axes.ravel()
         is_all = True
     else:
@@ -828,7 +828,7 @@ def plot_poincare_projections(
                 "Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho"
             )
         projections = [projection_map[proj_key]]
-        fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=0.75, min_height=4.8))
+        fig, ax_single = plt.subplots(1, 1, figsize=base_pub_figsize(single_column=False, height_ratio=0.75, min_height=4.8))
         axes = [ax_single]
         is_all = False
 
@@ -974,8 +974,13 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         n_peaks = 1
 
     rm_ts_height = max(6.8, 2.25 * 3)
-    rm_ts_width = SINGLE_COLUMN_WIDTH_IN if n_peaks == 1 else min(TWO_COLUMN_WIDTH_IN, SINGLE_COLUMN_WIDTH_IN * n_peaks)
-    fig = plt.figure(figsize=(rm_ts_width, rm_ts_height))
+    fig = plt.figure(
+        figsize=base_pub_figsize(
+            single_column=(n_peaks == 1),
+            height_ratio=rm_ts_height / (SINGLE_COLUMN_WIDTH_IN if n_peaks == 1 else TWO_COLUMN_WIDTH_IN),
+            min_height=rm_ts_height,
+        )
+    )
     gs = GridSpec(3, n_peaks, figure=fig, hspace=0, wspace=0.3)
     axes = np.empty((3, n_peaks), dtype=object)
     for col in range(n_peaks):
@@ -1482,7 +1487,16 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     style = plot_style()
     n_rows = 3 if show_frac_panel else 2
     fig_height = 7.4 if show_frac_panel else 5.2
-    fig, axes = plt.subplots(n_rows, 1, figsize=(TWO_COLUMN_WIDTH_IN, fig_height), sharex=False)
+    fig, axes = plt.subplots(
+        n_rows,
+        1,
+        figsize=base_pub_figsize(
+            single_column=False,
+            height_ratio=fig_height / TWO_COLUMN_WIDTH_IN,
+            min_height=fig_height,
+        ),
+        sharex=False,
+    )
     pol_frac_err_arr = None if pol_frac_err is None else np.asarray(pol_frac_err, dtype=float)
     valid_mask_arr = None if valid_mask is None else np.asarray(valid_mask, dtype=bool)
     circ_frac_err_arr = None if circ_frac_err is None else np.asarray(circ_frac_err, dtype=float)
@@ -2089,7 +2103,15 @@ def plot_burns_law_fits(fitter: RMFitter,
     x_model = (_c / freq_model_hz) ** 2
 
     fig_height = max(3.2, SINGLE_COLUMN_WIDTH_IN * 0.75)
-    fig, ax = plt.subplots(1, 1, figsize=(SINGLE_COLUMN_WIDTH_IN, fig_height))
+    fig, ax = plt.subplots(
+        1,
+        1,
+        figsize=base_pub_figsize(
+            single_column=True,
+            height_ratio=fig_height / SINGLE_COLUMN_WIDTH_IN,
+            min_height=fig_height,
+        ),
+    )
     if yerr is not None:
         ax.errorbar(freq_mhz, y, yerr=yerr, fmt='o', markersize=4,
                     color='tab:red', marker='s', ecolor='gray', elinewidth=1, capsize=2,

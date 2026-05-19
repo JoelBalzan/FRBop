@@ -8,11 +8,26 @@ from typing import Optional
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+SINGLE_COLUMN_WIDTH_IN = 4.8
+TWO_COLUMN_WIDTH_IN = 7.1
+
+
+def pub_figsize(*,
+                single_column: bool = True,
+                height_ratio: float = 0.62,
+                min_height: float = 3.0) -> tuple[float, float]:
+    """Return a publication-friendly figure size in inches."""
+    width = SINGLE_COLUMN_WIDTH_IN if single_column else TWO_COLUMN_WIDTH_IN
+    height = max(min_height, width * height_ratio)
+    return width, height
+
 
 def set_pub_style(use_latex: bool = True) -> None:
     """Publication-oriented Matplotlib defaults."""
+    fig_w, fig_h = pub_figsize(single_column=True)
     mpl.rcParams.update(
         {
+            "figure.figsize": (fig_w, fig_h),
             "figure.dpi": 150,
             "savefig.dpi": 600,
 

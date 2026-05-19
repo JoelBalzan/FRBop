@@ -23,21 +23,22 @@ from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.constants import c
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
+from frbop.utils.plotting import (
+	SINGLE_COLUMN_WIDTH_IN,
+	TWO_COLUMN_WIDTH_IN,
+	pub_figsize as base_pub_figsize,
+	savefig_rasterized,
+	set_pub_style,
+)
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 warnings.filterwarnings('ignore')
 
 
-TWO_COLUMN_WIDTH_IN = 7.1
-SINGLE_COLUMN_WIDTH_IN = 4.8
-
-
 def _pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[float, float]:
 	"""Return a publication-friendly figure size for a two-column layout."""
-	height = max(min_height, TWO_COLUMN_WIDTH_IN * height_ratio)
-	return TWO_COLUMN_WIDTH_IN, height
+	return base_pub_figsize(single_column=False, height_ratio=height_ratio, min_height=min_height)
 
 
 def _plot_style() -> Dict[str, float]:

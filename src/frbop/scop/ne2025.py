@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 
 
 def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
@@ -43,7 +43,7 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=No
 
     set_pub_style(use_latex=False)
 
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.65, min_height=3.4))
     ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')
     ax.set_xlabel("Distance from observer (kpc)")
     ax.set_ylabel(r"$C_n^2$ (m$^{-20/3}$)")

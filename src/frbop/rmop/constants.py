@@ -7,14 +7,16 @@ from typing import Dict, Tuple
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-TWO_COLUMN_WIDTH_IN = 7.1
-SINGLE_COLUMN_WIDTH_IN = 4.8
+from frbop.utils.plotting import (
+    SINGLE_COLUMN_WIDTH_IN,
+    TWO_COLUMN_WIDTH_IN,
+    pub_figsize as _pub_figsize,
+)
 
 
 def pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[float, float]:
     """Return a publication-friendly figure size for a two-column layout."""
-    height = max(min_height, TWO_COLUMN_WIDTH_IN * height_ratio)
-    return TWO_COLUMN_WIDTH_IN, height
+    return _pub_figsize(single_column=False, height_ratio=height_ratio, min_height=min_height)
 
 
 def plot_style() -> Dict[str, float]:

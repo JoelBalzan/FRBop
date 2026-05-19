@@ -3,6 +3,8 @@ from typing import List, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from frbop.utils.plotting import pub_figsize
+
 
 def select_peaks_manual(
     time_axis: np.ndarray,
@@ -26,7 +28,7 @@ def select_peaks_manual(
             f"time_axis length ({time_axis.size}) does not match profile length ({profile.size})"
         )
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
     ax.plot(time_axis, profile, color='k', linewidth=1)
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -104,7 +106,7 @@ def select_peak_fwhm_manual(
             f"time_axis length ({time_axis.size}) does not match profile length ({profile.size})"
         )
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
     ax.plot(time_axis, profile, color="k", linewidth=1)
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -251,7 +253,7 @@ def select_frequency_bands_manual(
             f"freq_axis length ({freq_axis.size}) does not match spectrum length ({spectrum.size})"
         )
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
     ax.plot(freq_axis, spectrum, color='k', linewidth=1)
     ax.set_title(title)
     ax.set_xlabel(x_label)

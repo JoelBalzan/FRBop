@@ -7,7 +7,7 @@ import numpy as np
 
 from frbop.scop.fit_utils import _decode_lorentzian_components
 from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 
 
 def _apply_publication_style() -> dict:
@@ -28,7 +28,7 @@ def plot_spectrum_powerlaw_fit(
     output=None,
 ):
     styles = _apply_publication_style()
-    fig, axs = plt.subplots(1, 2, figsize=(12.0, 4.0))
+    fig, axs = plt.subplots(1, 2, figsize=pub_figsize(single_column=False, height_ratio=0.55, min_height=3.6))
     freq_mhz = np.asarray(freq_mhz, dtype=float)
     spectrum = np.asarray(spectrum, dtype=float)
     mean_model = np.asarray(mean_model, dtype=float)
@@ -91,7 +91,7 @@ def plot_lorentzian_diagnostics(
     output=None,
 ):
     styles = _apply_publication_style()
-    fig, axs = plt.subplots(2, 3, figsize=(16, 9))
+    fig, axs = plt.subplots(2, 3, figsize=pub_figsize(single_column=False, height_ratio=1.05, min_height=6.5))
     xabs = np.abs(lags_plot_sym)
 
     panel_cfg = [
@@ -205,7 +205,9 @@ def plot_scintillation_band_power_law(
     # Top row: power-law plot + residual ratio
     # Bottom rows: per-band spectra + ACF Lorentzian fits
     n_bands = len(band_results)
-    fig = plt.figure(figsize=(max(13.0, 4.5 * n_bands), 12.5))
+    base_width, base_height = pub_figsize(single_column=False, height_ratio=1.15, min_height=7.0)
+    fig_height = max(base_height, 6.0)
+    fig = plt.figure(figsize=(base_width, fig_height))
     gs_top = fig.add_gridspec(1, 2, top=0.95, bottom=0.62, hspace=0.35, wspace=0.3)
     gs_bot = fig.add_gridspec(2, n_bands, top=0.57, bottom=0.07, hspace=0.45, wspace=0.35)
 

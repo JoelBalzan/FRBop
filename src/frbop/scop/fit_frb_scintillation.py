@@ -35,7 +35,7 @@ from frbop.scop.plotting import (
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
 from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs
 
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 
 
 # ---------------------------------------------------------------------------
@@ -889,7 +889,7 @@ def main():
     lag_zoom = args.lag_zoom if args.lag_zoom is not None else args.fit_max_lag
 
     # Spectrum + normalised ACF
-    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    fig, ax = plt.subplots(1, 1, figsize=pub_figsize(single_column=True, height_ratio=1.0, min_height=4.5))
 
     set_pub_style(use_latex=False)
 

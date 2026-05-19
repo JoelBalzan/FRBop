@@ -32,7 +32,7 @@ from scipy.fftpack import dct
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
@@ -529,7 +529,7 @@ class DMOptimiser:
 		np.save(run_dir / f"{run_prefix}_I_at_max.npy", dedispersed_i)
 
 		# Metric-vs-DM plot
-		plt.figure(figsize=(8, 4))
+		plt.figure(figsize=pub_figsize(single_column=True, height_ratio=0.6, min_height=3.2))
 		plt.plot(dm_values, metric_values, '-', color='tab:blue', linewidth=1.8)
 		if uncertainty is not None:
 			low_dm = uncertainty.get('uncertainty_low_dm')
@@ -559,7 +559,7 @@ class DMOptimiser:
 
 		# I profile at best DM
 		time_series = np.mean(dedispersed_i, axis=0)
-		plt.figure(figsize=(8, 4))
+		plt.figure(figsize=pub_figsize(single_column=True, height_ratio=0.6, min_height=3.2))
 		plt.plot(time_series, color='k', linewidth=1.3)
 		plt.xlabel('Time index')
 		plt.ylabel('Stokes I (arb.)')
@@ -2568,9 +2568,10 @@ class DMOptimiser:
 		"""
 		n_methods = len(results)
 		has_qu = self.stokes_q is not None and self.stokes_u is not None
-		fig_width = 15.5
+		base_width, base_height = pub_figsize(single_column=False, height_ratio=0.9, min_height=5.5)
+		fig_width = base_width
 		row_height = 2.7
-		fig_height = max(11.0, row_height * (n_methods + 1))
+		fig_height = max(base_height, row_height * (n_methods + 1))
 		fig, axes = plt.subplots(
 			n_methods + 1,
 			5,
@@ -3082,7 +3083,10 @@ class DMOptimiser:
 		save_path : str, optional
 			Path to save figure
 		"""
-		fig, axes = plt.subplots(len(metrics), 1, figsize=(10, 3*len(metrics)))
+		base_width, base_height = pub_figsize(single_column=True, height_ratio=0.75, min_height=3.4)
+		row_height = 2.6
+		fig_height = max(base_height, row_height * len(metrics))
+		fig, axes = plt.subplots(len(metrics), 1, figsize=(base_width, fig_height))
 		
 		if len(metrics) == 1:
 			axes = [axes]

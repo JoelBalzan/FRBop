@@ -7,7 +7,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from frbop.utils.plotting import savefig_rasterized
+from frbop.utils.plotting import pub_figsize, savefig_rasterized
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 class PeaksMixin:
@@ -39,7 +39,7 @@ class PeaksMixin:
 		peaks, properties = find_peaks(smoothed, distance=min_distance, prominence=2*np.std(smoothed[:n_edge]))
 
 		if diagnostics_path:
-			plt.figure(figsize=(10, 4))
+			plt.figure(figsize=pub_figsize(single_column=True, height_ratio=0.6, min_height=3.2))
 			plt.plot(self.time_ms, time_series, color='0.6', linewidth=1, label='Raw')
 			plt.plot(self.time_ms, smoothed, color='k', linewidth=1.5, label='Smoothed')
 			if len(peaks) > 0:

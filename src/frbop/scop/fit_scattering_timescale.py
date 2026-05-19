@@ -8,12 +8,7 @@ from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
-
-
-def _pub_figsize(*, single_column: bool = True) -> tuple[float, float]:
-    """Simple publication-ish figure sizes in inches."""
-    return (3.35, 2.6) if single_column else (6.9, 3.6)
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 
 
 def main():
@@ -225,7 +220,7 @@ def main():
                 set_pub_style(use_latex=False)
 
                 # Use single-column width by default so figure fits in a 2-col LaTeX layout
-                fig, ax = plt.subplots(figsize=_pub_figsize(single_column=True))
+                fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.7, min_height=3.0))
                 ax.plot(t_burst, pulse_profile, 'k-', label='Data')
                 fit_y = scattered_gaussian(t_burst, *popt_t)
                 ax.plot(t_burst, fit_y, 'r--', label=rf'Fit: $\tau$ = {t_scatt_fit_ms:.3f} ms')
