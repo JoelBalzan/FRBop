@@ -169,7 +169,7 @@ class MetricsMixin:
 			out=np.zeros_like(I_ts, dtype=float),
 			where=mask,
 		)
-		np.clip(L_over_I, 0.0, 1.0, out=L_over_I)
+		#np.clip(L_over_I, 0.0, 1.0, out=L_over_I)
 
 		if mode == 'peak':
 			if np.any(mask):
