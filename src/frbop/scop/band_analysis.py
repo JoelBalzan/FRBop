@@ -5,7 +5,9 @@ import numpy as np
 from frbop.scop.acf import autocorr
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts
 from frbop.scop.models import lorentzian
-from frbop.utils.peaks import select_frequency_bands_manual as shared_select_frequency_bands_manual
+from frbop.utils.peaks import (
+    select_frequency_bands_manual as shared_select_frequency_bands_manual,
+)
 
 
 def select_frequency_bands_manual(
@@ -21,88 +23,6 @@ def select_frequency_bands_manual(
         y_label=y_label,
         exclusive_end=exclusive_end,
     )
-
-
-def split_frequency_bands_equal(freq_axis: np.ndarray, n_bands: int) -> list[tuple[int, int]]:
-    """Split a 1D frequency axis into n approximately equal contiguous bands."""
-    freq_axis = np.asarray(freq_axis, dtype=float)
-    if freq_axis.ndim != 1:
-        raise ValueError(f"freq_axis must be 1D, got shape={freq_axis.shape}")
-    if n_bands <= 0:
-        raise ValueError("n_bands must be > 0")
-    if freq_axis.size == 0:
-        return []
-
-    n_bands = min(int(n_bands), int(freq_axis.size))
-    regions: list[tuple[int, int]] = []
-    for chunk in np.array_split(np.arange(freq_axis.size), n_bands):
-        if chunk.size == 0:
-            continue
-        regions.append((int(chunk[0]), int(chunk[-1]) + 1))
-    return regions
-
-
-def split_frequency_bands_equal_snr(
-    freq_axis: np.ndarray,
-    snr_weights: np.ndarray | None,
-    n_bands: int,
-    *,
-    min_channels: int = 4,
-) -> list[tuple[int, int]]:
-    """Split a 1D frequency axis into contiguous bands with equal total SNR weight.
-
-    Parameters
-    ----------
-    freq_axis   : 1D array of frequencies (MHz), ascending
-    snr_weights : per-channel SNR weights (same shape as freq_axis). Non-positive
-                  or non-finite values are treated as zero.
-    n_bands     : number of bands to split into
-    min_channels: minimum channels per band (best-effort). If too strict,
-                  n_bands will be reduced.
-    """
-    freq_axis = np.asarray(freq_axis, dtype=float)
-    if freq_axis.ndim != 1:
-        raise ValueError(f"freq_axis must be 1D, got shape={freq_axis.shape}")
-    if n_bands <= 0:
-        raise ValueError("n_bands must be > 0")
-    if freq_axis.size == 0:
-        return []
-
-    n_channels = int(freq_axis.size)
-    min_channels = max(1, int(min_channels))
-    max_bands = max(1, n_channels // min_channels)
-    n_bands = min(int(n_bands), max_bands, n_channels)
-
-    if snr_weights is None:
-        return split_frequency_bands_equal(freq_axis, n_bands)
-
-    snr_weights = np.asarray(snr_weights, dtype=float)
-    if snr_weights.shape != freq_axis.shape:
-        raise ValueError("snr_weights must match freq_axis shape")
-
-    weights = np.where(np.isfinite(snr_weights) & (snr_weights > 0), snr_weights, 0.0)
-    total = float(np.sum(weights))
-    if total <= 0:
-        return split_frequency_bands_equal(freq_axis, n_bands)
-
-    cumulative = np.cumsum(weights)
-    targets = [(total * i) / n_bands for i in range(1, n_bands)]
-
-    boundaries = [0]
-    for target in targets:
-        idx = int(np.searchsorted(cumulative, target, side="left"))
-        idx = max(boundaries[-1] + min_channels, idx)
-        idx = min(idx, n_channels - min_channels * (n_bands - len(boundaries)))
-        boundaries.append(idx)
-    boundaries.append(n_channels)
-
-    regions: list[tuple[int, int]] = []
-    for start, stop in zip(boundaries[:-1], boundaries[1:]):
-        if stop > start:
-            regions.append((int(start), int(stop)))
-    return regions
-
-
 def convert_mhz_to_frequency_indices(freq_axis: np.ndarray, mhz_values: list[float], N: int) -> list[tuple[int, int]]:
     """
     Convert MHz frequency pairs to (start_idx, stop_idx) tuples.

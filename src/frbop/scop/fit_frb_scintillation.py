@@ -10,9 +10,7 @@ from frbop.scop.band_analysis import (
     convert_mhz_to_frequency_indices,
     fit_scintillation_band_power_law,
     measure_scintillation_bands,
-    select_frequency_bands_manual,
-    split_frequency_bands_equal,
-    split_frequency_bands_equal_snr,
+    select_frequency_bands_manual
 )
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts, _decode_lorentzian_components
 from frbop.scop.gating import find_burst_window, select_peak_fwhm_manual, select_peaks_manual
@@ -33,7 +31,7 @@ from frbop.scop.plotting import (
     plot_scintillation_band_power_law,
 )
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
-from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs
+from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs, split_frequency_bands_equal, split_frequency_bands_equal_snr
 
 from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style, IBM_PALETTE
 

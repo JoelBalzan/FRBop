@@ -17,7 +17,12 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import savefig_rasterized, pub_figsize 
+from frbop.utils.plotting import savefig_rasterized, pub_figsize
+from frbop.utils.peaks import (
+    select_frequency_bands_manual,
+    split_frequency_bands_equal,
+    split_frequency_bands_equal_snr,
+)
 
 from .constants import (
     TWO_COLUMN_WIDTH_IN,
@@ -582,6 +587,351 @@ def plot_poincare_sphere(
         plt.show()
     _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré sphere plot saved to {output_file}")
+    plt.close()
+
+
+def plot_poincare_sphere_subbands(
+        time_series_data: Dict,
+        freq_hz: np.ndarray,
+        output_file: str = 'poincare_sphere_subbands.png',
+        n_subbands: int = 2,
+        n_time_bins: Optional[int] = None,
+        noise_fraction: float = 0.1,
+        time_unit: str = 's',
+        interactive: bool = False,
+        force_surface: bool = False,
+        noise_reference_data: Optional[Dict] = None,
+        circle_fit_mode: Optional[str] = None,
+        circle_fit_segments: Optional[List[Tuple[int, int]]] = None,
+        band_method: str = 'equal',
+        band_regions: Optional[List[Tuple[int, int]]] = None,
+        snr_weights: Optional[np.ndarray] = None) -> None:
+    """
+    Plot Poincaré tracks for multiple frequency bands on a single sphere.
+
+    Parameters
+    ----------
+    time_series_data : dict
+        Dictionary with keys ``'time'``, ``'I'``, ``'Q'``, ``'U'`` (and optionally ``'V'``)
+        containing 2-D arrays (time × frequency or frequency × time).
+    freq_hz : array
+        Frequency axis in Hz matching the frequency dimension of the data.
+    n_subbands : int
+        Number of bands when ``band_regions`` is not provided.
+    band_method : str
+        Band selection method: ``'equal'``, ``'equal_snr'``, or ``'manual'``.
+    band_regions : list of tuple, optional
+        Explicit (start, stop) index regions to use instead of auto selection.
+    """
+    if time_series_data is None:
+        raise ValueError("plot_poincare_sphere_subbands requires time_series_data.")
+    if freq_hz is None:
+        raise ValueError("plot_poincare_sphere_subbands requires freq_hz.")
+
+    I_cube = np.asarray(time_series_data['I'], dtype=float)
+    Q_cube = np.asarray(time_series_data['Q'], dtype=float)
+    U_cube = np.asarray(time_series_data['U'], dtype=float)
+    V_cube = np.asarray(time_series_data.get('V', None), dtype=float) if 'V' in time_series_data else None
+    times = np.asarray(time_series_data['time'], dtype=float)
+
+    if I_cube.ndim != 2:
+        raise ValueError("Time-series data must be 2D (time × frequency).")
+
+    n_time = len(times)
+    time_axis = 0 if I_cube.shape[0] == n_time else 1
+    n_freq_data = I_cube.shape[1] if time_axis == 0 else I_cube.shape[0]
+
+    freq_hz_arr = np.asarray(freq_hz, dtype=float)
+    if freq_hz_arr.size != n_freq_data:
+        n_min = min(freq_hz_arr.size, n_freq_data)
+        print(
+            "Warning: freq_hz length does not match data; trimming to "
+            f"{n_min} channels."
+        )
+        freq_hz_arr = freq_hz_arr[:n_min]
+        if time_axis == 0:
+            I_cube = I_cube[:, :n_min]
+            Q_cube = Q_cube[:, :n_min]
+            U_cube = U_cube[:, :n_min]
+            if V_cube is not None:
+                V_cube = V_cube[:, :n_min]
+        else:
+            I_cube = I_cube[:n_min, :]
+            Q_cube = Q_cube[:n_min, :]
+            U_cube = U_cube[:n_min, :]
+            if V_cube is not None:
+                V_cube = V_cube[:n_min, :]
+
+    freq_mhz = freq_hz_arr / 1e6
+
+    if band_regions is None:
+        method = str(band_method).lower()
+        if method == 'manual':
+            spectrum = np.nanmean(I_cube, axis=0 if time_axis == 0 else 1)
+            band_regions = select_frequency_bands_manual(freq_mhz, spectrum)
+        elif method == 'equal_snr':
+            if snr_weights is None:
+                n_off = max(1, int(n_time * noise_fraction))
+                if time_axis == 0:
+                    i_off = I_cube[:n_off, :]
+                    q_mean = np.nanmean(Q_cube, axis=0)
+                    u_mean = np.nanmean(U_cube, axis=0)
+                else:
+                    i_off = I_cube[:, :n_off]
+                    q_mean = np.nanmean(Q_cube, axis=1)
+                    u_mean = np.nanmean(U_cube, axis=1)
+                sigma_i_chan = np.nanstd(i_off, axis=0 if time_axis == 0 else 1)
+                sigma_i_chan = np.where(
+                    np.isfinite(sigma_i_chan) & (sigma_i_chan > 0), sigma_i_chan, 1e-10
+                )
+                l_mean = np.sqrt(q_mean**2 + u_mean**2)
+                snr_weights = l_mean / (sigma_i_chan + 1e-10)
+            band_regions = split_frequency_bands_equal_snr(freq_mhz, snr_weights, n_subbands)
+        else:
+            band_regions = split_frequency_bands_equal(freq_mhz, n_subbands)
+
+    if not band_regions:
+        print("Warning: no frequency bands selected; skipping Poincaré subbands plot.")
+        return
+
+    unit = time_unit.lower()
+    time_scale = 1e3 if unit == 'ms' else (1e6 if unit in ('us', 'µs') else 1.0)
+    color_label = "Time (ms)" if unit == 'ms' else ("Time (µs)" if unit in ('us', 'µs') else "Time (s)")
+    noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
+
+    band_tracks = []
+    for band_idx, (b_start, b_stop) in enumerate(band_regions):
+        b_start = int(max(0, b_start))
+        b_stop = int(min(n_freq_data, b_stop))
+        if b_stop <= b_start:
+            continue
+
+        if n_time_bins is None or n_time_bins <= 0:
+            bin_size = 1
+            n_bins = n_time
+        else:
+            bin_size = max(1, n_time // n_time_bins)
+            n_bins = (n_time + bin_size - 1) // bin_size
+
+        q_list, u_list, v_list, pol_list, time_list = [], [], [], [], []
+        for i in range(n_bins):
+            s = i * bin_size
+            e = min((i + 1) * bin_size, n_time)
+            if e <= s:
+                continue
+            time_list.append(float(np.mean(times[s:e])))
+            if time_axis == 0:
+                I_sl = I_cube[s:e, b_start:b_stop]
+                Q_sl = Q_cube[s:e, b_start:b_stop]
+                U_sl = U_cube[s:e, b_start:b_stop]
+                V_sl = V_cube[s:e, b_start:b_stop] if V_cube is not None else None
+            else:
+                I_sl = I_cube[b_start:b_stop, s:e]
+                Q_sl = Q_cube[b_start:b_stop, s:e]
+                U_sl = U_cube[b_start:b_stop, s:e]
+                V_sl = V_cube[b_start:b_stop, s:e] if V_cube is not None else None
+            I_m = np.nanmean(I_sl)
+            Q_m = np.nanmean(Q_sl)
+            U_m = np.nanmean(U_sl)
+            V_m = np.nanmean(V_sl) if V_sl is not None else 0.0
+            q_list.append(Q_m / (I_m + 1e-10))
+            u_list.append(U_m / (I_m + 1e-10))
+            v_list.append(V_m / (I_m + 1e-10))
+            pol_list.append(np.sqrt(Q_m**2 + U_m**2))
+
+        if not q_list:
+            continue
+
+        q_norm = np.array(q_list)
+        u_norm = np.array(u_list)
+        v_norm = np.array(v_list)
+        color_axis = np.array(time_list) * time_scale
+        pol_arr = np.array(pol_list)
+
+        n_frac = max(1, int(len(pol_arr) * noise_fraction))
+        sigma_pol = np.nanstd(pol_arr[:n_frac])
+        sigma_pol = sigma_pol if (np.isfinite(sigma_pol) and sigma_pol > 0) else 1e-10
+        snr = pol_arr / (sigma_pol + 1e-10)
+        mask = snr > 5.0
+        if np.sum(mask) < 2:
+            mask = snr > 2.0
+        if np.sum(mask) < 2:
+            print(f"Warning: band {band_idx + 1} has too few SNR points; skipping.")
+            continue
+
+        q_filt = q_norm[mask]
+        u_filt = u_norm[mask]
+        v_filt = v_norm[mask]
+        color_filt = color_axis[mask]
+        time_filt_s = np.array(time_list)[mask]
+
+        if force_surface:
+            vecs = np.vstack([q_filt, u_filt, v_filt])
+            norms = np.linalg.norm(vecs, axis=0)
+            norms[norms == 0] = 1.0
+            q_filt = q_filt / norms
+            u_filt = u_filt / norms
+            v_filt = v_filt / norms
+            q_filt *= 1.002
+            u_filt *= 1.002
+            v_filt *= 1.002
+
+        sigma_q, sigma_u, sigma_v = _compute_poincare_point_errors(
+            noise_ref,
+            point_times=np.asarray(time_filt_s, dtype=float),
+            noise_fraction=noise_fraction,
+        )
+        sigma_lon_deg, sigma_lat_deg = _poincare_angle_errors_deg(
+            q_filt, u_filt, v_filt, sigma_q, sigma_u, sigma_v
+        )
+
+        band_tracks.append({
+            'band_idx': band_idx,
+            'b_start': b_start,
+            'b_stop': b_stop,
+            'q': q_filt,
+            'u': u_filt,
+            'v': v_filt,
+            'color': color_filt,
+            'time_s': time_filt_s,
+            'sigma_lon': sigma_lon_deg,
+            'sigma_lat': sigma_lat_deg,
+        })
+
+    if not band_tracks:
+        print("Warning: no valid subband tracks to plot.")
+        return
+
+    style = plot_style()
+    fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+    ax = fig.add_subplot(111, projection='3d')
+
+    u_s = np.linspace(0, 2 * np.pi, 100)
+    v_s = np.linspace(0,     np.pi, 100)
+    xs  = np.outer(np.cos(u_s), np.sin(v_s))
+    ys  = np.outer(np.sin(u_s), np.sin(v_s))
+    zs  = np.outer(np.ones_like(u_s), np.cos(v_s))
+
+    ax.plot_surface(xs, ys, zs, color='lightgray', alpha=0.2, rstride=4, cstride=4,
+                    linewidth=0, antialiased=True, zorder=1)
+    n_grid = 12
+    for lat in np.linspace(0, np.pi, n_grid, endpoint=False)[1:]:
+        x_lat = np.cos(u_s) * np.sin(lat)
+        y_lat = np.sin(u_s) * np.sin(lat)
+        z_lat = np.full_like(u_s, np.cos(lat))
+        ax.plot(x_lat, y_lat, z_lat, color='gray', alpha=0.3, linewidth=0.5)
+    for lon in np.linspace(0, 2*np.pi, n_grid, endpoint=False):
+        x_lon = np.cos(lon) * np.sin(v_s)
+        y_lon = np.sin(lon) * np.sin(v_s)
+        z_lon = np.cos(v_s)
+        ax.plot(x_lon, y_lon, z_lon, color='gray', alpha=0.3, linewidth=0.5)
+
+    all_colors = np.concatenate([track['color'] for track in band_tracks])
+    norm = plt.Normalize(vmin=np.nanmin(all_colors), vmax=np.nanmax(all_colors))
+    band_colors = plt.cm.tab10(np.linspace(0, 1, max(1, len(band_tracks))))
+
+    def _sph_to_cart(lon_d: float, lat_d: float, radius: float) -> Tuple[float, float, float]:
+        lon_r = np.radians(lon_d)
+        lat_r = np.radians(lat_d)
+        x = radius * np.cos(lat_r) * np.cos(lon_r)
+        y = radius * np.cos(lat_r) * np.sin(lon_r)
+        z = radius * np.sin(lat_r)
+        return float(x), float(y), float(z)
+
+    legend_handles = []
+    for i_track, track in enumerate(band_tracks):
+        edge_color = band_colors[i_track]
+        sc = ax.scatter(
+            track['q'], track['u'], track['v'],
+            c=track['color'], cmap='viridis', norm=norm,
+            s=60, alpha=1,
+            edgecolors=edge_color, linewidth=0.8, zorder=200,
+            depthshade=True,
+        )
+
+        lon_deg = np.degrees(np.arctan2(track['u'], track['q']))
+        r_vec = np.sqrt(track['q']**2 + track['u']**2 + track['v']**2)
+        lat_deg = np.degrees(np.arcsin(np.clip(track['v'] / (r_vec + 1e-20), -1.0, 1.0)))
+
+        for i in range(len(track['q'])):
+            if not (np.isfinite(lon_deg[i]) and np.isfinite(lat_deg[i]) and np.isfinite(r_vec[i])):
+                continue
+            dlon = float(track['sigma_lon'][i]) if np.isfinite(track['sigma_lon'][i]) else 0.0
+            dlat = float(track['sigma_lat'][i]) if np.isfinite(track['sigma_lat'][i]) else 0.0
+            rr = float(r_vec[i])
+            if dlon > 0:
+                x1, y1, z1 = _sph_to_cart(lon_deg[i] - dlon, lat_deg[i], rr)
+                x2, y2, z2 = _sph_to_cart(lon_deg[i] + dlon, lat_deg[i], rr)
+                ax.plot([x1, x2], [y1, y2], [z1, z2], color='0.45', linewidth=0.7, alpha=0.6, zorder=150)
+            if dlat > 0:
+                lat_lo = max(-89.9, lat_deg[i] - dlat)
+                lat_hi = min(89.9, lat_deg[i] + dlat)
+                x1, y1, z1 = _sph_to_cart(lon_deg[i], lat_lo, rr)
+                x2, y2, z2 = _sph_to_cart(lon_deg[i], lat_hi, rr)
+                ax.plot([x1, x2], [y1, y2], [z1, z2], color='0.45', linewidth=0.7, alpha=0.6, zorder=150)
+
+        if circle_fit_mode is not None and len(track['q']) >= 3:
+            points_xyz = np.column_stack([track['q'], track['u'], track['v']])
+            segments = _build_circle_segments(len(track['q']), circle_fit_segments)
+            for s_idx, e_idx in segments:
+                fit = _fit_circle_on_sphere(points_xyz[s_idx:e_idx + 1], mode=circle_fit_mode)
+                if fit is None:
+                    continue
+                arc = fit['arc_xyz']
+                ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
+                        linestyle='--', linewidth=1.2, alpha=0.9,
+                        color=edge_color, zorder=140)
+
+        label = (
+            f"Band {track['band_idx'] + 1}: "
+            f"{freq_mhz[track['b_start']]:.1f}-"
+            f"{freq_mhz[track['b_stop'] - 1]:.1f} MHz"
+        )
+        legend_handles.append(
+            plt.Line2D([0], [0], marker='o', color='none',
+                       markerfacecolor='none', markeredgecolor=edge_color,
+                       markeredgewidth=1.3, markersize=7, label=label)
+        )
+
+    if len(legend_handles) > 0:
+        ax.legend(handles=legend_handles, fontsize=style['legend'], loc='upper left')
+
+    mean_q = np.concatenate([track['q'] for track in band_tracks])
+    mean_u = np.concatenate([track['u'] for track in band_tracks])
+    mean_v = np.concatenate([track['v'] for track in band_tracks])
+    mean_vec = np.array([np.mean(mean_q), np.mean(mean_u), np.mean(mean_v)])
+    norm_vec = np.linalg.norm(mean_vec)
+    if norm_vec > 0:
+        azim = np.degrees(np.arctan2(mean_vec[1], mean_vec[0]))
+        elev = np.degrees(np.arcsin(mean_vec[2] / norm_vec))
+        ax.view_init(elev=elev, azim=azim)
+
+    cbar = plt.colorbar(sc, ax=ax, shrink=0.6, pad=0.02,
+                        orientation='horizontal', fraction=0.04)
+    cbar.set_label(color_label, fontsize=style['label'], labelpad=5)
+    cbar.ax.tick_params(labelsize=style['tick'])
+
+    ax.set_xlabel('Q', fontsize=style['label'], labelpad=-6)
+    ax.set_ylabel('U', fontsize=style['label'], labelpad=-6)
+    ax.set_zlabel('V', fontsize=style['label'], labelpad=-6)
+    try:
+        ax.xaxis.set_label_position('left')
+        ax.yaxis.set_label_position('right')
+    except Exception:
+        pass
+    ax.set_xlim([-1.1, 1.1])
+    ax.set_ylim([-1.1, 1.1])
+    ax.set_zlim([-1.1, 1.1])
+    ax.set_box_aspect([1, 1, 1])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+
+    plt.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
+    if interactive:
+        plt.show()
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    print(f"Poincaré subband sphere plot saved to {output_file}")
     plt.close()
 
 

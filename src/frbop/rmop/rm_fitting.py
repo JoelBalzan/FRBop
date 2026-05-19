@@ -18,6 +18,7 @@ from .plotting import (
     plot_burns_law_fits,
     plot_poincare_projections,
     plot_poincare_sphere,
+    plot_poincare_sphere_subbands,
     plot_rm_results,
     plot_rm_time_series,
 )
@@ -166,6 +167,12 @@ def main() -> None:
         "--poincare-surface",
         action="store_true",
         help="Force all Poincare points onto unit sphere surface",
+    )
+    parser.add_argument(
+        "--poincare-subbands",
+        type=int,
+        default=1,
+        help="Split the full band into this many subbands and plot one Poincare sphere per band",
     )
     parser.add_argument(
         "--poincare-projections",
@@ -1128,19 +1135,35 @@ def main() -> None:
 
             if args.poincare:
                 pt_bins = args.time_bins if args.time_bins and args.time_bins > 0 else None
-                plot_poincare_sphere(
-                    time_series_data,
-                    f"{args.output}_poincare.{args.ext}",
-                    n_time_bins=pt_bins,
-                    noise_fraction=args.noise_fraction,
-                    time_unit=args.time_unit,
-                    interactive=args.poincare_interactive,
-                    force_surface=args.poincare_surface,
-                    rm_results=rm_results,
-                    noise_reference_data=full_time_series_data,
-                    circle_fit_mode=args.poincare_circle_fit,
-                    circle_fit_segments=circle_segments,
-                )
+                if args.poincare_subbands and args.poincare_subbands > 1:
+                    plot_poincare_sphere_subbands(
+                        time_series_data,
+                        freq_hz,
+                        f"{args.output}_poincare.{args.ext}",
+                        n_subbands=args.poincare_subbands,
+                        n_time_bins=pt_bins,
+                        noise_fraction=args.noise_fraction,
+                        time_unit=args.time_unit,
+                        interactive=args.poincare_interactive,
+                        force_surface=args.poincare_surface,
+                        noise_reference_data=full_time_series_data,
+                        circle_fit_mode=args.poincare_circle_fit,
+                        circle_fit_segments=circle_segments,
+                    )
+                else:
+                    plot_poincare_sphere(
+                        time_series_data,
+                        f"{args.output}_poincare.{args.ext}",
+                        n_time_bins=pt_bins,
+                        noise_fraction=args.noise_fraction,
+                        time_unit=args.time_unit,
+                        interactive=args.poincare_interactive,
+                        force_surface=args.poincare_surface,
+                        rm_results=rm_results,
+                        noise_reference_data=full_time_series_data,
+                        circle_fit_mode=args.poincare_circle_fit,
+                        circle_fit_segments=circle_segments,
+                    )
                 if args.poincare_projections:
                     proj_tag = str(args.poincare_projections).lower()
                     plot_poincare_projections(
