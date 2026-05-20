@@ -50,6 +50,7 @@ def main() -> None:
         ),
     )
 
+    # Input data
     parser.add_argument("-i", "--stokes-i", required=False, help="Stokes I file path")
     parser.add_argument("-q", "--stokes-q", required=False, help="Stokes Q file path")
     parser.add_argument("-u", "--stokes-u", required=False, help="Stokes U file path")
@@ -79,6 +80,24 @@ def main() -> None:
         choices=["s", "ms", "us"],
         help="Time unit (default: ms)",
     )
+
+    # Data layout and processing
+    parser.add_argument("--time-series", action="store_true", help="Process as time series data")
+    parser.add_argument("--time-avg", action="store_true", help="Average over time axis for 2D data")
+    parser.add_argument(
+        "--time-axis",
+        type=int,
+        default=1,
+        help="Time axis for 2D arrays (default: 1)",
+    )
+    parser.add_argument(
+        "--freq-axis",
+        type=int,
+        default=0,
+        help="Frequency axis for 2D arrays (default: 0)",
+    )
+
+    # RM fitting
     parser.add_argument(
         "--method",
         choices=["simple", "rm_synthesis", "qu_fitting", "rmnest"],
@@ -99,24 +118,8 @@ def main() -> None:
         default=2000,
         help="Number of RM trial values (default: 2000)",
     )
-    parser.add_argument("--time-series", action="store_true", help="Process as time series data")
-    parser.add_argument(
-        "--time-avg",
-        action="store_true",
-        help="Average over time axis for 2D data",
-    )
-    parser.add_argument(
-        "--time-axis",
-        type=int,
-        default=1,
-        help="Time axis for 2D arrays (default: 1)",
-    )
-    parser.add_argument(
-        "--freq-axis",
-        type=int,
-        default=0,
-        help="Frequency axis for 2D arrays (default: 0)",
-    )
+
+    # On-pulse selection
     parser.add_argument(
         "--onpulse-only",
         action="store_true",
@@ -140,6 +143,8 @@ def main() -> None:
         default=None,
         help="Manually specify peak indices as pairs: start1 end1 start2 end2 ...",
     )
+
+    # Output and plotting
     parser.add_argument(
         "-o",
         "--output",
@@ -153,6 +158,8 @@ def main() -> None:
         action="store_true",
         help="Hide the third (L/I and V/I) panel in plot_rm_results",
     )
+
+    # Poincare plots
     parser.add_argument(
         "--poincare",
         action="store_true",
@@ -215,6 +222,8 @@ def main() -> None:
             "(indices refer to plotted Poincare points after masking/binning)."
         ),
     )
+
+    # Peak separation
     parser.add_argument(
         "--separate-peaks",
         action="store_true",
@@ -241,6 +250,8 @@ def main() -> None:
             "will be merged (default: 0, no merging)"
         ),
     )
+
+    # RMNest
     parser.add_argument(
         "--rmnest-gfr",
         action="store_true",
@@ -266,6 +277,8 @@ def main() -> None:
         default="dynesty",
         help="Sampler for RMNest/Bilby (default: dynesty)",
     )
+
+    # Binning and noise
     parser.add_argument(
         "--time-bins",
         type=int,
@@ -293,6 +306,8 @@ def main() -> None:
         default=0.1,
         help="Fraction of Stokes I samples used for noise estimation (default: 0.10)",
     )
+
+    # Physics helpers
     parser.add_argument(
         "--turbulent-radius-pc",
         type=float,
@@ -1072,13 +1087,13 @@ def main() -> None:
         print("\nTime Series Results:")
         print(f"  RM bins used = {rm_diag['n_valid']}/{rm_diag['n_total']}")
         print(f"  Mean RM = {rm_diag['rm_mean']:.4f} rad/m^2")
-        print(f"  sigma_RM(time) = {rm_diag['sigma_rm_time']:.4f} rad/m^2")
-        if np.isfinite(rm_diag["weighted_sigma_rm_time"]):
+        print(f"  std_RM(time) = {rm_diag['std_rm_time']:.4f} rad/m^2")
+        if np.isfinite(rm_diag["weighted_std_rm_time"]):
             print(
                 f"  Weighted Mean RM (L^2) = {rm_diag['weighted_rm_mean']:.4f} rad/m^2"
             )
             print(
-                f"  Weighted sigma_RM(time) (L^2) = {rm_diag['weighted_sigma_rm_time']:.4f} rad/m^2"
+                f"  Weighted std_RM(time) (L^2) = {rm_diag['weighted_std_rm_time']:.4f} rad/m^2"
             )
         print(f"  Min RM = {rm_diag['rm_min']:.4f} rad/m^2")
         print(f"  Max RM = {rm_diag['rm_max']:.4f} rad/m^2")
@@ -1130,6 +1145,8 @@ def main() -> None:
                 max_merge_gap=args.max_merge_gap,
                 time_series_data=time_series_data,
                 freq_hz=freq_hz,
+                n_rm_bins=args.time_bins if args.time_bins and args.time_bins > 0 else None,
+                n_pa_bins=args.time_bins*3 if args.time_bins and args.time_bins > 0 else None,
                 noise_fraction=args.noise_fraction,
             )
 

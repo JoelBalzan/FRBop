@@ -49,7 +49,7 @@ def time_series_sigma_rm_diagnostic(rm_time: np.ndarray,
             'rm_min': np.nan,
             'rm_max': np.nan,
             'weighted_rm_mean': np.nan,
-            'weighted_sigma_rm_time': np.nan,
+            'weighted_std_rm_time': np.nan,
             'weighted_n': 0,
             'weight_sum': 0.0,
             'n_valid': 0,
@@ -58,7 +58,7 @@ def time_series_sigma_rm_diagnostic(rm_time: np.ndarray,
 
     rm_valid = rm_arr[valid]
     weighted_rm_mean = np.nan
-    weighted_sigma_rm_time = np.nan
+    weighted_std_rm_time = np.nan
     weighted_n = 0
     weight_sum = 0.0
 
@@ -73,17 +73,17 @@ def time_series_sigma_rm_diagnostic(rm_time: np.ndarray,
                 weighted_n = int(np.sum(w_mask))
                 if weight_sum > 0:
                     weighted_rm_mean = float(np.sum(w * rm_w) / weight_sum)
-                    weighted_sigma_rm_time = float(
+                    weighted_std_rm_time = float(
                         np.sqrt(np.sum(w * (rm_w - weighted_rm_mean) ** 2) / weight_sum)
                     )
 
     return {
         'rm_mean': float(np.mean(rm_valid)),
-        'sigma_rm_time': float(np.std(rm_valid)),
+        'std_rm_time': float(np.std(rm_valid)),
         'rm_min': float(np.min(rm_valid)),
         'rm_max': float(np.max(rm_valid)),
         'weighted_rm_mean': weighted_rm_mean,
-        'weighted_sigma_rm_time': weighted_sigma_rm_time,
+        'weighted_std_rm_time': weighted_std_rm_time,
         'weighted_n': weighted_n,
         'weight_sum': weight_sum,
         'n_valid': n_valid,

@@ -249,7 +249,7 @@ class RMFitter:
         lambda_sq_double = np.concatenate([self.lambda_sq, self.lambda_sq])  # noqa: F841
 
         # Initial guess
-        p0 = [0.0, np.mean(self.stokes_q), np.mean(self.stokes_u)]
+        p0 = [0.0, np.nanmean(self.stokes_q), np.nanmean(self.stokes_u)]
 
         try:
             # Fit
@@ -404,11 +404,11 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     # Compute off-pulse-based Q/U noise estimates using the same fraction of
     # samples used elsewhere for I noise estimation.
     if time_axis == 0:
-        I_full_for_noise = np.mean(time_series_data['I'], axis=1)
+        I_full_for_noise = np.nanmean(time_series_data['I'], axis=1)
         Q_time = time_series_data['Q']
         U_time = time_series_data['U']
     else:
-        I_full_for_noise = np.mean(time_series_data['I'], axis=0)
+        I_full_for_noise = np.nanmean(time_series_data['I'], axis=0)
         Q_time = time_series_data['Q']
         U_time = time_series_data['U']
 
@@ -465,9 +465,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     # prepare noise estimate for Stokes V if available
     if 'V' in time_series_data:
         if time_axis == 0:
-            V_full_for_noise = np.mean(time_series_data['V'], axis=1)
+            V_full_for_noise = np.nanmean(time_series_data['V'], axis=1)
         else:
-            V_full_for_noise = np.mean(time_series_data['V'], axis=0)
+            V_full_for_noise = np.nanmean(time_series_data['V'], axis=0)
         noise_v = np.nanstd(V_full_for_noise[:n_frac_noise])
         if noise_v <= 0:
             mad_v = np.nanmedian(np.abs(V_full_for_noise - np.nanmedian(V_full_for_noise)))
@@ -481,23 +481,23 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         if bin_end <= bin_start:
             continue
 
-        time_binned[i] = np.mean(times[bin_start:bin_end])
+        time_binned[i] = np.nanmean(times[bin_start:bin_end])
 
         # Extract data for this time bin and average in time
         if time_axis == 0:
-            stokes_i = np.mean(time_series_data['I'][bin_start:bin_end, :], axis=0)
-            stokes_q = np.mean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
-            stokes_u = np.mean(time_series_data['U'][bin_start:bin_end, :], axis=0)
+            stokes_i = np.nanmean(time_series_data['I'][bin_start:bin_end, :], axis=0)
+            stokes_q = np.nanmean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
+            stokes_u = np.nanmean(time_series_data['U'][bin_start:bin_end, :], axis=0)
             if 'V' in time_series_data:
-                stokes_v = np.mean(time_series_data['V'][bin_start:bin_end, :], axis=0)
+                stokes_v = np.nanmean(time_series_data['V'][bin_start:bin_end, :], axis=0)
             else:
                 stokes_v = None
         else:
-            stokes_i = np.mean(time_series_data['I'][:, bin_start:bin_end], axis=1)
-            stokes_q = np.mean(time_series_data['Q'][:, bin_start:bin_end], axis=1)
-            stokes_u = np.mean(time_series_data['U'][:, bin_start:bin_end], axis=1)
+            stokes_i = np.nanmean(time_series_data['I'][:, bin_start:bin_end], axis=1)
+            stokes_q = np.nanmean(time_series_data['Q'][:, bin_start:bin_end], axis=1)
+            stokes_u = np.nanmean(time_series_data['U'][:, bin_start:bin_end], axis=1)
             if 'V' in time_series_data:
-                stokes_v = np.mean(time_series_data['V'][:, bin_start:bin_end], axis=1)
+                stokes_v = np.nanmean(time_series_data['V'][:, bin_start:bin_end], axis=1)
             else:
                 stokes_v = None
 
@@ -511,10 +511,10 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         # Initialize fitter
         fitter = RMFitter(freq_fit, stokes_i, stokes_q, stokes_u, stokes_v)
 
-        q_val = np.mean(stokes_q)
-        u_val = np.mean(stokes_u)
-        i_val = np.mean(stokes_i)
-        v_val = np.mean(stokes_v) if stokes_v is not None else 0.0
+        q_val = np.nanmean(stokes_q)
+        u_val = np.nanmean(stokes_u)
+        i_val = np.nanmean(stokes_i)
+        v_val = np.nanmean(stokes_v) if stokes_v is not None else 0.0
         i_snr_array[i] = i_val / (noise_i + 1e-10)
         q_bin[i] = q_val / (i_val + 1e-10)
         u_bin[i] = u_val / (i_val + 1e-10)

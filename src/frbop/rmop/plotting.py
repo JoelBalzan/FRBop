@@ -1299,7 +1299,8 @@ def plot_poincare_projections(
     plt.close()
 
 
-def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
+def plot_rm_time_series(time_array: np.ndarray, 
+                        rm_results: Dict,
                         output_file: str = 'rm_time_series.png',
                         time_profile: Optional[np.ndarray] = None,
                         separate_peaks: bool = False,
@@ -1313,13 +1314,6 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                         noise_fraction: float = 0.1):
     """
     Plot RM as a function of time.
-
-    Parameters:
-    -----------
-    ...
-    n_pa_bins : int
-        Number of bins for PA/EA plot (0 = full resolution, default: 0)
-    ...
     """
     from .data_io import find_peak_regions  # local import to avoid circular
 
@@ -1490,6 +1484,8 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 bin_edges = np.linspace(t_good.min(), t_good.max(), n_pa_bins + 1)
                 bin_centres, pa_binned, pa_binned_err = [], [], []
                 ea_binned, ea_binned_err = [], []
+                bin_counts = []                    
+                
                 for b in range(n_pa_bins):
                     sel = (t_good >= bin_edges[b]) & (t_good < bin_edges[b + 1])
                     if b == n_pa_bins - 1:
@@ -1503,17 +1499,23 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                     pa_binned_err.append(1.0 / np.sqrt(np.sum(w_pa)))
                     ea_binned.append(np.sum(w_ea * ea_good[sel]) / np.sum(w_ea))
                     ea_binned_err.append(1.0 / np.sqrt(np.sum(w_ea)))
+                    bin_counts.append(np.sum(sel))       
+                
+                bc      = np.array(bin_centres)
+                pa_b    = np.array(pa_binned)
+                pa_be   = np.array(pa_binned_err)
+                ea_b    = np.array(ea_binned)
+                ea_be   = np.array(ea_binned_err)
+                counts  = np.array(bin_counts)          
+                MIN_BIN_POINTS = 2         
+                PA_ERR_MAX    = 20.0       
 
-                bc = np.array(bin_centres)
-                pa_b = np.array(pa_binned)
-                pa_be = np.array(pa_binned_err)
-                ea_b = np.array(ea_binned)
-                ea_be = np.array(ea_binned_err)
                 bin_ok = (
                     np.isfinite(bc)
                     & np.isfinite(pa_b) & np.isfinite(pa_be)
                     & np.isfinite(ea_b) & np.isfinite(ea_be)
-                    & (pa_be <= 50.0) & (ea_be <= 50.0)
+                    & (pa_be <= PA_ERR_MAX) & (ea_be <= PA_ERR_MAX)
+                    & (counts >= MIN_BIN_POINTS)
                 )
                 if np.any(bin_ok):
                     ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='s', color='b',
@@ -1559,8 +1561,8 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 
         ax_top_twin.yaxis.set_label_position('right')
         ax_top_twin.yaxis.tick_right()
-        ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color="limegreen")
-        ax_top_twin.tick_params(axis='y', colors="limegreen", labelsize=style['tick'])
+        ax_top_twin.set_ylabel(rf'RM (rad m$^{{-2}}$)', fontsize=style['label'])
+        ax_top_twin.tick_params(axis='y', labelsize=style['tick'])
 
         rm_peak = rm_results['rm'][peak_mask]
         tms = time_peak * 1e3
@@ -1568,11 +1570,11 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         if rm_err_peak is not None:
             rm_err_peak = rm_err_peak[peak_mask]
             ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-                                 fmt='o-', color="limegreen", markersize=3,
+                                 fmt='o-', color='limegreen', markersize=3,
                                  linewidth=1.5, capsize=2, alpha=1,
                                  label='RM')
         else:
-            ax_top_twin.plot(tms, rm_peak, "#dc267f-o", linewidth=1.5, markersize=3, label='RM')
+            ax_top_twin.plot(tms, rm_peak, 'o-', color='limegreen', linewidth=1.5, markersize=3, label='RM')
 
         ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
         ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
@@ -1678,23 +1680,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 if 'Binned RM' in lab or 'Binned' in lab:
                     continue
                 if lab.strip() == 'RM':
-                    keep = False
-                    try:
-                        col = getattr(h, 'get_color', lambda: None)()
-                    except Exception:
-                        col = None
-                    if isinstance(col, str) and col.lower() in ('lawngreen',):
-                        keep = True
-                    else:
-                        try:
-                            import numpy as _np
-                            colarr = _np.asarray(col)
-                            if colarr.size >= 3 and _np.allclose(colarr[:3], _np.array([0.486, 0.988, 0.0]), atol=0.05):
-                                keep = True
-                        except Exception:
-                            keep = False
-                    if not keep:
-                        continue
+                    pass
                 final_handles.append(h)
                 final_labels.append(lab)
                 seen.add(lab)
@@ -1744,6 +1730,43 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 lf_bin = np.asarray(rm_results['L_frac_bin'])
                 vf_bin = np.asarray(rm_results.get('V_frac_bin', []))
 
+                frac_time_ms = full_time[full_mask] * 1e3
+                p_full_masked = P_frac_full[full_mask]
+                l_full_masked = L_frac_full[full_mask]
+                v_full_masked = V_frac_full[full_mask] if 'V' in time_series_data else None
+                err_frac_masked = err_frac[full_mask]
+
+                def _bin_frac_err(bt_ms: np.ndarray, frac_masked: np.ndarray) -> np.ndarray:
+                    if bt_ms.size == 0 or frac_masked.size == 0:
+                        return np.array([], dtype=float)
+                    dt_ms = np.nan
+                    if frac_time_ms.size > 1:
+                        dt_ms = np.nanmedian(np.diff(frac_time_ms))
+                    if bt_ms.size > 1:
+                        dt_bt = np.nanmedian(np.diff(bt_ms))
+                        if np.isfinite(dt_bt) and dt_bt > 0:
+                            dt_ms = dt_bt
+                    if not np.isfinite(dt_ms) or dt_ms <= 0:
+                        dt_ms = 0.0
+                    half = dt_ms / 2.0
+                    errs = np.full(bt_ms.shape, np.nan, dtype=float)
+                    for idx, t in enumerate(bt_ms):
+                        if half > 0:
+                            sel = (frac_time_ms >= (t - half)) & (frac_time_ms <= (t + half))
+                        else:
+                            nearest = int(np.argmin(np.abs(frac_time_ms - t)))
+                            sel = np.zeros_like(frac_time_ms, dtype=bool)
+                            sel[nearest] = True
+                        vals = frac_masked[sel]
+                        vals = vals[np.isfinite(vals)]
+                        if vals.size >= 2:
+                            errs[idx] = np.nanstd(vals) / np.sqrt(vals.size)
+                        elif vals.size == 1:
+                            fallback = err_frac_masked[sel]
+                            fallback = fallback[np.isfinite(fallback)]
+                            errs[idx] = fallback[0] if fallback.size else np.nan
+                    return errs
+
                 if 'valid_bins' in rm_results:
                     bin_mask = np.asarray(rm_results['valid_bins'], dtype=bool)
                 else:
@@ -1754,11 +1777,21 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                         bin_mask = np.ones_like(bt, dtype=bool)
 
                 if np.any(bin_mask):
+                    pf_err = _bin_frac_err(bt, p_full_masked)
+                    lf_err = _bin_frac_err(bt, l_full_masked)
+                    vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
                     ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1, label='P/I')
                     ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1, label='L/I')
+                    ax3.errorbar(bt[bin_mask], pf_bin[bin_mask], yerr=pf_err[bin_mask], fmt='o',
+                                 color='k', markersize=3, capsize=2, linestyle='none', zorder=10)
+                    ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o',
+                                 color='r', markersize=3, capsize=2, linestyle='none', zorder=10)
                     ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
                     if 'V_frac_bin' in rm_results and vf_bin.size:
                         ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1, label='V/I')
+                        if vf_err is not None:
+                            ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o',
+                                         color='b', markersize=3, capsize=2, linestyle='none', zorder=10)
                         ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
                 else:
                     combined_idx = full_indices[combined]
