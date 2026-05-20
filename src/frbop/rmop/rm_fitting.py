@@ -1147,6 +1147,7 @@ def main() -> None:
                         interactive=args.poincare_interactive,
                         force_surface=args.poincare_surface,
                         noise_reference_data=full_time_series_data,
+                        rm_results=rm_results,
                         circle_fit_mode=args.poincare_circle_fit,
                         circle_fit_segments=circle_segments,
                     )

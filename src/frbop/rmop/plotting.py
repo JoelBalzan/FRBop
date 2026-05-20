@@ -346,18 +346,17 @@ def plot_poincare_sphere(
     n_time = len(times)
     noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
 
-    if rm_results is not None and 'q_bin' in rm_results:
+    use_rm = rm_results is not None and 'q_bin' in rm_results
+    if use_rm:
         q_norm = np.array(rm_results['q_bin'])
         u_norm = np.array(rm_results['u_bin'])
         v_norm = np.array(rm_results.get('v_bin', np.zeros_like(q_norm)))
         color_axis = np.array(rm_results['time'])
         orig_idx = np.arange(q_norm.size, dtype=int)
         pol_list = np.sqrt(q_norm**2 + u_norm**2)
-        mask = np.ones(q_norm.size, dtype=bool)
-        if 'valid_bins' in rm_results:
-            mask &= np.asarray(rm_results['valid_bins'], dtype=bool)
-        if 'pa_ea_valid' in rm_results:
-            mask &= np.asarray(rm_results['pa_ea_valid'], dtype=bool)
+        rm_arr = np.asarray(rm_results.get('rm', np.full_like(q_norm, np.nan)), dtype=float)
+        mask = np.isfinite(q_norm) & np.isfinite(u_norm) & np.isfinite(v_norm) & np.isfinite(rm_arr)
+
         if not np.all(mask):
             q_norm = q_norm[mask]
             u_norm = u_norm[mask]
@@ -373,10 +372,11 @@ def plot_poincare_sphere(
             color_axis = color_axis[notnan]
             pol_list = pol_list[notnan]
             orig_idx = orig_idx[notnan]
-        if q_norm.size == 0:
-            print("Warning: all Poincaré bins were masked; skipping plot.")
+        if q_norm.size < 2:
+            print("Warning: too few finite Poincare points from RM results.")
             return
-    else:
+
+    if not use_rm:
         if I_cube.ndim == 2:
             time_axis = 0 if I_cube.shape[0] == n_time else 1
         else:
@@ -503,7 +503,7 @@ def plot_poincare_sphere(
         ax.plot(x_lon, y_lon, z_lon, color='gray', alpha=0.3, linewidth=0.5)
 
     sc = ax.scatter(q_filt, u_filt, v_filt,
-                    c=color_filt, cmap='viridis',
+                    c=color_filt, cmap='plasma',
                     s=60, alpha=1,
                     edgecolors='black', linewidth=0.6, zorder=200,
                     depthshade=True)
@@ -601,6 +601,7 @@ def plot_poincare_sphere_subbands(
         interactive: bool = False,
         force_surface: bool = False,
         noise_reference_data: Optional[Dict] = None,
+    rm_results: Optional[Dict] = None,
         circle_fit_mode: Optional[str] = None,
         circle_fit_segments: Optional[List[Tuple[int, int]]] = None,
         band_method: str = 'equal',
@@ -713,8 +714,18 @@ def plot_poincare_sphere_subbands(
             bin_size = max(1, n_time // n_time_bins)
             n_bins = (n_time + bin_size - 1) // bin_size
 
+        rm_mask_idx = None
+        if rm_results is not None and 'rm' in rm_results:
+            rm_arr = np.asarray(rm_results['rm'], dtype=float)
+            rm_mask_idx = np.isfinite(rm_arr)
+
         q_list, u_list, v_list, pol_list, time_list = [], [], [], [], []
         for i in range(n_bins):
+            if rm_mask_idx is not None:
+                if i >= rm_mask_idx.size:
+                    continue
+                if not rm_mask_idx[i]:
+                    continue
             s = i * bin_size
             e = min((i + 1) * bin_size, n_time)
             if e <= s:
@@ -843,7 +854,7 @@ def plot_poincare_sphere_subbands(
         edge_color = band_colors[i_track]
         sc = ax.scatter(
             track['q'], track['u'], track['v'],
-            c=track['color'], cmap='viridis', norm=norm,
+            c=track['color'], cmap='plasma', norm=norm,
             s=60, alpha=1,
             edgecolors=edge_color, linewidth=0.8, zorder=200,
             depthshade=True,
@@ -972,7 +983,7 @@ def plot_poincare_projections(
     (a reasonable half-sky for most FRB/pulsar PA swings); the others show the
     full visible hemisphere.
 
-    Colour encodes time (same viridis palette as ``plot_poincare_sphere``).
+    Colour encodes time (same plasma palette as ``plot_poincare_sphere``).
 
     Parameters
     ----------
@@ -1015,18 +1026,17 @@ def plot_poincare_projections(
     n_time = len(times)
     noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
 
-    if rm_results is not None and 'q_bin' in rm_results:
+    use_rm = rm_results is not None and 'q_bin' in rm_results
+    if use_rm:
         q_norm     = np.array(rm_results['q_bin'])
         u_norm     = np.array(rm_results['u_bin'])
         v_norm     = np.array(rm_results.get('v_bin', np.zeros_like(q_norm)))
         color_axis = np.array(rm_results['time'])
         orig_idx = np.arange(q_norm.size, dtype=int)
         pol_list   = np.sqrt(q_norm**2 + u_norm**2)
-        mask = np.ones(q_norm.size, dtype=bool)
-        if 'valid_bins' in rm_results:
-            mask &= np.asarray(rm_results['valid_bins'], dtype=bool)
-        if 'pa_ea_valid' in rm_results:
-            mask &= np.asarray(rm_results['pa_ea_valid'], dtype=bool)
+        rm_arr = np.asarray(rm_results.get('rm', np.full_like(q_norm, np.nan)), dtype=float)
+        mask = np.isfinite(q_norm) & np.isfinite(u_norm) & np.isfinite(v_norm) & np.isfinite(rm_arr)
+
         if not np.all(mask):
             q_norm, u_norm, v_norm = q_norm[mask], u_norm[mask], v_norm[mask]
             color_axis = color_axis[mask]
@@ -1037,7 +1047,8 @@ def plot_poincare_projections(
         color_axis = color_axis[notnan]
         pol_list   = pol_list[notnan]
         orig_idx = orig_idx[notnan]
-    else:
+
+    if not use_rm:
         if I_cube.ndim != 2:
             raise ValueError("Time-series data must be 2D.")
         time_axis = 0 if I_cube.shape[0] == n_time else 1
@@ -1090,8 +1101,12 @@ def plot_poincare_projections(
     c_f = color_axis[mask]
 
     if force_surface:
-        r = np.sqrt(q_f**2 + u_f**2 + v_f**2); r[r == 0] = 1.0
-        q_f /= r; u_f /= r; v_f /= r
+        r = np.sqrt(q_f**2 + u_f**2 + v_f**2) 
+        r[r == 0] = 1.0
+
+        q_f /= r
+        u_f /= r
+        v_f /= r
 
     r_f   = np.sqrt(q_f**2 + u_f**2 + v_f**2)
     r_f   = np.where(r_f < 1e-10, 1e-10, r_f)
@@ -1233,7 +1248,7 @@ def plot_poincare_projections(
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
             ax.scatter(sx[fin_s], sy[fin_s],
-                       c=c_f[fin_s], cmap='viridis', norm=norm,
+                       c=c_f[fin_s], cmap='plasma', norm=norm,
                        s=55, edgecolors='black', linewidths=0.6,
                        zorder=4, alpha=1.0)
 
@@ -1273,7 +1288,7 @@ def plot_poincare_projections(
     else:
         fig.subplots_adjust(left=0.10, right=0.93, top=0.90, bottom=0.14)
         cax = fig.add_axes([0.22, 0.05, 0.56, 0.025])
-    sm  = plt.cm.ScalarMappable(cmap='viridis', norm=norm)
+    sm  = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
     sm.set_array([])
     cb  = fig.colorbar(sm, cax=cax, orientation='horizontal')
     cb.set_label(color_label, fontsize=style['label'])
@@ -1527,13 +1542,12 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         if n_peaks > 1:
             ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
         ax_pa.grid(True, alpha=0.3)
-        ax_pa.legend(loc='best', fontsize=style['legend'])
+        ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
         ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
 
         # ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
         ax_top = axes[1, peak_idx]
         #disable global right ticks
-        ax_top.tick_params(right=False, labelright=False)
         ax_top_twin = ax_top.twinx()
 
         # Prevent doubled borders from twinx()
@@ -1545,8 +1559,8 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 
         ax_top_twin.yaxis.set_label_position('right')
         ax_top_twin.yaxis.tick_right()
-        ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='#FE6100')
-        ax_top_twin.tick_params(axis='y', colors='darkorange', labelsize=style['tick'])
+        ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color="limegreen")
+        ax_top_twin.tick_params(axis='y', colors="limegreen", labelsize=style['tick'])
 
         rm_peak = rm_results['rm'][peak_mask]
         tms = time_peak * 1e3
@@ -1554,15 +1568,16 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         if rm_err_peak is not None:
             rm_err_peak = rm_err_peak[peak_mask]
             ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-                                 fmt='o-', color='#FE6100', markersize=3,
+                                 fmt='o-', color="limegreen", markersize=3,
                                  linewidth=1.5, capsize=2, alpha=1,
                                  label='RM')
         else:
-            ax_top_twin.plot(tms, rm_peak, 'darkorange-o', linewidth=1.5, markersize=3, label='RM')
+            ax_top_twin.plot(tms, rm_peak, "#dc267f-o", linewidth=1.5, markersize=3, label='RM')
 
         ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
         ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
         ax_top.tick_params(axis='y', labelsize=style['tick'])
+        ax_top.tick_params(right=False, labelright=False)
         ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L')
         ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V')
 
@@ -1684,7 +1699,8 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
                 final_labels.append(lab)
                 seen.add(lab)
             if final_handles:
-                ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best')
+                ax_top.legend(final_handles, final_labels, fontsize=style['legend'],
+                              loc='best', borderaxespad=0.9)
         ax_top.tick_params(axis='x', labelbottom=False)
 
         # ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
@@ -1796,7 +1812,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
         if n_peaks > 1:
             ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
         ax3.grid(True, alpha=0.3)
-        ax3.legend(loc='best', fontsize=style['legend'])
+        ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
         ax3.tick_params(axis='both', labelsize=style['tick'])
 
     plt.tight_layout()

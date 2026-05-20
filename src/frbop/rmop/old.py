@@ -1693,7 +1693,7 @@ def plot_poincare_sphere(
 
 	# ---- Scatter: always the actual filtered bins, not interpolated ----
 	sc = ax.scatter(q_filt, u_filt, v_filt,
-					c=color_filt, cmap='viridis',
+					c=color_filt, cmap='plasma',
 					s=60, alpha=1,
 					edgecolors='black', linewidth=0.6, zorder=200,
 					depthshade=True)
@@ -1831,7 +1831,7 @@ def plot_poincare_projections(
 	(a reasonable half-sky for most FRB/pulsar PA swings); the others show the
 	full visible hemisphere.
 
-	Colour encodes time (same viridis palette as ``plot_poincare_sphere``).
+	Colour encodes time (same plasma palette as ``plot_poincare_sphere``).
 
 	Parameters
 	----------
@@ -2126,7 +2126,7 @@ def plot_poincare_projections(
 		fin_s = np.isfinite(sx) & np.isfinite(sy)
 		if np.any(fin_s):
 			ax.scatter(sx[fin_s], sy[fin_s],
-					   c=c_f[fin_s], cmap='viridis', norm=norm,
+					   c=c_f[fin_s], cmap='plasma', norm=norm,
 					   s=55, edgecolors='black', linewidths=0.6,
 					   zorder=4, alpha=1.0)
 
@@ -2170,7 +2170,7 @@ def plot_poincare_projections(
 	else:
 		fig.subplots_adjust(left=0.10, right=0.93, top=0.90, bottom=0.14)
 		cax = fig.add_axes([0.22, 0.05, 0.56, 0.025])
-	sm  = plt.cm.ScalarMappable(cmap='viridis', norm=norm)
+	sm  = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
 	sm.set_array([])
 	cb  = fig.colorbar(sm, cax=cax, orientation='horizontal')
 	cb.set_label(color_label, fontsize=style['label'])
