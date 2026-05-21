@@ -340,8 +340,8 @@ class PolarisationMixin:
 			if force_kc is not None:
 				kc = int(force_kc)
 			else:
-				kc = self._resolve_nonshrine_kc(pa_fill[np.newaxis, :])
-			pa_shrine = self._apply_kc_lowpass_2d(pa_fill[np.newaxis, :], kc)[0]
+				kc = self.resolve_nonshrine_kc(pa_fill[np.newaxis, :])
+			pa_shrine = self.apply_kc_lowpass_2d(pa_fill[np.newaxis, :], kc)[0]
 			pa_shrine_smooth = np.where(np.isfinite(pa_deg_masked), pa_shrine, np.nan)
 
 			weights = self._pa_fit_weights(L_debias, sigma_L, data_i, valid)

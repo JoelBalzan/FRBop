@@ -498,7 +498,7 @@ class PlottingMixin:
 			if pa_slope_values is not None:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
 				pa_slope_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 				if l_i_mean_values is not None:
 					l_i_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean')
@@ -506,7 +506,7 @@ class PlottingMixin:
 		run_tag = f"scan_{int(np.round(dm_values[0] * 1000))}_{int(np.round(dm_values[-1] * 1000))}_{len(dm_values)}"
 
 		run_prefix_structure = f"{run_tag}_structure"
-		run_dir_structure = self._run_shrine_method(
+		run_dir_structure = self.run_shrine_method(
 			script_name="maximise_structure.py",
 			run_prefix=run_prefix_structure,
 			dm_values=dm_values,
@@ -517,7 +517,7 @@ class PlottingMixin:
 		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
 
 		run_prefix_snr = f"{run_tag}_snr"
-		run_dir_snr = self._run_shrine_method(
+		run_dir_snr = self.run_shrine_method(
 			script_name="maximise_sn.py",
 			run_prefix=run_prefix_snr,
 			dm_values=dm_values,
@@ -541,7 +541,7 @@ class PlottingMixin:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 				pa_slope_shrine_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
 			metrics['pa_slope_shrine'] = pa_slope_shrine_values
 		if l_i_mean_values is not None:

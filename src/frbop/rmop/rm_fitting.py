@@ -16,8 +16,10 @@ from .diagnostics import time_series_sigma_rm_diagnostic
 from .fitter import RMFitter, fit_rm_time_series
 from .plotting import (
     plot_burns_law_fits,
+    plot_polarisation_fraction_acf_ccf,
     plot_poincare_projections,
     plot_poincare_sphere,
+    plot_poincare_sphere_frequency,
     plot_poincare_sphere_subbands,
     plot_rm_results,
     plot_rm_time_series,
@@ -803,6 +805,30 @@ def main() -> None:
                 turbulent_radius_pc=args.turbulent_radius_pc,
                 screen_scale_cm=args.screen_scale_cm,
             )
+
+            plot_polarisation_fraction_acf_ccf(
+                fitter,
+                f"{args.output}_frac_correlation.{args.ext}",
+            )
+
+            if args.poincare:
+                plot_poincare_sphere_frequency(
+                    freq_hz,
+                    stokes_i,
+                    stokes_q,
+                    stokes_u,
+                    stokes_v,
+                    f"{args.output}_poincare_frequency.{args.ext}",
+                    sigma_i=sigma_i_chan,
+                    sigma_q=sigma_q_chan,
+                    sigma_u=sigma_u_chan,
+                    sigma_v=sigma_v_chan,
+                    snr_threshold=2.0,
+                    interactive=args.poincare_interactive,
+                    force_surface=args.poincare_surface,
+                    circle_fit_mode=args.poincare_circle_fit,
+                    circle_fit_segments=circle_segments,
+                )
 
         if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i_full_noise is not None:
             for i_extra, (pk_start, pk_end) in enumerate(time_avg_extra_regions, start=2):

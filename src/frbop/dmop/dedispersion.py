@@ -172,6 +172,7 @@ class DedispersionMixin:
 							dedispersed[i, t_out] = data[i, t]
 			
 		return dedispersed
+		
 	def _max_output_size_for_dm_range(self, data: np.ndarray, dm_range: Tuple[float, float]) -> int:
 		"""
 		Calculate the maximum output size needed for dedispersion across a DM range.

@@ -101,7 +101,7 @@ class ComparisonMixin:
 			if run_qu_methods:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 				if pa_values is not None:
 					pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 				if pa_shrine_values is not None:
@@ -117,7 +117,7 @@ class ComparisonMixin:
 		if run_structure:
 			print("  - Testing Structure Maximising (SHRINE)...")
 			run_prefix_structure = f"{label}_{segment_tag}_structure"
-			run_dir_structure = self._run_shrine_method(
+			run_dir_structure = self.run_shrine_method(
 				script_name="maximise_structure.py",
 				run_prefix=run_prefix_structure,
 				dm_values=dm_values,
@@ -167,7 +167,7 @@ class ComparisonMixin:
 		if run_snr:
 			print("  - Testing S/N Maximising (SHRINE)...")
 			run_prefix_snr = f"{label}_{segment_tag}_snr"
-			run_dir_snr = self._run_shrine_method(
+			run_dir_snr = self.run_shrine_method(
 				script_name="maximise_sn.py",
 				run_prefix=run_prefix_snr,
 				dm_values=dm_values,
@@ -211,13 +211,13 @@ class ComparisonMixin:
 			best_dedisp_i_pa = self.dedisperse(data, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pa = self.dedisperse(data_q, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pa = self.dedisperse(data_u, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
-			best_sm_i_pa, best_sm_q_pa, best_sm_u_pa = self._maybe_kc_smooth_nonshrine(best_dedisp_i_pa, best_dedisp_q_pa, best_dedisp_u_pa)
+			best_sm_i_pa, best_sm_q_pa, best_sm_u_pa = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pa, best_dedisp_q_pa, best_dedisp_u_pa)
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
 			metric_pa = float(pa_values[max_idx_pa])
 			pa_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_values)
 			run_prefix_pa = f"{label}_{segment_tag}_pa_slope"
-			run_dir_pa = self._save_nonshrine_run_outputs(
+			run_dir_pa = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pa,
 				method_label='PA Slope Maximising',
 				dm_values=dm_values,
@@ -253,7 +253,7 @@ class ComparisonMixin:
 			best_dedisp_i_pas = self.dedisperse(data, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pas = self.dedisperse(data_q, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pas = self.dedisperse(data_u, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
-			best_sm_i_pas, best_sm_q_pas, best_sm_u_pas = self._maybe_kc_smooth_nonshrine(best_dedisp_i_pas, best_dedisp_q_pas, best_dedisp_u_pas)
+			best_sm_i_pas, best_sm_q_pas, best_sm_u_pas = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pas, best_dedisp_q_pas, best_dedisp_u_pas)
 			best_pa_shrine_smooth, best_shrine_fit_line, best_shrine_time_axis = self._get_pa_shrine_smoothed_and_fit(
 				best_sm_q_pas,
 				best_sm_u_pas,
@@ -265,7 +265,7 @@ class ComparisonMixin:
 			metric_pas = float(pa_shrine_values[max_idx_pas])
 			pa_shrine_uncertainty = self._uncertainty_from_metric_shrine(dm_values, pa_shrine_values)
 			run_prefix_pas = f"{label}_{segment_tag}_pa_slope_shrine"
-			run_dir_pas = self._save_nonshrine_run_outputs(
+			run_dir_pas = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pas,
 				method_label='PA Slope Maximising (SHRINE PA)',
 				dm_values=dm_values,
@@ -309,7 +309,7 @@ class ComparisonMixin:
 				fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 			)
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
-			run_dir_li_mean = self._save_nonshrine_run_outputs(
+			run_dir_li_mean = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_li_mean,
 				method_label='L/I Maximising (mean)',
 				dm_values=dm_values,

@@ -41,7 +41,7 @@ class OptimisationMixin:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			if use_relative and uncertainty_reference_profiles is not None:
 				uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
@@ -51,7 +51,7 @@ class OptimisationMixin:
 		best_dedisp_q = self.dedisperse(data_q, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_u = self.dedisperse(data_u, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_i = self.dedisperse(data_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-		best_sm_i, best_sm_q, best_sm_u = self._maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
+		best_sm_i, best_sm_q, best_sm_u = self.maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
 		best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q, best_sm_u, best_sm_i, time_axis)
 		best_pa_deg = self._pa_series_deg(best_sm_q, best_sm_u, best_sm_i)
 		dedispersed_display = self.dedisperse(
@@ -80,7 +80,7 @@ class OptimisationMixin:
 			if data_i is not None
 			else self.dedisperse(self.stokes_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		)
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label='PA Slope Maximising',
 			dm_values=dm_values,
@@ -140,7 +140,7 @@ class OptimisationMixin:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			if use_relative and uncertainty_reference_profiles is not None:
 				uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
@@ -150,7 +150,7 @@ class OptimisationMixin:
 		best_dedisp_q = self.dedisperse(data_q, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_u = self.dedisperse(data_u, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_i = self.dedisperse(data_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-		best_sm_i, best_sm_q, best_sm_u = self._maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
+		best_sm_i, best_sm_q, best_sm_u = self.maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
 		best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_shrine_smoothed_and_fit(
 			best_sm_q,
 			best_sm_u,
@@ -185,7 +185,7 @@ class OptimisationMixin:
 			if data_i is not None
 			else self.dedisperse(self.stokes_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		)
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label='PA Slope Maximising (SHRINE PA)',
 			dm_values=dm_values,
@@ -248,7 +248,7 @@ class OptimisationMixin:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode)
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			if use_relative and uncertainty_reference_profiles is not None:
 				uncertainty_reference_profiles[i] = self._li_uncertainty_reference_profile(sm_q, sm_u, sm_i)
 			li_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode=mode)
@@ -277,7 +277,7 @@ class OptimisationMixin:
 			fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 		)
 		run_prefix = f"{label}_{segment or 'segment'}_l_i_{mode}"
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label=f"L/I Maximising ({mode})",
 			dm_values=dm_values,
@@ -343,7 +343,7 @@ class OptimisationMixin:
 			i_data[i] = np.nansum(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_structure"
-		run_dir = self._run_shrine_method(
+		run_dir = self.run_shrine_method(
 			script_name="maximise_structure.py",
 			run_prefix=run_prefix,
 			dm_values=dm_values,
@@ -423,7 +423,7 @@ class OptimisationMixin:
 			i_data[i] = np.nansum(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_snr"
-		run_dir = self._run_shrine_method(
+		run_dir = self.run_shrine_method(
 			script_name="maximise_sn.py",
 			run_prefix=run_prefix,
 			dm_values=dm_values,

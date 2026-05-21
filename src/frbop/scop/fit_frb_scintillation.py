@@ -893,7 +893,7 @@ def main():
 
     xabs = np.abs(lags_plot_sym)
 
-    comp_colors = IBM_PALETTE
+    comp_colors = IBM_PALETTE[::-1]
 
     ax.plot(lags_plot_sym, acf_plot_sym, label="ACF", color="k", lw=2)
     labels = ["Lorentzian", "Double Lorentzian", "Triple Lorentzian"]

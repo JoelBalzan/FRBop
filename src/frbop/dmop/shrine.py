@@ -16,7 +16,7 @@ from frbop.utils.plotting import pub_figsize, savefig_rasterized
 from .common import shrine_get_kc, shrine_lowpass_smooth
 
 class ShrineMixin:
-	def _apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
+	def apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
 		"""
 		Apply SHRINE low-pass filter using the shared SHRINE implementation.
 		"""
@@ -31,7 +31,7 @@ class ShrineMixin:
 		i_smooth, _, _, _ = shrine_lowpass_smooth(ci_data, kc_eff, order=3)
 		return i_smooth
 
-	def _resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
+	def resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
 		if self._nonshrine_resolved_kc is not None:
 			if not self._nonshrine_kc_printed:
 				print(f"Found kc of: {self._nonshrine_resolved_kc}")
@@ -54,7 +54,7 @@ class ShrineMixin:
 				seed_kc = int(shrine_get_kc(ci_data))
 			dm_values = np.arange(reference.shape[0], dtype=float)
 			run_prefix = "nonshrine_kc_min_unc"
-			run_dir = self._run_shrine_method(
+			run_dir = self.run_shrine_method(
 				script_name="minimise_uncertainty.py",
 				run_prefix=run_prefix,
 				dm_values=dm_values,
@@ -88,7 +88,7 @@ class ShrineMixin:
 		self._nonshrine_resolved_kc = None
 		self._nonshrine_kc_printed = False
 
-	def _maybe_kc_smooth_nonshrine(self,
+	def maybe_kc_smooth_nonshrine(self,
 									   data_i: Optional[np.ndarray],
 									   data_q: Optional[np.ndarray] = None,
 									   data_u: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
@@ -102,14 +102,14 @@ class ShrineMixin:
 		if reference is None:
 			return data_i, data_q, data_u
 
-		kc = self._resolve_nonshrine_kc(reference)
+		kc = self.resolve_nonshrine_kc(reference)
 
-		sm_i = self._apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
-		sm_q = self._apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
-		sm_u = self._apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
+		sm_i = self.apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
+		sm_q = self.apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
+		sm_u = self.apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
 		return sm_i, sm_q, sm_u
 
-	def _run_shrine_method(self,
+	def run_shrine_method(self,
 					   script_name: str,
 					   run_prefix: str,
 					   dm_values: np.ndarray,
@@ -147,7 +147,7 @@ class ShrineMixin:
 		subprocess.run(cmd, cwd=str(run_dir), check=True)
 		return run_dir
 
-	def _save_nonshrine_run_outputs(self,
+	def save_nonshrine_run_outputs(self,
 								   run_prefix: str,
 								   method_label: str,
 								   dm_values: np.ndarray,

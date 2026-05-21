@@ -376,7 +376,7 @@ class DMOptimiser:
 		# From pulsar handbook: dt = 4.15 × 10^6 ms × (f1^-2 - f2^-2) × DM
 		self.DM_CONSTANT = 4.148808e6
 
-	def _apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
+	def apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
 		"""
 		Apply SHRINE low-pass filter using the shared SHRINE implementation.
 		"""
@@ -391,7 +391,7 @@ class DMOptimiser:
 		i_smooth, _, _, _ = shrine_lowpass_smooth(ci_data, kc_eff, order=3)
 		return i_smooth
 
-	def _resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
+	def resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
 		if self._nonshrine_resolved_kc is not None:
 			if not self._nonshrine_kc_printed:
 				print(f"Found kc of: {self._nonshrine_resolved_kc}")
@@ -414,7 +414,7 @@ class DMOptimiser:
 				seed_kc = int(shrine_get_kc(ci_data))
 			dm_values = np.arange(reference.shape[0], dtype=float)
 			run_prefix = "nonshrine_kc_min_unc"
-			run_dir = self._run_shrine_method(
+			run_dir = self.run_shrine_method(
 				script_name="minimise_uncertainty.py",
 				run_prefix=run_prefix,
 				dm_values=dm_values,
@@ -448,7 +448,7 @@ class DMOptimiser:
 		self._nonshrine_resolved_kc = None
 		self._nonshrine_kc_printed = False
 
-	def _maybe_kc_smooth_nonshrine(self,
+	def maybe_kc_smooth_nonshrine(self,
 									   data_i: Optional[np.ndarray],
 									   data_q: Optional[np.ndarray] = None,
 									   data_u: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
@@ -462,14 +462,14 @@ class DMOptimiser:
 		if reference is None:
 			return data_i, data_q, data_u
 
-		kc = self._resolve_nonshrine_kc(reference)
+		kc = self.resolve_nonshrine_kc(reference)
 
-		sm_i = self._apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
-		sm_q = self._apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
-		sm_u = self._apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
+		sm_i = self.apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
+		sm_q = self.apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None
+		sm_u = self.apply_kc_lowpass_2d(data_u, kc) if data_u is not None else None
 		return sm_i, sm_q, sm_u
 
-	def _run_shrine_method(self,
+	def run_shrine_method(self,
 					   script_name: str,
 					   run_prefix: str,
 					   dm_values: np.ndarray,
@@ -507,7 +507,7 @@ class DMOptimiser:
 		subprocess.run(cmd, cwd=str(run_dir), check=True)
 		return run_dir
 
-	def _save_nonshrine_run_outputs(self,
+	def save_nonshrine_run_outputs(self,
 								   run_prefix: str,
 								   method_label: str,
 								   dm_values: np.ndarray,
@@ -1466,8 +1466,8 @@ class DMOptimiser:
 			if force_kc is not None:
 				kc = int(force_kc)
 			else:
-				kc = self._resolve_nonshrine_kc(pa_fill[np.newaxis, :])
-			pa_shrine = self._apply_kc_lowpass_2d(pa_fill[np.newaxis, :], kc)[0]
+				kc = self.resolve_nonshrine_kc(pa_fill[np.newaxis, :])
+			pa_shrine = self.apply_kc_lowpass_2d(pa_fill[np.newaxis, :], kc)[0]
 			pa_shrine_smooth = np.where(np.isfinite(pa_deg_masked), pa_shrine, np.nan)
 
 			weights = self._pa_fit_weights(L_debias, sigma_L, data_i, valid)
@@ -1701,7 +1701,7 @@ class DMOptimiser:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 
@@ -1710,7 +1710,7 @@ class DMOptimiser:
 		best_dedisp_q = self.dedisperse(data_q, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_u = self.dedisperse(data_u, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_i = self.dedisperse(data_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-		best_sm_i, best_sm_q, best_sm_u = self._maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
+		best_sm_i, best_sm_q, best_sm_u = self.maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
 		best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q, best_sm_u, best_sm_i, time_axis)
 		best_pa_deg = self._pa_series_deg(best_sm_q, best_sm_u, best_sm_i)
 		dedispersed_display = self.dedisperse(
@@ -1735,7 +1735,7 @@ class DMOptimiser:
 			if data_i is not None
 			else self.dedisperse(self.stokes_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		)
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label='PA Slope Maximising',
 			dm_values=dm_values,
@@ -1792,7 +1792,7 @@ class DMOptimiser:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
 
@@ -1801,7 +1801,7 @@ class DMOptimiser:
 		best_dedisp_q = self.dedisperse(data_q, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_u = self.dedisperse(data_u, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		best_dedisp_i = self.dedisperse(data_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
-		best_sm_i, best_sm_q, best_sm_u = self._maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
+		best_sm_i, best_sm_q, best_sm_u = self.maybe_kc_smooth_nonshrine(best_dedisp_i, best_dedisp_q, best_dedisp_u)
 		best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_shrine_smoothed_and_fit(
 			best_sm_q,
 			best_sm_u,
@@ -1832,7 +1832,7 @@ class DMOptimiser:
 			if data_i is not None
 			else self.dedisperse(self.stokes_i, optimal_dm, output_size=output_size, mode=self.dedisp_mode)
 		)
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label='PA Slope Maximising (SHRINE PA)',
 			dm_values=dm_values,
@@ -1892,7 +1892,7 @@ class DMOptimiser:
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode)
-			sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 			uncertainty_reference_profiles[i] = self._li_uncertainty_reference_profile(sm_q, sm_u, sm_i)
 			li_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode=mode)
 
@@ -1926,7 +1926,7 @@ class DMOptimiser:
 			fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 		)
 		run_prefix = f"{label}_{segment or 'segment'}_l_i_{mode}"
-		run_dir = self._save_nonshrine_run_outputs(
+		run_dir = self.save_nonshrine_run_outputs(
 			run_prefix=run_prefix,
 			method_label=f"L/I Maximising ({mode})",
 			dm_values=dm_values,
@@ -1992,7 +1992,7 @@ class DMOptimiser:
 			i_data[i] = np.nanmean(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_structure"
-		run_dir = self._run_shrine_method(
+		run_dir = self.run_shrine_method(
 			script_name="maximise_structure.py",
 			run_prefix=run_prefix,
 			dm_values=dm_values,
@@ -2072,7 +2072,7 @@ class DMOptimiser:
 			i_data[i] = np.nanmean(dedispersed, axis=0)
 
 		run_prefix = f"{label}_{segment or 'segment'}_snr"
-		run_dir = self._run_shrine_method(
+		run_dir = self.run_shrine_method(
 			script_name="maximise_sn.py",
 			run_prefix=run_prefix,
 			dm_values=dm_values,
@@ -2277,7 +2277,7 @@ class DMOptimiser:
 			if run_qu_methods:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 				if pa_values is not None:
 					pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 				if pa_shrine_values is not None:
@@ -2293,7 +2293,7 @@ class DMOptimiser:
 		if run_structure:
 			print("  - Testing Structure Maximising (SHRINE)...")
 			run_prefix_structure = f"{label}_{segment_tag}_structure"
-			run_dir_structure = self._run_shrine_method(
+			run_dir_structure = self.run_shrine_method(
 				script_name="maximise_structure.py",
 				run_prefix=run_prefix_structure,
 				dm_values=dm_values,
@@ -2343,7 +2343,7 @@ class DMOptimiser:
 		if run_snr:
 			print("  - Testing S/N Maximising (SHRINE)...")
 			run_prefix_snr = f"{label}_{segment_tag}_snr"
-			run_dir_snr = self._run_shrine_method(
+			run_dir_snr = self.run_shrine_method(
 				script_name="maximise_sn.py",
 				run_prefix=run_prefix_snr,
 				dm_values=dm_values,
@@ -2387,7 +2387,7 @@ class DMOptimiser:
 			best_dedisp_i_pa = self.dedisperse(data, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pa = self.dedisperse(data_q, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pa = self.dedisperse(data_u, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
-			best_sm_i_pa, best_sm_q_pa, best_sm_u_pa = self._maybe_kc_smooth_nonshrine(best_dedisp_i_pa, best_dedisp_q_pa, best_dedisp_u_pa)
+			best_sm_i_pa, best_sm_q_pa, best_sm_u_pa = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pa, best_dedisp_q_pa, best_dedisp_u_pa)
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
 			metric_pa = float(pa_values[max_idx_pa])
@@ -2401,7 +2401,7 @@ class DMOptimiser:
 			else:
 				pa_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_values, max_idx_pa)
 			run_prefix_pa = f"{label}_{segment_tag}_pa_slope"
-			run_dir_pa = self._save_nonshrine_run_outputs(
+			run_dir_pa = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pa,
 				method_label='PA Slope Maximising',
 				dm_values=dm_values,
@@ -2437,7 +2437,7 @@ class DMOptimiser:
 			best_dedisp_i_pas = self.dedisperse(data, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pas = self.dedisperse(data_q, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pas = self.dedisperse(data_u, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
-			best_sm_i_pas, best_sm_q_pas, best_sm_u_pas = self._maybe_kc_smooth_nonshrine(best_dedisp_i_pas, best_dedisp_q_pas, best_dedisp_u_pas)
+			best_sm_i_pas, best_sm_q_pas, best_sm_u_pas = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pas, best_dedisp_q_pas, best_dedisp_u_pas)
 			best_pa_shrine_smooth, best_shrine_fit_line, best_shrine_time_axis = self._get_pa_shrine_smoothed_and_fit(
 				best_sm_q_pas,
 				best_sm_u_pas,
@@ -2457,7 +2457,7 @@ class DMOptimiser:
 			else:
 				pa_shrine_uncertainty = self._uncertainty_from_half_prominence(dm_values, pa_shrine_values, max_idx_pas)
 			run_prefix_pas = f"{label}_{segment_tag}_pa_slope_shrine"
-			run_dir_pas = self._save_nonshrine_run_outputs(
+			run_dir_pas = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pas,
 				method_label='PA Slope Maximising (SHRINE PA)',
 				dm_values=dm_values,
@@ -2523,7 +2523,7 @@ class DMOptimiser:
 				fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
 			)
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
-			run_dir_li_mean = self._save_nonshrine_run_outputs(
+			run_dir_li_mean = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_li_mean,
 				method_label='L/I Maximising (mean)',
 				dm_values=dm_values,
@@ -3018,7 +3018,7 @@ class DMOptimiser:
 			if pa_slope_values is not None:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
 				pa_slope_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 				if l_i_mean_values is not None:
 					l_i_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean')
@@ -3026,7 +3026,7 @@ class DMOptimiser:
 		run_tag = f"scan_{int(np.round(dm_values[0] * 1000))}_{int(np.round(dm_values[-1] * 1000))}_{len(dm_values)}"
 
 		run_prefix_structure = f"{run_tag}_structure"
-		run_dir_structure = self._run_shrine_method(
+		run_dir_structure = self.run_shrine_method(
 			script_name="maximise_structure.py",
 			run_prefix=run_prefix_structure,
 			dm_values=dm_values,
@@ -3037,7 +3037,7 @@ class DMOptimiser:
 		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
 
 		run_prefix_snr = f"{run_tag}_snr"
-		run_dir_snr = self._run_shrine_method(
+		run_dir_snr = self.run_shrine_method(
 			script_name="maximise_sn.py",
 			run_prefix=run_prefix_snr,
 			dm_values=dm_values,
@@ -3061,7 +3061,7 @@ class DMOptimiser:
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-				sm_i, sm_q, sm_u = self._maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
+				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 				pa_slope_shrine_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
 			metrics['pa_slope_shrine'] = pa_slope_shrine_values
 		if l_i_mean_values is not None:

@@ -4,6 +4,7 @@ Plotting functions for RM analysis:
   - plot_burns_law_fits
   - plot_rm_time_series
   - plot_poincare_sphere
+    - plot_poincare_sphere_frequency
   - plot_poincare_projections
 
 Also contains the Poincaré-sphere helper functions that are shared between
@@ -17,7 +18,7 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import savefig_rasterized, pub_figsize
+from frbop.utils.plotting import savefig_rasterized, pub_figsize, IBM_PALETTE
 from frbop.utils.peaks import (
     select_frequency_bands_manual,
     split_frequency_bands_equal,
@@ -587,6 +588,211 @@ def plot_poincare_sphere(
         plt.show()
     _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Poincaré sphere plot saved to {output_file}")
+    plt.close()
+
+
+def plot_poincare_sphere_frequency(
+        freq_hz: np.ndarray,
+        stokes_i: np.ndarray,
+        stokes_q: np.ndarray,
+        stokes_u: np.ndarray,
+        stokes_v: Optional[np.ndarray] = None,
+        output_file: str = 'poincare_sphere_frequency.png',
+        sigma_i: Optional[np.ndarray] = None,
+        sigma_q: Optional[np.ndarray] = None,
+        sigma_u: Optional[np.ndarray] = None,
+        sigma_v: Optional[np.ndarray] = None,
+        snr_threshold: float = 2.0,
+        interactive: bool = False,
+        force_surface: bool = False,
+        circle_fit_mode: Optional[str] = None,
+        circle_fit_segments: Optional[List[Tuple[int, int]]] = None) -> None:
+    """Plot the Poincare sphere for a time-averaged spectrum as a function of frequency."""
+    freq_hz = np.asarray(freq_hz, dtype=float)
+    i_val = np.asarray(stokes_i, dtype=float)
+    q_val = np.asarray(stokes_q, dtype=float)
+    u_val = np.asarray(stokes_u, dtype=float)
+    v_val = np.asarray(stokes_v, dtype=float) if stokes_v is not None else np.zeros_like(i_val)
+
+    if freq_hz.ndim != 1 or i_val.ndim != 1 or q_val.ndim != 1 or u_val.ndim != 1:
+        raise ValueError("Frequency Poincare plotting requires 1D Stokes arrays.")
+
+    n_data = min(freq_hz.size, i_val.size, q_val.size, u_val.size, v_val.size)
+    if n_data == 0:
+        print("Warning: no frequency channels available for Poincare plot.")
+        return
+    if freq_hz.size != n_data or i_val.size != n_data or q_val.size != n_data or u_val.size != n_data or v_val.size != n_data:
+        print("Warning: trimming frequency Poincare inputs to the common channel count.")
+
+    freq_hz = freq_hz[:n_data]
+    i_val = i_val[:n_data]
+    q_val = q_val[:n_data]
+    u_val = u_val[:n_data]
+    v_val = v_val[:n_data]
+
+    valid = np.isfinite(freq_hz) & np.isfinite(i_val) & np.isfinite(q_val) & np.isfinite(u_val) & np.isfinite(v_val)
+    if sigma_i is not None:
+        sigma_i = np.asarray(sigma_i, dtype=float)[:n_data]
+        sigma_q = np.asarray(sigma_q if sigma_q is not None else np.zeros_like(i_val), dtype=float)[:n_data]
+        sigma_u = np.asarray(sigma_u if sigma_u is not None else np.zeros_like(i_val), dtype=float)[:n_data]
+        sigma_v = np.asarray(sigma_v if sigma_v is not None else np.zeros_like(i_val), dtype=float)[:n_data]
+        i_snr = i_val / (sigma_i + 1e-10)
+        valid &= i_snr >= snr_threshold
+        if np.sum(valid) < 2:
+            print(
+                f"Warning: only {np.sum(valid)} channels above SNR threshold {snr_threshold:.1f}. "
+                "Lowering the threshold to 1.0."
+            )
+            valid = np.isfinite(freq_hz) & np.isfinite(i_val) & np.isfinite(q_val) & np.isfinite(u_val) & np.isfinite(v_val)
+            valid &= i_snr >= 1.0
+
+        sigma_q_norm = np.sqrt((sigma_q / (i_val + 1e-10)) ** 2 + ((q_val * sigma_i) / ((i_val + 1e-10) ** 2)) ** 2)
+        sigma_u_norm = np.sqrt((sigma_u / (i_val + 1e-10)) ** 2 + ((u_val * sigma_i) / ((i_val + 1e-10) ** 2)) ** 2)
+        sigma_v_norm = np.sqrt((sigma_v / (i_val + 1e-10)) ** 2 + ((v_val * sigma_i) / ((i_val + 1e-10) ** 2)) ** 2)
+    else:
+        sigma_q_norm = np.zeros_like(i_val)
+        sigma_u_norm = np.zeros_like(i_val)
+        sigma_v_norm = np.zeros_like(i_val)
+
+    if np.sum(valid) < 2:
+        print("Error: fewer than 2 frequency channels survive the Poincare plot cut. Cannot plot.")
+        return
+
+    filtered_idx = np.flatnonzero(valid)
+    q_filt = q_val[valid] / (i_val[valid] + 1e-10)
+    u_filt = u_val[valid] / (i_val[valid] + 1e-10)
+    v_filt = v_val[valid] / (i_val[valid] + 1e-10)
+    freq_mhz = freq_hz[valid] / 1e6
+    sigma_q_filt = sigma_q_norm[valid]
+    sigma_u_filt = sigma_u_norm[valid]
+    sigma_v_filt = sigma_v_norm[valid]
+
+    if force_surface:
+        vecs = np.vstack([q_filt, u_filt, v_filt])
+        norms = np.linalg.norm(vecs, axis=0)
+        norms[norms == 0] = 1.0
+        q_filt = q_filt / norms
+        u_filt = u_filt / norms
+        v_filt = v_filt / norms
+        q_filt *= 1.002
+        u_filt *= 1.002
+        v_filt *= 1.002
+
+    sigma_lon_deg, sigma_lat_deg = _poincare_angle_errors_deg(
+        q_filt, u_filt, v_filt, sigma_q_filt, sigma_u_filt, sigma_v_filt
+    )
+
+    style = plot_style()
+
+    fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+    ax = fig.add_subplot(111, projection='3d')
+
+    u_s = np.linspace(0, 2 * np.pi, 100)
+    v_s = np.linspace(0, np.pi, 100)
+    xs = np.outer(np.cos(u_s), np.sin(v_s))
+    ys = np.outer(np.sin(u_s), np.sin(v_s))
+    zs = np.outer(np.ones_like(u_s), np.cos(v_s))
+
+    ax.plot_surface(xs, ys, zs, color='lightgray', alpha=0.2, rstride=4, cstride=4,
+                    linewidth=0, antialiased=True, zorder=1)
+    n_grid = 12
+    for lat in np.linspace(0, np.pi, n_grid, endpoint=False)[1:]:
+        x_lat = np.cos(u_s) * np.sin(lat)
+        y_lat = np.sin(u_s) * np.sin(lat)
+        z_lat = np.full_like(u_s, np.cos(lat))
+        ax.plot(x_lat, y_lat, z_lat, color='gray', alpha=0.3, linewidth=0.5)
+    for lon in np.linspace(0, 2 * np.pi, n_grid, endpoint=False):
+        x_lon = np.cos(lon) * np.sin(v_s)
+        y_lon = np.sin(lon) * np.sin(v_s)
+        z_lon = np.cos(v_s)
+        ax.plot(x_lon, y_lon, z_lon, color='gray', alpha=0.3, linewidth=0.5)
+
+    sc = ax.scatter(q_filt, u_filt, v_filt,
+                    c=freq_mhz, cmap='plasma',
+                    s=60, alpha=1,
+                    edgecolors='black', linewidth=0.6, zorder=200,
+                    depthshade=True)
+
+    lon_deg = np.degrees(np.arctan2(u_filt, q_filt))
+    r_vec = np.sqrt(q_filt ** 2 + u_filt ** 2 + v_filt ** 2)
+    lat_deg = np.degrees(np.arcsin(np.clip(v_filt / (r_vec + 1e-20), -1.0, 1.0)))
+
+    def _sph_to_cart(lon_d: float, lat_d: float, radius: float) -> Tuple[float, float, float]:
+        lon_r = np.radians(lon_d)
+        lat_r = np.radians(lat_d)
+        x = radius * np.cos(lat_r) * np.cos(lon_r)
+        y = radius * np.cos(lat_r) * np.sin(lon_r)
+        z = radius * np.sin(lat_r)
+        return float(x), float(y), float(z)
+
+    for i in range(len(q_filt)):
+        if not (np.isfinite(lon_deg[i]) and np.isfinite(lat_deg[i]) and np.isfinite(r_vec[i])):
+            continue
+
+        dlon = float(sigma_lon_deg[i]) if np.isfinite(sigma_lon_deg[i]) else 0.0
+        dlat = float(sigma_lat_deg[i]) if np.isfinite(sigma_lat_deg[i]) else 0.0
+        rr = float(r_vec[i])
+
+        if dlon > 0:
+            x1, y1, z1 = _sph_to_cart(lon_deg[i] - dlon, lat_deg[i], rr)
+            x2, y2, z2 = _sph_to_cart(lon_deg[i] + dlon, lat_deg[i], rr)
+            ax.plot([x1, x2], [y1, y2], [z1, z2], color='0.45', linewidth=0.7, alpha=0.6, zorder=150)
+
+        if dlat > 0:
+            lat_lo = max(-89.9, lat_deg[i] - dlat)
+            lat_hi = min(89.9, lat_deg[i] + dlat)
+            x1, y1, z1 = _sph_to_cart(lon_deg[i], lat_lo, rr)
+            x2, y2, z2 = _sph_to_cart(lon_deg[i], lat_hi, rr)
+            ax.plot([x1, x2], [y1, y2], [z1, z2], color='0.45', linewidth=0.7, alpha=0.6, zorder=150)
+
+    if circle_fit_mode is not None and len(q_filt) >= 3:
+        segments = _build_circle_segments(len(q_filt), circle_fit_segments, filtered_indices=filtered_idx)
+        color_cycle = plt.cm.tab10(np.linspace(0, 1, max(1, len(segments))))
+        points_xyz = np.column_stack([q_filt, u_filt, v_filt])
+        for i_seg, (s_idx, e_idx) in enumerate(segments):
+            fit = _fit_circle_on_sphere(points_xyz[s_idx:e_idx + 1], mode=circle_fit_mode)
+            if fit is None:
+                continue
+            arc = fit['arc_xyz']
+            ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
+                    linestyle='--', linewidth=1.2, alpha=0.9,
+                    color=color_cycle[i_seg], zorder=140)
+
+    if len(q_filt) >= 1:
+        mean_vec = np.array([np.mean(q_filt), np.mean(u_filt), np.mean(v_filt)])
+        norm = np.linalg.norm(mean_vec)
+        if norm > 0:
+            azim = np.degrees(np.arctan2(mean_vec[1], mean_vec[0]))
+            elev = np.degrees(np.arcsin(mean_vec[2] / norm))
+            ax.view_init(elev=elev, azim=azim)
+
+    cbar = plt.colorbar(sc, ax=ax, shrink=0.6, pad=0.02,
+                        orientation='horizontal', fraction=0.04)
+    cbar.set_label("Frequency (MHz)", fontsize=style['label'], labelpad=5)
+    cbar.ax.tick_params(labelsize=style['tick'])
+
+    ax.set_xlabel('Q', fontsize=style['label'], labelpad=-6)
+    ax.set_ylabel('U', fontsize=style['label'], labelpad=-6)
+    ax.set_zlabel('V', fontsize=style['label'], labelpad=-6)
+    try:
+        ax.xaxis.set_label_position('left')
+        ax.yaxis.set_label_position('right')
+    except Exception:
+        pass
+    ax.set_xlim([-1.1, 1.1])
+    ax.set_ylim([-1.1, 1.1])
+    ax.set_zlim([-1.1, 1.1])
+    ax.set_box_aspect([1, 1, 1])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+
+    plt.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
+    fig.canvas.draw()
+    _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+    if interactive:
+        plt.show()
+    print(f"Poincare frequency sphere plot saved to {output_file}")
     plt.close()
 
 
@@ -1570,18 +1776,23 @@ def plot_rm_time_series(time_array: np.ndarray,
         if rm_err_peak is not None:
             rm_err_peak = rm_err_peak[peak_mask]
             ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-                                 fmt='o-', color='limegreen', markersize=3,
+                                 fmt='o-', color=IBM_PALETTE[-1], markersize=5,
                                  linewidth=1.5, capsize=2, alpha=1,
+                                 markeredgecolor='white', markeredgewidth=1,
                                  label='RM')
         else:
-            ax_top_twin.plot(tms, rm_peak, 'o-', color='limegreen', linewidth=1.5, markersize=3, label='RM')
+            ax_top_twin.plot(tms, rm_peak, 
+            'o-', color=IBM_PALETTE[-1], markersize=5, 
+            linewidth=1.5, 
+            markeredgecolor='white', markeredgewidth=1,
+            label='RM')
 
         ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
         ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
         ax_top.tick_params(axis='y', labelsize=style['tick'])
         ax_top.tick_params(right=False, labelright=False)
-        ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L')
-        ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V')
+        ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L', alpha=1)
+        ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V', alpha=1)
 
         if time_series_data is not None and freq_hz is not None and not rm_results.get('is_binned', False):
             if time_series_data['I'].shape[0] == len(time_array):
@@ -2610,4 +2821,204 @@ def plot_burns_law_fits(fitter: RMFitter,
     plt.tight_layout()
     _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
     print(f"Burn-law fit plot saved to {output_file}")
+    plt.close()
+
+
+def plot_polarisation_fraction_acf_ccf(
+        fitter: RMFitter,
+        output_file: str = 'polarisation_fraction_acf_ccf.png') -> None:
+    """Plot ACFs for L/I and V/I (computed on the original fractions), plus their cross-correlation on a common frequency grid.
+    A linear trend is still shown as an overlay but ACF/CCF are computed from the raw interpolated fraction series.
+    """
+    freq_hz = np.asarray(fitter.freq_hz, dtype=float)
+    freq_mhz = freq_hz / 1e6
+    stokes_i = np.asarray(fitter.stokes_i, dtype=float)
+    stokes_q = np.asarray(fitter.stokes_q, dtype=float)
+    stokes_u = np.asarray(fitter.stokes_u, dtype=float)
+    stokes_v = None if fitter.stokes_v is None else np.asarray(fitter.stokes_v, dtype=float)
+
+    valid = np.isfinite(freq_mhz) & np.isfinite(freq_hz) & (freq_hz > 0)
+    valid &= np.isfinite(stokes_i) & (stokes_i > 0)
+    valid &= np.isfinite(stokes_q) & np.isfinite(stokes_u)
+    if stokes_v is not None:
+        valid &= np.isfinite(stokes_v)
+
+    if np.sum(valid) < 8:
+        print("Warning: insufficient valid points for fraction ACF/CCF diagnostic; skipping plot.")
+        return
+
+    x = np.asarray(freq_mhz[valid], dtype=float)
+    order = np.argsort(x)
+    x = x[order]
+    q_frac = stokes_q[valid] / (stokes_i[valid] + 1e-10)
+    u_frac = stokes_u[valid] / (stokes_i[valid] + 1e-10)
+    l_frac = np.sqrt(stokes_q[valid] ** 2 + stokes_u[valid] ** 2) / (stokes_i[valid] + 1e-10)
+    q_frac = np.asarray(q_frac, dtype=float)[order]
+    u_frac = np.asarray(u_frac, dtype=float)[order]
+    l_frac = np.asarray(l_frac, dtype=float)[order]
+    v_frac = None if stokes_v is None else (stokes_v[valid] / (stokes_i[valid] + 1e-10))[order]
+
+    n_grid = int(min(512, max(64, 4 * x.size)))
+    grid = np.linspace(float(np.nanmin(x)), float(np.nanmax(x)), n_grid)
+    q_grid = np.interp(grid, x, q_frac)
+    u_grid = np.interp(grid, x, u_frac)
+    l_grid = np.interp(grid, x, l_frac)
+    v_grid = np.interp(grid, x, v_frac) if v_frac is not None else None
+
+    def _detrend(values: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        coeffs = np.polyfit(grid, values, deg=1)
+        trend = np.polyval(coeffs, grid)
+        resid = values - trend
+        resid = resid - np.nanmean(resid)
+        return resid, trend
+
+    def _norm_acf(values: np.ndarray) -> np.ndarray:
+        centered = values - np.nanmean(values)
+        corr = np.correlate(centered, centered, mode='full')
+        mid = corr.size // 2
+        denom = corr[mid]
+        if not np.isfinite(denom) or denom <= 0:
+            return np.full_like(corr, np.nan, dtype=float)
+        return corr / denom
+
+    def _norm_ccf(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        left_c = left - np.nanmean(left)
+        right_c = right - np.nanmean(right)
+        corr = np.correlate(left_c, right_c, mode='full')
+        denom = np.sqrt(np.sum(left_c ** 2) * np.sum(right_c ** 2))
+        if not np.isfinite(denom) or denom <= 0:
+            return np.full_like(corr, np.nan, dtype=float)
+        return corr / denom
+
+    q_resid, q_trend = _detrend(q_grid)
+    u_resid, u_trend = _detrend(u_grid)
+    l_resid, l_trend = _detrend(l_grid)
+    v_resid = v_trend = None
+    if v_grid is not None:
+        v_resid, v_trend = _detrend(v_grid)
+
+    dx = float(grid[1] - grid[0]) if grid.size > 1 else 1.0
+    lags = np.arange(-grid.size + 1, grid.size, dtype=float) * dx
+    acf_q = _norm_acf(q_resid)
+    acf_u = _norm_acf(u_resid)
+    acf_l = _norm_acf(l_resid)
+    acf_v = _norm_acf(v_resid) if v_resid is not None else None
+    ccf_qu = _norm_ccf(q_resid, u_resid)
+    ccf_lv = _norm_ccf(l_resid, v_resid) if v_resid is not None else None
+
+
+    if acf_l.size != lags.size:
+        print("Warning: unexpected ACF size mismatch; skipping fraction ACF/CCF plot.")
+        return
+
+    conf = 1.96 / np.sqrt(grid.size)
+    pos = lags > 0
+    best_q_idx = int(np.nanargmax(np.where(pos, acf_q, np.nan)))
+    best_q_lag = float(lags[best_q_idx])
+    best_q_val = float(acf_q[best_q_idx])
+    q_oscillatory = bool(np.isfinite(best_q_val) and best_q_val > conf)
+
+    best_u_idx = int(np.nanargmax(np.where(pos, acf_u, np.nan)))
+    best_u_lag = float(lags[best_u_idx])
+    best_u_val = float(acf_u[best_u_idx])
+    u_oscillatory = bool(np.isfinite(best_u_val) and best_u_val > conf)
+
+    best_l_idx = int(np.nanargmax(np.where(pos, acf_l, np.nan)))
+    best_l_lag = float(lags[best_l_idx])
+    best_l_val = float(acf_l[best_l_idx])
+    l_oscillatory = bool(np.isfinite(best_l_val) and best_l_val > conf)
+
+    v_summary = None
+    if acf_v is not None:
+        best_v_idx = int(np.nanargmax(np.where(pos, acf_v, np.nan)))
+        best_v_lag = float(lags[best_v_idx])
+        best_v_val = float(acf_v[best_v_idx])
+        v_oscillatory = bool(np.isfinite(best_v_val) and best_v_val > conf)
+        v_summary = (best_v_lag, best_v_val, v_oscillatory)
+
+    ccf_summary = None
+    if ccf_lv is not None:
+        ccf_best_idx = int(np.nanargmax(np.abs(ccf_lv)))
+        ccf_summary = (float(lags[ccf_best_idx]), float(ccf_lv[ccf_best_idx]), bool(abs(ccf_lv[ccf_best_idx]) > conf))
+
+    ccf_qu_summary = None
+    if ccf_qu is not None:
+        ccf_qu_best_idx = int(np.nanargmax(np.abs(ccf_qu)))
+        ccf_qu_summary = (float(lags[ccf_qu_best_idx]), float(ccf_qu[ccf_qu_best_idx]), bool(abs(ccf_qu[ccf_qu_best_idx]) > conf))
+
+    print("\nPolarisation-fraction correlation diagnostics (ACFs computed on original fractions):")
+    print(f"  Uniform frequency grid: {grid.size} samples, Δν={dx:.6e} MHz")
+    print(f"  Q/I ACF peak: lag={best_q_lag:.6e} MHz, r={best_q_val:.3f}, above 95% white-noise band={q_oscillatory}")
+    print(f"  U/I ACF peak: lag={best_u_lag:.6e} MHz, r={best_u_val:.3f}, above 95% white-noise band={u_oscillatory}")
+    print(f"  L/I ACF peak: lag={best_l_lag:.6e} MHz, r={best_l_val:.3f}, above 95% white-noise band={l_oscillatory}")
+    if v_summary is not None:
+        best_v_lag, best_v_val, v_oscillatory = v_summary
+        print(f"  V/I ACF peak: lag={best_v_lag:.6e} MHz, r={best_v_val:.3f}, above 95% white-noise band={v_oscillatory}")
+    else:
+        print("  V/I ACF peak: skipped (no valid V data)")
+    if ccf_qu_summary is not None:
+        ccf_lag, ccf_val, ccf_sig = ccf_qu_summary
+        print(f"  Q/I vs U/I cross-correlation peak: lag={ccf_lag:.6e} MHz, r={ccf_val:.3f}, above 95% white-noise band={ccf_sig}")
+    if ccf_summary is not None:
+        ccf_lag, ccf_val, ccf_sig = ccf_summary
+        print(f"  L/I vs V/I cross-correlation peak: lag={ccf_lag:.6e} MHz, r={ccf_val:.3f}, above 95% white-noise band={ccf_sig}")
+
+    style = plot_style()
+    fig, axes = plt.subplots(
+        3,
+        1,
+        figsize=pub_figsize(single_column=False, height_ratio=1.05, min_height=7.2),
+        sharex=False,
+    )
+
+    axes[0].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
+    axes[0].plot(grid, q_grid, color='#6a3d9a', linewidth=1.2, label='Q/I')
+    axes[0].plot(grid, u_grid, color='#ff7f00', linewidth=1.2, label='U/I')
+    axes[0].plot(grid, q_trend, color='#6a3d9a', linewidth=1.0, linestyle='--', alpha=0.45, label='Q/I trend')
+    axes[0].plot(grid, u_trend, color='#ff7f00', linewidth=1.0, linestyle='--', alpha=0.45, label='U/I trend')
+    axes[0].set_ylabel('Q/I, U/I', fontsize=style['label'])
+    axes[0].legend(fontsize=style['legend'], loc='best')
+    axes[0].grid(True, alpha=0.3)
+    axes[0].tick_params(axis='both', labelsize=style['tick'])
+
+    axes[1].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
+    if v_grid is not None and v_resid is not None and v_trend is not None:
+        axes[1].plot(grid, l_grid, color='r', linewidth=1.2, label='L/I')
+        axes[1].plot(grid, v_grid, color='b', linewidth=1.2, label='V/I')
+        axes[1].plot(grid, l_trend, color='r', linewidth=1.0, linestyle='--', alpha=0.45, label='L/I trend')
+        axes[1].plot(grid, v_trend, color='b', linewidth=1.0, linestyle='--', alpha=0.45, label='V/I trend')
+        axes[1].set_ylabel('L/I, V/I', fontsize=style['label'])
+        axes[1].legend(fontsize=style['legend'], loc='best')
+    else:
+        axes[1].plot(grid, l_grid, color='r', linewidth=1.2, label='L/I')
+        axes[1].plot(grid, l_trend, color='r', linewidth=1.0, linestyle='--', alpha=0.45, label='L/I trend')
+        axes[1].text(0.02, 0.88, 'No valid V/I data', ha='left', va='top', transform=axes[1].transAxes)
+        axes[1].set_ylabel('L/I', fontsize=style['label'])
+    axes[1].grid(True, alpha=0.3)
+    axes[1].tick_params(axis='both', labelsize=style['tick'])
+
+    axes[2].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
+    axes[2].plot(lags, acf_q, color='#6a3d9a', linewidth=1.3, label='ACF Q/I')
+    axes[2].plot(lags, acf_u, color='#ff7f00', linewidth=1.3, label='ACF U/I')
+    #axes[2].plot(lags, acf_l, color='r', linewidth=1.5, label='ACF L/I')
+    axes[2].axhline(conf, color='0.4', linestyle=':', linewidth=1.0, label='95% band')
+    axes[2].axhline(-conf, color='0.4', linestyle=':', linewidth=1.0)
+    if acf_v is not None:
+        axes[2].plot(lags, acf_v, color='b', linewidth=1.5, label='ACF V/I')
+    #if ccf_qu is not None:
+    #    axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=1.2, linestyle='--', label='CCF Q/I vs U/I')
+    #if ccf_lv is not None:
+    #    axes[2].plot(lags, ccf_lv, color='k', linewidth=1.2, linestyle='--', label='CCF L/I vs V/I')
+    axes[2].set_xlabel(r'Lag in Frequency (MHz)', fontsize=style['label'])
+    axes[2].set_ylabel('Correlation', fontsize=style['label'])
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend(fontsize=style['legend'], loc='best')
+    axes[2].tick_params(axis='both', labelsize=style['tick'])
+
+    plt.tight_layout()
+    import os as _os
+    stem, ext = _os.path.splitext(output_file)
+    out_file = output_file if ext else f"{output_file}.png"
+    _savefig_rasterized(out_file, dpi=600, bbox_inches='tight')
+    print(f"Polarisation fraction correlation plot saved to {out_file}")
     plt.close()
