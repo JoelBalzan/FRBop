@@ -516,6 +516,7 @@ def main():
     terr_crop = frb_config.get('terr_crop', None)
     f_crop = frb_config.get('f_crop', None)
     ferr_crop = frb_config.get('ferr_crop', None)
+    zap_channels = frb_config.get('zap_chan', None)
     
     # find_frb parameters (support both legacy and pass-based config sections)
     find_frb_config = {}
@@ -652,6 +653,7 @@ def main():
         'dt': loaded_dt,
         'df': df,
         'f0': f0,
+        'zapchan': zap_channels,
     }
     if pa0 is not None:
         frb_kwargs['pa0'] = pa0
