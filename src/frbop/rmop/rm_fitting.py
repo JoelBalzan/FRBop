@@ -17,6 +17,7 @@ from .fitter import RMFitter, fit_rm_time_series
 from .plotting import (
     plot_burns_law_fits,
     plot_polarisation_fraction_acf_ccf,
+    plot_poincare_projections_frequency,
     plot_poincare_projections,
     plot_poincare_sphere,
     plot_poincare_sphere_frequency,
@@ -188,11 +189,11 @@ def main() -> None:
         nargs="?",
         const="all",
         default=None,
-        choices=["all", "gnom", "stere", "aeqd", "ortho"],
+        choices=["all", "gnom", "stere", "aeqd", "ortho", "equirect", "robin"],
         help=(
             "Generate Poincare projections. Use 'all' (default when flag is present) "
-            "for a 2x2 panel, or a single projection type: gnom, stere, aeqd, ortho. "
-            "Requires --time-series and --poincare."
+            "for a panel, or a single projection type: gnom, stere, aeqd, ortho, equirect, robin. "
+            "Requires --poincare."
         ),
     )
     parser.add_argument(
@@ -733,8 +734,6 @@ def main() -> None:
                     circ_valid_mask=burn_circ_valid_mask,
                     show_frac_panel=not args.hide_rm_frac_panel,
                 )
-            if args.poincare:
-                print("Warning: --poincare requested but not running in time-series mode; skipping.")
 
         elif args.method == "rm_synthesis":
             result = fitter._fit_rm_with_rmtools(rm_range=tuple(args.rm_range), n_rm=args.n_rm)
@@ -756,8 +755,6 @@ def main() -> None:
                     circ_valid_mask=burn_circ_valid_mask,
                     show_frac_panel=not args.hide_rm_frac_panel,
                 )
-            if args.poincare:
-                print("Warning: --poincare requested but not running in time-series mode; skipping.")
 
         elif args.method == "qu_fitting":
             result = fitter.fit_rm_qufitting()
@@ -824,11 +821,36 @@ def main() -> None:
                     sigma_u=sigma_u_chan,
                     sigma_v=sigma_v_chan,
                     snr_threshold=2.0,
+                    exclude_edge_bins=args.exclude_edge_bins,
                     interactive=args.poincare_interactive,
                     force_surface=args.poincare_surface,
                     circle_fit_mode=args.poincare_circle_fit,
                     circle_fit_segments=circle_segments,
                 )
+
+                if args.poincare_projections:
+                    proj_tag = str(args.poincare_projections).lower()
+                    plot_poincare_projections_frequency(
+                        freq_hz,
+                        stokes_i,
+                        stokes_q,
+                        stokes_u,
+                        stokes_v,
+                        f"{args.output}_poincare_projections_{proj_tag}.{args.ext}",
+                        projection_type=args.poincare_projections,
+                        sigma_i=sigma_i_chan,
+                        sigma_q=sigma_q_chan,
+                        sigma_u=sigma_u_chan,
+                        sigma_v=sigma_v_chan,
+                        snr_threshold=2.0,
+                        exclude_edge_bins=args.exclude_edge_bins,
+                        force_surface=args.poincare_surface,
+                        circle_fit_mode=args.poincare_circle_fit,
+                        circle_fit_segments=circle_segments,
+                        center=tuple(args.poincare_proj_center)
+                        if args.poincare_proj_center is not None
+                        else None,
+                    )
 
         if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i_full_noise is not None:
             for i_extra, (pk_start, pk_end) in enumerate(time_avg_extra_regions, start=2):
