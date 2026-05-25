@@ -335,6 +335,14 @@ def _poincare_circle_weights(sigma_q: np.ndarray,
     return w
 
 
+def _poincare_point_sizes(p_frac: np.ndarray,
+                          min_size: float,
+                          max_size: float) -> np.ndarray:
+    p = np.asarray(p_frac, dtype=float)
+    p = np.clip(p, 0.0, 1.0)
+    return min_size + (max_size - min_size) * p
+
+
 def _split_lon_lat_segments(lon_deg: np.ndarray,
                             lat_deg: np.ndarray,
                             lon0_deg: float,
@@ -523,6 +531,8 @@ def plot_poincare_sphere(
     v_filt = v_norm[mask]
     color_filt = color_axis[mask]
 
+    p_frac = np.sqrt(q_filt ** 2 + u_filt ** 2 + v_filt ** 2)
+
     if force_surface:
         vecs = np.vstack([q_filt, u_filt, v_filt])
         norms = np.linalg.norm(vecs, axis=0)
@@ -533,6 +543,10 @@ def plot_poincare_sphere(
         q_filt *= 1.002
         u_filt *= 1.002
         v_filt *= 1.002
+
+    point_sizes = 60.0
+    if force_surface:
+        point_sizes = _poincare_point_sizes(p_frac, 8.0, 120.0)
 
     sigma_q, sigma_u, sigma_v = _compute_poincare_point_errors(
         noise_ref,
@@ -570,7 +584,7 @@ def plot_poincare_sphere(
 
     sc = ax.scatter(q_filt, u_filt, v_filt,
                     c=color_filt, cmap='plasma',
-                    s=60, alpha=1,
+                    s=point_sizes, alpha=1,
                     edgecolors='black', linewidth=0.6, zorder=200,
                     depthshade=True)
 
@@ -764,6 +778,8 @@ def plot_poincare_sphere_frequency(
     sigma_u_filt = sigma_u_norm[valid]
     sigma_v_filt = sigma_v_norm[valid]
 
+    p_frac = np.sqrt(q_filt ** 2 + u_filt ** 2 + v_filt ** 2)
+
     if force_surface:
         vecs = np.vstack([q_filt, u_filt, v_filt])
         norms = np.linalg.norm(vecs, axis=0)
@@ -774,6 +790,10 @@ def plot_poincare_sphere_frequency(
         q_filt *= 1.002
         u_filt *= 1.002
         v_filt *= 1.002
+
+    point_sizes = 60.0
+    if force_surface:
+        point_sizes = _poincare_point_sizes(p_frac, 8.0, 120.0)
 
     sigma_lon_deg, sigma_lat_deg = _poincare_angle_errors_deg(
         q_filt, u_filt, v_filt, sigma_q_filt, sigma_u_filt, sigma_v_filt
@@ -806,9 +826,9 @@ def plot_poincare_sphere_frequency(
 
     sc = ax.scatter(q_filt, u_filt, v_filt,
                     c=freq_mhz, cmap='plasma',
-                    s=60, alpha=1,
+                    s=point_sizes, alpha=1,
                     edgecolors='black', linewidth=0.6, zorder=200,
-                    depthshade=True)
+                    marker='s', depthshade=True)
 
     lon_deg = np.degrees(np.arctan2(u_filt, q_filt))
     r_vec = np.sqrt(q_filt ** 2 + u_filt ** 2 + v_filt ** 2)
@@ -1000,6 +1020,8 @@ def plot_poincare_projections_frequency(
     sigma_u_f = sigma_u_norm[valid]
     sigma_v_f = sigma_v_norm[valid]
 
+    p_frac = np.sqrt(q_f**2 + u_f**2 + v_f**2)
+
     if force_surface:
         vecs = np.vstack([q_f, u_f, v_f])
         norms = np.linalg.norm(vecs, axis=0)
@@ -1032,6 +1054,7 @@ def plot_poincare_projections_frequency(
         u_f = u_f[err_mask]
         v_f = v_f[err_mask]
         freq_mhz = freq_mhz[err_mask]
+        p_frac = p_frac[err_mask]
         sigma_q_f = sigma_q_f[err_mask]
         sigma_u_f = sigma_u_f[err_mask]
         sigma_v_f = sigma_v_f[err_mask]
@@ -1226,10 +1249,15 @@ def plot_poincare_projections_frequency(
         sx = np.array(sx, dtype=float); sy = np.array(sy, dtype=float)
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
+            if force_surface:
+                point_sizes = _poincare_point_sizes(p_frac, 6.0, 90.0)
+                scatter_sizes = point_sizes[fin_s]
+            else:
+                scatter_sizes = 55.0
             ax.scatter(sx[fin_s], sy[fin_s],
                        c=freq_mhz[fin_s], cmap='plasma', norm=norm,
-                       s=55, edgecolors='black', linewidths=0.6,
-                       zorder=4, alpha=1.0)
+                       s=scatter_sizes, edgecolors='black', linewidths=0.6,
+                       zorder=4, alpha=1.0, marker='s')
 
             x_span = bsmp.xmax - bsmp.xmin
             y_span = bsmp.ymax - bsmp.ymin
@@ -1246,7 +1274,7 @@ def plot_poincare_projections_frequency(
                     dy = np.sqrt((y_lon - y0) ** 2 + (y_lat - y0) ** 2)
                     if np.isfinite(dx) and np.isfinite(dy) and dx <= dx_max and dy <= dy_max:
                         ax.errorbar(x0, y0, xerr=dx, yerr=dy, fmt='none',
-                                    ecolor='0.45', elinewidth=0.7, alpha=0.5,
+                                    ecolor='gray', elinewidth=0.7, alpha=0.5,
                                     capsize=2.5, capthick=0.7, zorder=3)
                 except Exception:
                     continue
@@ -1469,6 +1497,8 @@ def plot_poincare_sphere_subbands(
         color_filt = color_axis[mask]
         time_filt_s = np.array(time_list)[mask]
 
+        p_frac = np.sqrt(q_filt ** 2 + u_filt ** 2 + v_filt ** 2)
+
         if force_surface:
             vecs = np.vstack([q_filt, u_filt, v_filt])
             norms = np.linalg.norm(vecs, axis=0)
@@ -1503,6 +1533,7 @@ def plot_poincare_sphere_subbands(
             'sigma_q': sigma_q,
             'sigma_u': sigma_u,
             'sigma_v': sigma_v,
+            'p_frac': p_frac,
         })
 
     if not band_tracks:
@@ -1548,10 +1579,13 @@ def plot_poincare_sphere_subbands(
     legend_handles = []
     for i_track, track in enumerate(band_tracks):
         edge_color = band_colors[i_track]
+        point_sizes = 60.0
+        if force_surface:
+            point_sizes = _poincare_point_sizes(track['p_frac'], 8.0, 120.0)
         sc = ax.scatter(
             track['q'], track['u'], track['v'],
             c=track['color'], cmap='plasma', norm=norm,
-            s=60, alpha=1,
+            s=point_sizes, alpha=1,
             edgecolors=edge_color, linewidth=0.8, zorder=200,
             depthshade=True,
         )
@@ -1821,6 +1855,8 @@ def plot_poincare_projections(
     v_f = v_norm[mask]
     c_f = color_axis[mask]
 
+    p_frac = np.sqrt(q_f**2 + u_f**2 + v_f**2)
+
     if force_surface:
         r = np.sqrt(q_f**2 + u_f**2 + v_f**2) 
         r[r == 0] = 1.0
@@ -2028,10 +2064,15 @@ def plot_poincare_projections(
         sx = np.array(sx, dtype=float); sy = np.array(sy, dtype=float)
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
+            if force_surface:
+                point_sizes = _poincare_point_sizes(p_frac, 6.0, 90.0)
+                scatter_sizes = point_sizes[fin_s]
+            else:
+                scatter_sizes = 55.0
             ax.scatter(sx[fin_s], sy[fin_s],
                        c=c_f[fin_s], cmap='plasma', norm=norm,
-                       s=55, edgecolors='black', linewidths=0.6,
-                       zorder=4, alpha=1.0)
+                       s=scatter_sizes, edgecolors='black', linewidths=0.6,
+                       zorder=4, alpha=1.0, marker='o')
 
             x_span = bsmp.xmax - bsmp.xmin
             y_span = bsmp.ymax - bsmp.ymin
@@ -2048,7 +2089,7 @@ def plot_poincare_projections(
                     dy = np.sqrt((y_lon - y0) ** 2 + (y_lat - y0) ** 2)
                     if np.isfinite(dx) and np.isfinite(dy) and dx <= dx_max and dy <= dy_max:
                         ax.errorbar(x0, y0, xerr=dx, yerr=dy, fmt='none',
-                                    ecolor='0.45', elinewidth=0.7, alpha=0.5,
+                                    ecolor='gray', elinewidth=0.7, alpha=0.5,
                                     capsize=2.5, capthick=0.7, zorder=3)
                 except Exception:
                     continue
@@ -2073,7 +2114,7 @@ def plot_poincare_projections(
         cax = fig.add_axes([0.25, 0.035, 0.50, 0.016])
     else:
         fig.subplots_adjust(left=0.10, right=0.93, top=0.90, bottom=0.14)
-        cax = fig.add_axes([0.22, 0.065, 0.56, 0.025])
+        cax = fig.add_axes([0.22, -0.05, 0.56, 0.025])
     sm  = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
     sm.set_array([])
     cb  = fig.colorbar(sm, cax=cax, orientation='horizontal')
@@ -2304,9 +2345,9 @@ def plot_rm_time_series(time_array: np.ndarray,
                     & (counts >= MIN_BIN_POINTS)
                 )
                 if np.any(bin_ok):
-                    ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='s', color='b',
+                    ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='o', color='b', ecolor='gray',
                                    markersize=4, capsize=2, label='EA', zorder=2)
-                    ax_pa.errorbar(bc[bin_ok], pa_b[bin_ok], yerr=pa_be[bin_ok], fmt='o', color='r',
+                    ax_pa.errorbar(bc[bin_ok], pa_b[bin_ok], yerr=pa_be[bin_ok], fmt='o', color='r', ecolor='gray',
                                    markersize=4, capsize=2, label='PA', zorder=2)
             else:
                 def scatter_runs(x, y, axis, **kwargs):
@@ -2318,8 +2359,8 @@ def plot_rm_time_series(time_array: np.ndarray,
                         if len(seg) > 0:
                             axis.scatter(x[seg], y[seg], **kwargs)
 
-                scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2)
-                scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2)
+                scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2, ecolor='gray')
+                scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2, ecolor='gray')
                 if np.any(mask_pa):
                     ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa],
                                    fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
@@ -2444,7 +2485,7 @@ def plot_rm_time_series(time_array: np.ndarray,
                 binned_time.append(time_array[(bin_start + bin_end) // 2])
 
             ax_top_twin.errorbar(np.array(binned_time) * 1e3, binned_rm, yerr=binned_rm_err,
-                                 fmt='o-', color='red', markersize=5, linewidth=2, capsize=3,
+                                 fmt='o-', color='red', ecolor='gray', markersize=5, linewidth=2, capsize=3,
                                  label=f'Binned RM ({n_bins_actual} bins)')
             ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='red')
             ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'])
@@ -2571,18 +2612,18 @@ def plot_rm_time_series(time_array: np.ndarray,
                     pf_err = _bin_frac_err(bt, p_full_masked)
                     lf_err = _bin_frac_err(bt, l_full_masked)
                     vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
-                    ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1, label='P/I')
-                    ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1, label='L/I')
-                    ax3.errorbar(bt[bin_mask], pf_bin[bin_mask], yerr=pf_err[bin_mask], fmt='o',
-                                 color='k', markersize=3, capsize=2, linestyle='none', zorder=10)
-                    ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o',
-                                 color='r', markersize=3, capsize=2, linestyle='none', zorder=10)
+                    #ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1, label='P/I')
+                    ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1)
+                    #ax3.errorbar(bt[bin_mask], pf_bin[bin_mask], yerr=pf_err[bin_mask], fmt='o',
+                    #             color='k', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
+                    ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label='L/I',
+                                 color='r', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
                     ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
                     if 'V_frac_bin' in rm_results and vf_bin.size:
-                        ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1, label='V/I')
+                        ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1)
                         if vf_err is not None:
-                            ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o',
-                                         color='b', markersize=3, capsize=2, linestyle='none', zorder=10)
+                            ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label='V/I',
+                                         color='b', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
                         ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
                 else:
                     combined_idx = full_indices[combined]
@@ -3328,12 +3369,12 @@ def plot_burns_law_fits(fitter: RMFitter,
     if burn_popt is not None and best_linear_model == 'P_Burn':
         y_burn = burn_model(x_model, *burn_popt)
         burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_burn, color='green', linewidth=2, linestyle='--', label=burn_label, zorder=20)
+        ax.plot(freq_model_mhz, y_burn, color='#648fff', linewidth=2, linestyle='--', label=burn_label, zorder=20)
 
     if mod_popt is not None and best_linear_model == 'P_mod-Burn':
         y_mod = modified_burn_model(x_model, *mod_popt)
         mod_label = r"$P_{\mathrm{mod-Burn}}(\lambda)=P_i\exp\left(-2\sigma_{\mathrm{RM}}^{\prime\,2}\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_mod, color='green', linewidth=2, linestyle='--', label=mod_label, zorder=20)
+        ax.plot(freq_model_mhz, y_mod, color='#648fff', linewidth=2, linestyle='--', label=mod_label, zorder=20)
 
     if const_popt is not None and best_linear_model == 'P_const':
         y_const = constant_model(x_model, *const_popt)
