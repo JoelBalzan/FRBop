@@ -3369,12 +3369,12 @@ def plot_burns_law_fits(fitter: RMFitter,
     if burn_popt is not None and best_linear_model == 'P_Burn':
         y_burn = burn_model(x_model, *burn_popt)
         burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_burn, color='#648fff', linewidth=2, linestyle='--', label=burn_label, zorder=20)
+        ax.plot(freq_model_mhz, y_burn, color='k', linewidth=2, linestyle='--', label=burn_label, zorder=20)
 
     if mod_popt is not None and best_linear_model == 'P_mod-Burn':
         y_mod = modified_burn_model(x_model, *mod_popt)
         mod_label = r"$P_{\mathrm{mod-Burn}}(\lambda)=P_i\exp\left(-2\sigma_{\mathrm{RM}}^{\prime\,2}\lambda^4\right)$"
-        ax.plot(freq_model_mhz, y_mod, color='#648fff', linewidth=2, linestyle='--', label=mod_label, zorder=20)
+        ax.plot(freq_model_mhz, y_mod, color='k', linewidth=2, linestyle='--', label=mod_label, zorder=20)
 
     if const_popt is not None and best_linear_model == 'P_const':
         y_const = constant_model(x_model, *const_popt)
