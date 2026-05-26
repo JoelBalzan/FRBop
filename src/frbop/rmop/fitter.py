@@ -149,23 +149,47 @@ class RMFitter:
         # Allow caller to provide Q/U noise estimates (e.g., from the same
         # off-pulse time region used to estimate I noise). Fall back to per-
         # spectrum estimates if not provided.
+        q_std = float(np.nanstd(self.stokes_q))
+        u_std = float(np.nanstd(self.stokes_u))
+        q_max = float(np.nanmax(np.abs(self.stokes_q))) if np.any(np.isfinite(self.stokes_q)) else 0.0
+        u_max = float(np.nanmax(np.abs(self.stokes_u))) if np.any(np.isfinite(self.stokes_u)) else 0.0
         noise_q_local = noise_q if noise_q is not None else (
-            np.std(self.stokes_q) if np.std(self.stokes_q) > 0 else 0.01 * np.abs(self.stokes_q).max()
+            q_std if q_std > 0 else 0.01 * q_max
         )
         noise_u_local = noise_u if noise_u is not None else (
-            np.std(self.stokes_u) if np.std(self.stokes_u) > 0 else 0.01 * np.abs(self.stokes_u).max()
+            u_std if u_std > 0 else 0.01 * u_max
         )
 
         # Use provided noise_i (from off-pulse) when available; otherwise use
         # per-spectrum std fallback.
-        noise_i_local = noise_i if noise_i is not None else (np.std(self.stokes_i) if np.std(self.stokes_i) > 0 else 0.01)
+        i_std = float(np.nanstd(self.stokes_i))
+        noise_i_local = noise_i if noise_i is not None else (i_std if i_std > 0 else 0.01)
 
         dI = np.ones_like(self.stokes_i) * noise_i_local
         dQ = np.ones_like(self.stokes_q) * noise_q_local
         dU = np.ones_like(self.stokes_u) * noise_u_local
 
         # RMtools expects data as [freq_Hz, I, Q, U, dI, dQ, dU]
-        data = [self.freq_hz, self.stokes_i, self.stokes_q, self.stokes_u, dI, dQ, dU]
+        finite = (
+            np.isfinite(self.freq_hz)
+            & np.isfinite(self.stokes_i)
+            & np.isfinite(self.stokes_q)
+            & np.isfinite(self.stokes_u)
+            & np.isfinite(dI)
+            & np.isfinite(dQ)
+            & np.isfinite(dU)
+        )
+        if np.sum(finite) < 4:
+            raise ValueError("RM synthesis needs at least 4 finite frequency channels")
+        data = [
+            self.freq_hz[finite],
+            self.stokes_i[finite],
+            self.stokes_q[finite],
+            self.stokes_u[finite],
+            dI[finite],
+            dQ[finite],
+            dU[finite],
+        ]
 
         # Call RMtools RM synthesis
         mDict, aDict = run_rmsynth(

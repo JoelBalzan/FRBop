@@ -184,7 +184,7 @@ class PolarisationMixin:
 		pa_deg = np.where(mask, pa_deg, np.nan)
 
 		# Drop short valid runs
-		min_run = 10
+		min_run = int(getattr(self, "pa_min_run", 3))
 		if np.any(mask):
 			keep_run = self._apply_min_run(mask, min_run)
 			pa_deg = np.where(keep_run, pa_deg, np.nan)
@@ -242,7 +242,7 @@ class PolarisationMixin:
 				i_mask = i_mask & peak_mask
 			mask = mask & i_mask
 		
-		min_run = 5
+		min_run = int(getattr(self, "pa_min_run", 3))
 		if np.any(mask):
 			mask = self._apply_min_run(mask, min_run)
 		
@@ -307,7 +307,7 @@ class PolarisationMixin:
 				i_mask = i_mask & peak_mask
 			mask = mask & i_mask
 
-		min_run = 5
+		min_run = int(getattr(self, "pa_min_run", 3))
 		if np.any(mask):
 			mask = self._apply_min_run(mask, min_run)
 

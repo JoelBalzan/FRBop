@@ -20,11 +20,19 @@ from .common import (
 class UncertaintyMixin:
 	@staticmethod
 	def _robust_vmin_vmax(data: np.ndarray, low: float = 5.0, high: float = 99.0) -> Tuple[float, float]:
-		vmin = float(np.percentile(data, low))
-		vmax = float(np.percentile(data, high))
+		values = np.asarray(data, dtype=float)
+		finite = values[np.isfinite(values)]
+		if finite.size == 0:
+			return 0.0, 1.0
+		vmin = float(np.percentile(finite, low))
+		vmax = float(np.percentile(finite, high))
 		if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
-			vmin = float(np.min(data))
-			vmax = float(np.max(data))
+			vmin = float(np.min(finite))
+			vmax = float(np.max(finite))
+			if vmin == vmax:
+				pad = 1e-6 if vmin == 0.0 else abs(vmin) * 1e-6
+				vmin -= pad
+				vmax += pad
 		return vmin, vmax
 
 	@staticmethod

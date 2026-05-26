@@ -117,6 +117,12 @@ def parse_args() -> argparse.Namespace:
 		help="Polynomial degree for PA profile fitting (default: 1 for linear)",
 	)
 	parser.add_argument(
+		"--pa-min-run",
+		type=int,
+		default=3,
+		help="Minimum consecutive PA samples required to keep a run (default: 3)",
+	)
+	parser.add_argument(
 		"--pa-weight-strength",
 		type=float,
 		default=1.0,
@@ -276,6 +282,7 @@ def main():
 		print(f"  - Input data already dedispersed at DM: {args.input_dm} pc cm⁻³")
 	print(f"  - PA weight strength: {args.pa_weight_strength}")
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
+	print(f"  - PA min run: {args.pa_min_run}")
 	print(f"  - Linear debiasing: {args.debias_linear}")
 	print(f"  - Non-SHRINE kc smoothing: {args.nonshrine_kc_smooth}")
 	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
@@ -400,6 +407,7 @@ def main():
 		input_dm=args.input_dm,
 		dedisp_mode=args.dedisp_mode,
 		pa_fit_degree=args.pa_fit_degree,
+		pa_min_run=args.pa_min_run,
 		pa_weight_strength=args.pa_weight_strength,
 		pa_fit_post_peak_only=args.pa_fit_post_peak_only,
 		nonshrine_kc_smooth=args.nonshrine_kc_smooth,

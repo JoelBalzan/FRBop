@@ -40,6 +40,7 @@ class DMOptimiser(
                  input_dm: float = 0.0,
                  dedisp_mode: str = 'expand',
                  pa_fit_degree: int = 1,
+                 pa_min_run: int = 3,
                  pa_weight_strength: float = 1.0,
                  pa_fit_post_peak_only: bool = False,
                  nonshrine_kc_smooth: bool = False,
@@ -80,6 +81,9 @@ class DMOptimiser(
             raise ValueError(f"dedisp_mode must be one of {sorted(valid_dedisp_modes)}, got {dedisp_mode!r}")
         self.dedisp_mode = dedisp_mode
         self.pa_fit_degree = int(pa_fit_degree)
+        self.pa_min_run = int(pa_min_run)
+        if self.pa_min_run < 1:
+            raise ValueError("pa_min_run must be >= 1")
         self.pa_weight_strength = float(pa_weight_strength)
         if self.pa_weight_strength <= 0:
             raise ValueError("pa_weight_strength must be positive")

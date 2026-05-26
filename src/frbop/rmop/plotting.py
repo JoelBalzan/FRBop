@@ -127,7 +127,7 @@ def _compute_poincare_point_errors(time_series_data: Dict,
             mask_t = np.zeros_like(times, dtype=bool)
             mask_t[idx] = True
 
-        n_bin = int(np.sum(mask_t))
+        n_bin = int(np.nansum(mask_t))
         n_bin = max(1, n_bin)
 
         I_m = float(np.nanmean(I_t[mask_t]))
@@ -238,23 +238,23 @@ def _fit_circle_on_sphere(points_xyz: np.ndarray,
             w = None
         else:
             w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
-            if np.sum(w) <= 0:
+            if np.nansum(w) <= 0:
                 w = None
 
     if w is None:
         evals_g, evecs_g = np.linalg.eigh(X.T @ X)
     else:
-        w_norm = w / np.sum(w)
+        w_norm = w / np.nansum(w)
         evals_g, evecs_g = np.linalg.eigh(X.T @ (X * w_norm[:, None]))
     n_g = evecs_g[:, np.argmin(evals_g)]
     d_g = 0.0
     if w is None:
         res_g = np.nanstd(X @ n_g)
-        mu = np.mean(X, axis=0)
+        mu = np.nanmean(X, axis=0)
         C = (X - mu).T @ (X - mu)
     else:
-        res_g = np.sqrt(np.sum(w_norm * (X @ n_g) ** 2))
-        mu = np.sum(X * w_norm[:, None], axis=0)
+        res_g = np.sqrt(np.nansum(w_norm * (X @ n_g) ** 2))
+        mu = np.nansum(X * w_norm[:, None], axis=0)
         C = (X - mu).T @ ((X - mu) * w_norm[:, None])
     evals_s, evecs_s = np.linalg.eigh(C)
     n_s = evecs_s[:, np.argmin(evals_s)]
@@ -262,7 +262,7 @@ def _fit_circle_on_sphere(points_xyz: np.ndarray,
     if w is None:
         res_s = np.nanstd((X @ n_s) - d_s)
     else:
-        res_s = np.sqrt(np.sum(w_norm * ((X @ n_s) - d_s) ** 2))
+        res_s = np.sqrt(np.nansum(w_norm * ((X @ n_s) - d_s) ** 2))
 
     mode_l = str(mode).lower()
     if mode_l == 'great':
@@ -471,7 +471,7 @@ def plot_poincare_sphere(
             end   = min((i + 1) * bin_size, n_time)
             if end <= start:
                 continue
-            time_list.append(np.mean(times[start:end]))
+            time_list.append(np.nanmean(times[start:end]))
             if time_axis == 0:
                 I_sl = I_cube[start:end, :]
                 Q_sl = Q_cube[start:end, :]
@@ -517,11 +517,11 @@ def plot_poincare_sphere(
         mask = np.ones(q_norm.shape[0], dtype=bool)
     else:
         mask = snr > snr_threshold
-        if np.sum(mask) < 2:
-            print(f"Warning: Only {np.sum(mask)} points above SNR threshold "
+        if np.nansum(mask) < 2:
+            print(f"Warning: Only {np.nansum(mask)} points above SNR threshold "
                   f"{snr_threshold:.1f}. Lowering to 2.0.")
             mask = snr > 2.0
-        if np.sum(mask) < 2:
+        if np.nansum(mask) < 2:
             print("Error: fewer than 2 points survive SNR cut. Cannot plot.")
             return
 
@@ -656,7 +656,7 @@ def plot_poincare_sphere(
                     color='black', zorder=140)
 
     if len(q_filt) >= 1:
-        mean_vec = np.array([np.mean(q_filt), np.mean(u_filt), np.mean(v_filt)])
+        mean_vec = np.array([np.nanmean(q_filt), np.nanmean(u_filt), np.nanmean(v_filt)])
         norm = np.linalg.norm(mean_vec)
         if norm > 0:
             azim = np.degrees(np.arctan2(mean_vec[1], mean_vec[0]))
@@ -749,9 +749,9 @@ def plot_poincare_sphere_frequency(
         sigma_v = np.asarray(sigma_v if sigma_v is not None else np.zeros_like(i_val), dtype=float)[:n_data]
         i_snr = i_val / (sigma_i + 1e-10)
         valid &= i_snr >= snr_threshold
-        if np.sum(valid) < 2:
+        if np.nansum(valid) < 2:
             print(
-                f"Warning: only {np.sum(valid)} channels above SNR threshold {snr_threshold:.1f}. "
+                f"Warning: only {np.nansum(valid)} channels above SNR threshold {snr_threshold:.1f}. "
                 "Lowering the threshold to 1.0."
             )
             valid = np.isfinite(freq_hz) & np.isfinite(i_val) & np.isfinite(q_val) & np.isfinite(u_val) & np.isfinite(v_val)
@@ -765,7 +765,7 @@ def plot_poincare_sphere_frequency(
         sigma_u_norm = np.zeros_like(i_val)
         sigma_v_norm = np.zeros_like(i_val)
 
-    if np.sum(valid) < 2:
+    if np.nansum(valid) < 2:
         print("Error: fewer than 2 frequency channels survive the Poincare plot cut. Cannot plot.")
         return
 
@@ -894,7 +894,7 @@ def plot_poincare_sphere_frequency(
                     color='black', zorder=140)
 
     if len(q_filt) >= 1:
-        mean_vec = np.array([np.mean(q_filt), np.mean(u_filt), np.mean(v_filt)])
+        mean_vec = np.array([np.nanmean(q_filt), np.nanmean(u_filt), np.nanmean(v_filt)])
         norm = np.linalg.norm(mean_vec)
         if norm > 0:
             azim = np.degrees(np.arctan2(mean_vec[1], mean_vec[0]))
@@ -991,9 +991,9 @@ def plot_poincare_projections_frequency(
         sigma_v = np.asarray(sigma_v if sigma_v is not None else np.zeros_like(i_val), dtype=float)[:n_data]
         i_snr = i_val / (sigma_i + 1e-10)
         valid &= i_snr >= snr_threshold
-        if np.sum(valid) < 2:
+        if np.nansum(valid) < 2:
             print(
-                f"Warning: only {np.sum(valid)} channels above SNR threshold {snr_threshold:.1f}. "
+                f"Warning: only {np.nansum(valid)} channels above SNR threshold {snr_threshold:.1f}. "
                 "Lowering the threshold to 1.0."
             )
             valid = np.isfinite(freq_hz) & np.isfinite(i_val) & np.isfinite(q_val) & np.isfinite(u_val) & np.isfinite(v_val)
@@ -1007,7 +1007,7 @@ def plot_poincare_projections_frequency(
         sigma_u_norm = np.zeros_like(i_val)
         sigma_v_norm = np.zeros_like(i_val)
 
-    if np.sum(valid) < 2:
+    if np.nansum(valid) < 2:
         print("Error: fewer than 2 frequency channels survive the Poincare projection cut.")
         return
 
@@ -1092,7 +1092,7 @@ def plot_poincare_projections_frequency(
         cn = np.sqrt(cx**2 + cy**2 + cz**2)
         cx, cy, cz = (cx / cn, cy / cn, cz / cn) if cn > 1e-10 else (0., 0., 1.)
     else:
-        cx = np.mean(q_f); cy = np.mean(u_f); cz = np.mean(v_f)
+        cx = np.nanmean(q_f); cy = np.nanmean(u_f); cz = np.nanmean(v_f)
         cn = np.sqrt(cx**2 + cy**2 + cz**2)
         cx, cy, cz = (cx / cn, cy / cn, cz / cn) if cn > 1e-10 else (0., 0., 1.)
 
@@ -1247,6 +1247,40 @@ def plot_poincare_projections_frequency(
 
         sx, sy = bsmp(lon_f, lat_f)
         sx = np.array(sx, dtype=float); sy = np.array(sy, dtype=float)
+        n_plot = min(
+            sx.size,
+            sy.size,
+            len(lon_f),
+            len(lat_f),
+            len(freq_mhz),
+            len(p_frac),
+            len(sigma_lon_deg),
+            len(sigma_lat_deg),
+        )
+        if n_plot == 0:
+            continue
+        if (
+            sx.size != n_plot
+            or sy.size != n_plot
+            or len(lon_f) != n_plot
+            or len(lat_f) != n_plot
+            or len(freq_mhz) != n_plot
+            or len(p_frac) != n_plot
+            or len(sigma_lon_deg) != n_plot
+            or len(sigma_lat_deg) != n_plot
+        ):
+            print(
+                "Warning: mismatched Poincare projection arrays; truncating to "
+                f"{n_plot} samples."
+            )
+            sx = sx[:n_plot]
+            sy = sy[:n_plot]
+            lon_f = lon_f[:n_plot]
+            lat_f = lat_f[:n_plot]
+            freq_mhz = freq_mhz[:n_plot]
+            p_frac = p_frac[:n_plot]
+            sigma_lon_deg = sigma_lon_deg[:n_plot]
+            sigma_lat_deg = sigma_lat_deg[:n_plot]
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
             if force_surface:
@@ -1287,7 +1321,7 @@ def plot_poincare_projections_frequency(
                     tx = np.asarray(tx, dtype=float)
                     ty = np.asarray(ty, dtype=float)
                     ok = np.isfinite(tx) & np.isfinite(ty)
-                    if np.sum(ok) >= 2:
+                    if np.nansum(ok) >= 2:
                         ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=2.2,
                                 color='black', alpha=0.95, zorder=2)
 
@@ -1451,7 +1485,7 @@ def plot_poincare_sphere_subbands(
             e = min((i + 1) * bin_size, n_time)
             if e <= s:
                 continue
-            time_list.append(float(np.mean(times[s:e])))
+            time_list.append(float(np.nanmean(times[s:e])))
             if time_axis == 0:
                 I_sl = I_cube[s:e, b_start:b_stop]
                 Q_sl = Q_cube[s:e, b_start:b_stop]
@@ -1485,9 +1519,9 @@ def plot_poincare_sphere_subbands(
         sigma_pol = sigma_pol if (np.isfinite(sigma_pol) and sigma_pol > 0) else 1e-10
         snr = pol_arr / (sigma_pol + 1e-10)
         mask = snr > 5.0
-        if np.sum(mask) < 2:
+        if np.nansum(mask) < 2:
             mask = snr > 2.0
-        if np.sum(mask) < 2:
+        if np.nansum(mask) < 2:
             print(f"Warning: band {band_idx + 1} has too few SNR points; skipping.")
             continue
 
@@ -1663,7 +1697,7 @@ def plot_poincare_sphere_subbands(
     mean_q = np.concatenate([track['q'] for track in band_tracks])
     mean_u = np.concatenate([track['u'] for track in band_tracks])
     mean_v = np.concatenate([track['v'] for track in band_tracks])
-    mean_vec = np.array([np.mean(mean_q), np.mean(mean_u), np.mean(mean_v)])
+    mean_vec = np.array([np.nanmean(mean_q), np.nanmean(mean_u), np.nanmean(mean_v)])
     norm_vec = np.linalg.norm(mean_vec)
     if norm_vec > 0:
         azim = np.degrees(np.arctan2(mean_vec[1], mean_vec[0]))
@@ -1814,7 +1848,7 @@ def plot_poincare_projections(
             s, e = i * bin_size, min((i + 1) * bin_size, n_time)
             if e <= s:
                 continue
-            time_list.append(np.mean(times[s:e]))
+            time_list.append(np.nanmean(times[s:e]))
             sl = (slice(s, e), slice(None)) if time_axis == 0 else (slice(None), slice(s, e))
             I_m = np.nanmean(I_cube[sl]);  Q_m = np.nanmean(Q_cube[sl])
             U_m = np.nanmean(U_cube[sl])
@@ -1843,9 +1877,9 @@ def plot_poincare_projections(
         mask = np.ones(q_norm.shape[0], dtype=bool)
     else:
         mask = snr > snr_threshold
-        if np.sum(mask) < 2:
+        if np.nansum(mask) < 2:
             mask = snr > 2.0
-        if np.sum(mask) < 2:
+        if np.nansum(mask) < 2:
             print("Error: fewer than 2 points survive SNR cut in projections.")
             return
 
@@ -1907,7 +1941,7 @@ def plot_poincare_projections(
         cn = np.sqrt(cx**2 + cy**2 + cz**2)
         cx, cy, cz = (cx/cn, cy/cn, cz/cn) if cn > 1e-10 else (0., 0., 1.)
     else:
-        cx = np.mean(q_f); cy = np.mean(u_f); cz = np.mean(v_f)
+        cx = np.nanmean(q_f); cy = np.nanmean(u_f); cz = np.nanmean(v_f)
         cn = np.sqrt(cx**2 + cy**2 + cz**2)
         cx, cy, cz = (cx/cn, cy/cn, cz/cn) if cn > 1e-10 else (0., 0., 1.)
 
@@ -2102,7 +2136,7 @@ def plot_poincare_projections(
                     tx = np.asarray(tx, dtype=float)
                     ty = np.asarray(ty, dtype=float)
                     ok = np.isfinite(tx) & np.isfinite(ty)
-                    if np.sum(ok) >= 2:
+                    if np.nansum(ok) >= 2:
                         ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=2.2,
                                 color='black', alpha=0.95, zorder=2)
 
@@ -2206,15 +2240,15 @@ def plot_rm_time_series(time_array: np.ndarray,
                 time_axis_dim = 0
 
             if time_axis_dim == 0:
-                I_full = np.mean(time_series_data['I'], axis=1)
-                Q_full = np.mean(time_series_data['Q'], axis=1)
-                U_full = np.mean(time_series_data['U'], axis=1)
-                V_full = np.mean(time_series_data['V'], axis=1) if 'V' in time_series_data else np.zeros_like(I_full)
+                I_full = np.nanmean(time_series_data['I'], axis=1)
+                Q_full = np.nanmean(time_series_data['Q'], axis=1)
+                U_full = np.nanmean(time_series_data['U'], axis=1)
+                V_full = np.nanmean(time_series_data['V'], axis=1) if 'V' in time_series_data else np.zeros_like(I_full)
             else:
-                I_full = np.mean(time_series_data['I'], axis=0)
-                Q_full = np.mean(time_series_data['Q'], axis=0)
-                U_full = np.mean(time_series_data['U'], axis=0)
-                V_full = np.mean(time_series_data['V'], axis=0) if 'V' in time_series_data else np.zeros_like(I_full)
+                I_full = np.nanmean(time_series_data['I'], axis=0)
+                Q_full = np.nanmean(time_series_data['Q'], axis=0)
+                U_full = np.nanmean(time_series_data['U'], axis=0)
+                V_full = np.nanmean(time_series_data['V'], axis=0) if 'V' in time_series_data else np.zeros_like(I_full)
 
             pol_int_full = np.sqrt(Q_full**2 + U_full**2)
             P_frac_full = np.sqrt(Q_full**2 + U_full**2 + V_full**2) / (I_full + 1e-10)
@@ -2322,11 +2356,11 @@ def plot_rm_time_series(time_array: np.ndarray,
                     w_pa = 1.0 / (pa_sig_good[sel]**2 + 1e-20)
                     w_ea = 1.0 / (ea_sig_good[sel]**2 + 1e-20)
                     bin_centres.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
-                    pa_binned.append(np.sum(w_pa * pa_good[sel]) / np.sum(w_pa))
-                    pa_binned_err.append(1.0 / np.sqrt(np.sum(w_pa)))
-                    ea_binned.append(np.sum(w_ea * ea_good[sel]) / np.sum(w_ea))
-                    ea_binned_err.append(1.0 / np.sqrt(np.sum(w_ea)))
-                    bin_counts.append(np.sum(sel))       
+                    pa_binned.append(np.nansum(w_pa * pa_good[sel]) / np.nansum(w_pa))
+                    pa_binned_err.append(1.0 / np.sqrt(np.nansum(w_pa)))
+                    ea_binned.append(np.nansum(w_ea * ea_good[sel]) / np.nansum(w_ea))
+                    ea_binned_err.append(1.0 / np.sqrt(np.nansum(w_ea)))
+                    bin_counts.append(np.nansum(sel))       
                 
                 bc      = np.array(bin_centres)
                 pa_b    = np.array(pa_binned)
@@ -2421,7 +2455,7 @@ def plot_rm_time_series(time_array: np.ndarray,
             else:
                 time_axis_dim = 1
 
-            n_time = np.sum(peak_mask)
+            n_time = np.nansum(peak_mask)
             bin_size = max(1, n_time // n_rm_bins)
             n_bins_actual = (n_time + bin_size - 1) // bin_size
 
@@ -2430,11 +2464,11 @@ def plot_rm_time_series(time_array: np.ndarray,
             binned_time = []
 
             if time_axis_dim == 0:
-                I_full_tmp = np.mean(time_series_data['I'], axis=1)
+                I_full_tmp = np.nanmean(time_series_data['I'], axis=1)
                 Q_tmp = time_series_data['Q']
                 U_tmp = time_series_data['U']
             else:
-                I_full_tmp = np.mean(time_series_data['I'], axis=0)
+                I_full_tmp = np.nanmean(time_series_data['I'], axis=0)
                 Q_tmp = time_series_data['Q']
                 U_tmp = time_series_data['U']
             n_frac_tmp = max(1, int(len(I_full_tmp) * noise_fraction))
@@ -2464,15 +2498,15 @@ def plot_rm_time_series(time_array: np.ndarray,
                 if bin_end <= bin_start:
                     continue
                 if time_axis_dim == 0:
-                    i_avg = np.mean(time_series_data['I'][bin_start:bin_end, :], axis=0)
-                    q_avg = np.mean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
-                    u_avg = np.mean(time_series_data['U'][bin_start:bin_end, :], axis=0)
-                    v_avg = np.mean(time_series_data['V'][bin_start:bin_end, :], axis=0) if 'V' in time_series_data else None
+                    i_avg = np.nanmean(time_series_data['I'][bin_start:bin_end, :], axis=0)
+                    q_avg = np.nanmean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
+                    u_avg = np.nanmean(time_series_data['U'][bin_start:bin_end, :], axis=0)
+                    v_avg = np.nanmean(time_series_data['V'][bin_start:bin_end, :], axis=0) if 'V' in time_series_data else None
                 else:
-                    i_avg = np.mean(time_series_data['I'][:, bin_start:bin_end], axis=1)
-                    q_avg = np.mean(time_series_data['Q'][:, bin_start:bin_end], axis=1)
-                    u_avg = np.mean(time_series_data['U'][:, bin_start:bin_end], axis=1)
-                    v_avg = np.mean(time_series_data['V'][:, bin_start:bin_end], axis=1) if 'V' in time_series_data else None
+                    i_avg = np.nanmean(time_series_data['I'][:, bin_start:bin_end], axis=1)
+                    q_avg = np.nanmean(time_series_data['Q'][:, bin_start:bin_end], axis=1)
+                    u_avg = np.nanmean(time_series_data['U'][:, bin_start:bin_end], axis=1)
+                    v_avg = np.nanmean(time_series_data['V'][:, bin_start:bin_end], axis=1) if 'V' in time_series_data else None
 
                 fitter = RMFitter(freq_hz, i_avg, q_avg, u_avg, v_avg)
                 result = fitter._fit_rm_with_rmtools(rm_range=(-1000, 1000), n_rm=500,
@@ -2805,7 +2839,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     rm_peak = rm_synthesis_result.get('rm_clean_peak', rm_synthesis_result.get('rm_peak'))
     lambda_sq_model = np.linspace(fitter.lambda_sq.min(), fitter.lambda_sq.max(), 100)
 
-    if np.sum(pa_mask) >= 2:
+    if np.nansum(pa_mask) >= 2:
         coeffs = np.polyfit(fitter.lambda_sq[pa_mask], np.unwrap(fitter.pol_angle)[pa_mask], 1)
         rm_fit = coeffs[0]
         pol_angle_0 = coeffs[1]
@@ -2955,7 +2989,7 @@ def plot_burns_law_fits(fitter: RMFitter,
         valid &= valid_mask_arr
     if pol_frac_err_arr is not None and pol_frac_err_arr.shape == pol_frac.shape:
         valid &= np.isfinite(pol_frac_err_arr) & (pol_frac_err_arr > 0)
-    if np.sum(valid) < 5:
+    if np.nansum(valid) < 5:
         print("Warning: insufficient valid points for Burn-law fitting; skipping plot.")
         return
 
@@ -3050,7 +3084,7 @@ def plot_burns_law_fits(fitter: RMFitter,
                     fallback = 1e-10
                 sigma[~finite] = fallback
 
-        ln_like = -0.5 * np.sum((residual / sigma) ** 2 + np.log(2.0 * np.pi * sigma ** 2))
+        ln_like = -0.5 * np.nansum((residual / sigma) ** 2 + np.log(2.0 * np.pi * sigma ** 2))
         bic = n_params * np.log(n) - 2.0 * ln_like
         ln_z = -0.5 * bic
         return ln_z / np.log(10.0)
@@ -3107,7 +3141,7 @@ def plot_burns_law_fits(fitter: RMFitter,
             valid_c &= circ_valid_mask_arr
         if circ_frac_err_arr is not None and circ_frac_err_arr.shape == circ_frac.shape:
             valid_c &= np.isfinite(circ_frac_err_arr) & (circ_frac_err_arr > 0)
-        if np.sum(valid_c) >= 5:
+        if np.nansum(valid_c) >= 5:
             x_c = x_full[valid_c]
             freq_c = freq_mhz_full[valid_c]
             y_c = circ_frac[valid_c]
@@ -3136,7 +3170,7 @@ def plot_burns_law_fits(fitter: RMFitter,
             except Exception:
                 circ_lin_popt = None
 
-            if np.sum(np.isfinite(y_c)) >= 8:
+            if np.nansum(np.isfinite(y_c)) >= 8:
                 try:
                     circ_sin_popt, circ_sin_pcov = curve_fit(
                         circ_sine_model, x_c, y_c,
@@ -3464,7 +3498,7 @@ def plot_polarisation_fraction_acf_ccf(
     if stokes_v is not None:
         valid &= np.isfinite(stokes_v)
 
-    if np.sum(valid) < 8:
+    if np.nansum(valid) < 8:
         print("Warning: insufficient valid points for fraction ACF/CCF diagnostic; skipping plot.")
         return
 
@@ -3506,7 +3540,7 @@ def plot_polarisation_fraction_acf_ccf(
         left_c = left - np.nanmean(left)
         right_c = right - np.nanmean(right)
         corr = np.correlate(left_c, right_c, mode='full')
-        denom = np.sqrt(np.sum(left_c ** 2) * np.sum(right_c ** 2))
+        denom = np.sqrt(np.nansum(left_c ** 2) * np.nansum(right_c ** 2))
         if not np.isfinite(denom) or denom <= 0:
             return np.full_like(corr, np.nan, dtype=float)
         return corr / denom
