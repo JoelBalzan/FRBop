@@ -8,23 +8,21 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.peaks import (parse_peak_index_pairs,
+                               select_frequency_bands_manual,
+                               split_frequency_bands_equal,
+                               split_frequency_bands_equal_snr)
 from frbop.utils.plotting import set_pub_style
 
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
 from .diagnostics import time_series_sigma_rm_diagnostic
 from .fitter import RMFitter, fit_rm_time_series
-from .plotting import (
-    plot_burns_law_fits,
-    plot_polarisation_fraction_acf_ccf,
-    plot_poincare_projections_frequency,
-    plot_poincare_projections,
-    plot_poincare_sphere,
-    plot_poincare_sphere_frequency,
-    plot_poincare_sphere_subbands,
-    plot_rm_results,
-    plot_rm_time_series,
-)
+from .plotting import (plot_burns_law_fits, plot_poincare_projections,
+                       plot_poincare_projections_frequency,
+                       plot_poincare_sphere, plot_poincare_sphere_frequency,
+                       plot_poincare_sphere_subbands,
+                       plot_polarisation_fraction_acf_ccf, plot_rm_results,
+                       plot_rm_time_series)
 
 warnings.filterwarnings("ignore")
 
@@ -63,42 +61,12 @@ def main() -> None:
         default=None,
         help="Path to Stokes cube with components ordered I,Q,U,(V)",
     )
-    parser.add_argument(
-        "--stokes-axis",
-        type=int,
-        default=0,
-        help="Axis index of Stokes dimension in --stokes-cube (default: 0)",
-    )
     parser.add_argument("--freq", default=None, help="Frequency file (.npy or .txt)")
-    parser.add_argument(
-        "--freq-unit",
-        default="MHz",
-        choices=["Hz", "MHz", "GHz"],
-        help="Frequency unit (default: MHz)",
-    )
     parser.add_argument("--time", default=None, help="Time file (.npy or .txt)")
-    parser.add_argument(
-        "--time-unit",
-        default="ms",
-        choices=["s", "ms", "us"],
-        help="Time unit (default: ms)",
-    )
 
     # Data layout and processing
     parser.add_argument("--time-series", action="store_true", help="Process as time series data")
     parser.add_argument("--time-avg", action="store_true", help="Average over time axis for 2D data")
-    parser.add_argument(
-        "--time-axis",
-        type=int,
-        default=1,
-        help="Time axis for 2D arrays (default: 1)",
-    )
-    parser.add_argument(
-        "--freq-axis",
-        type=int,
-        default=0,
-        help="Frequency axis for 2D arrays (default: 0)",
-    )
 
     # RM fitting
     parser.add_argument(
@@ -225,7 +193,32 @@ def main() -> None:
             "(indices refer to plotted Poincare points after masking/binning)."
         ),
     )
-
+    parser.add_argument(
+        "--poincare-freq-bands",
+        type=int,
+        default=None,
+        help=(
+            "Split the frequency band into N subbands for Poincare frequency plots. "
+            "Use with --poincare and --time-avg."
+        ),
+    )
+    parser.add_argument(
+        "--poincare-freq-bands-snr",
+        type=int,
+        default=None,
+        help="Split Poincare frequency subbands by equal SNR weight into N bands.",
+    )
+    parser.add_argument(
+        "--poincare-freq-bands-min-channels",
+        type=int,
+        default=4,
+        help="Minimum channels per Poincare frequency subband (default: 4)",
+    )
+    parser.add_argument(
+        "--poincare-freq-bands-manual",
+        action="store_true",
+        help="Manually select Poincare frequency subbands (interactive).",
+    )
     # Peak separation
     parser.add_argument(
         "--separate-peaks",
@@ -326,6 +319,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    stokes_axis = 0
+    time_axis = 1
+    freq_axis = 0
+    freq_unit = "MHz"
+    time_unit = "ms"
+
     using_cube = args.stokes_cube is not None
     using_separate = any(v is not None for v in (args.stokes_i, args.stokes_q, args.stokes_u, args.stokes_v))
     if using_cube and using_separate:
@@ -363,13 +362,13 @@ def main() -> None:
         u_file=args.stokes_u,
         v_file=args.stokes_v,
         cube_file=args.stokes_cube,
-        stokes_axis=args.stokes_axis,
+        stokes_axis=stokes_axis,
         freq_file=args.freq,
         time_file=args.time,
-        time_axis=args.time_axis,
-        freq_axis=args.freq_axis,
-        freq_unit=args.freq_unit,
-        time_unit=args.time_unit,
+        time_axis=time_axis,
+        freq_axis=freq_axis,
+        freq_unit=freq_unit,
+        time_unit=time_unit,
     )
 
     burn_pol_frac_err = None
@@ -390,13 +389,13 @@ def main() -> None:
 
     if stokes_i.ndim == 2:
         print(f"\n  Detected 2D data with shape: {stokes_i.shape}")
-        print(f"  Time axis: {args.time_axis}, Frequency axis: {args.freq_axis}")
+        print(f"  Time axis: {time_axis}, Frequency axis: {freq_axis}")
 
         stokes_i_full_noise = stokes_i
         stokes_q_full_noise = stokes_q
         stokes_u_full_noise = stokes_u
         stokes_v_full_noise = stokes_v
-        if args.time_axis == 0:
+        if time_axis == 0:
             n_time_noise = stokes_i_full_noise.shape[0]
             n_frac_noise = max(1, int(n_time_noise * args.noise_fraction))
             i_off = stokes_i_full_noise[:n_frac_noise, :]
@@ -443,7 +442,7 @@ def main() -> None:
         sigma_u_chan_base = sigma_u_chan.copy()
         sigma_v_chan_base = sigma_v_chan.copy() if sigma_v_chan is not None else None
 
-        n_freq_data = stokes_i.shape[args.freq_axis]
+        n_freq_data = stokes_i.shape[freq_axis]
         if len(freq_hz) != n_freq_data:
             print(
                 f"\n  WARNING: Frequency array length ({len(freq_hz)}) does not match "
@@ -490,7 +489,7 @@ def main() -> None:
             if args.onpulse_only:
                 print(f"\nDetecting on-pulse window ({args.onpulse_fraction * 100:.1f}% flux)...")
 
-                time_profile = np.sum(stokes_i, axis=args.freq_axis)
+                time_profile = np.sum(stokes_i, axis=freq_axis)
                 start_idx, end_idx = find_onpulse_window(time_profile, args.onpulse_fraction)
 
                 if time_array is not None:
@@ -504,6 +503,63 @@ def main() -> None:
 
                 onpulse_mask = (start_idx, end_idx)
 
+        if onpulse_regions is None and onpulse_mask is not None:
+            onpulse_regions = [onpulse_mask]
+        if onpulse_regions is not None and len(onpulse_regions) > 0:
+            def _print_component_fractions(
+                label: str,
+                i_seg: np.ndarray,
+                q_seg: np.ndarray,
+                u_seg: np.ndarray,
+                v_seg: Optional[np.ndarray],
+            ) -> None:
+                i_mean = float(np.nanmean(i_seg))
+                q_mean = float(np.nanmean(q_seg))
+                u_mean = float(np.nanmean(u_seg))
+                l_mean = float(np.sqrt(q_mean ** 2 + u_mean ** 2))
+                if v_seg is not None:
+                    v_mean = float(np.nanmean(v_seg))
+                    p_mean = float(np.sqrt(q_mean ** 2 + u_mean ** 2 + v_mean ** 2))
+                else:
+                    v_mean = float("nan")
+                    p_mean = float(np.sqrt(q_mean ** 2 + u_mean ** 2))
+                denom = i_mean if np.isfinite(i_mean) and i_mean != 0.0 else float("nan")
+                p_frac = p_mean / denom if np.isfinite(denom) else float("nan")
+                l_frac = l_mean / denom if np.isfinite(denom) else float("nan")
+                v_frac = v_mean / denom if np.isfinite(denom) else float("nan")
+                print(
+                    f"  {label}: P/I={p_frac:.4f}, L/I={l_frac:.4f}, V/I={v_frac:.4f}"
+                )
+            print("\nSelected component fractions:")
+            for idx, (start_idx, end_idx) in enumerate(onpulse_regions, start=1):
+                if time_axis == 0:
+                    i_seg = stokes_i[start_idx : end_idx + 1, :]
+                    q_seg = stokes_q[start_idx : end_idx + 1, :]
+                    u_seg = stokes_u[start_idx : end_idx + 1, :]
+                    v_seg = (
+                        stokes_v[start_idx : end_idx + 1, :]
+                        if stokes_v is not None
+                        else None
+                    )
+                else:
+                    i_seg = stokes_i[:, start_idx : end_idx + 1]
+                    q_seg = stokes_q[:, start_idx : end_idx + 1]
+                    u_seg = stokes_u[:, start_idx : end_idx + 1]
+                    v_seg = (
+                        stokes_v[:, start_idx : end_idx + 1]
+                        if stokes_v is not None
+                        else None
+                    )
+                _print_component_fractions(
+                    f"component {idx} (bins {start_idx}-{end_idx})",
+                    i_seg,
+                    q_seg,
+                    u_seg,
+                    v_seg,
+                )
+        else:
+            print("\nSelected component fractions: no on-pulse regions available")
+
         if args.time_avg:
             print("  Averaging over time axis...")
             n_time_avg_used = n_time_noise
@@ -516,7 +572,7 @@ def main() -> None:
                 if len(time_avg_extra_regions) > 0:
                     print(f"  Additional selected peaks to process separately: {len(time_avg_extra_regions)}")
 
-                if args.time_axis == 0:
+                if time_axis == 0:
                     stokes_i = np.mean(stokes_i[first_start : first_end + 1, :], axis=0)
                     stokes_q = np.mean(stokes_q[first_start : first_end + 1, :], axis=0)
                     stokes_u = np.mean(stokes_u[first_start : first_end + 1, :], axis=0)
@@ -533,24 +589,24 @@ def main() -> None:
                 n_time_avg_used = max(1, end_idx - start_idx + 1)
                 print(f"  Using only on-pulse region (bins {start_idx} to {end_idx})...")
 
-                if args.time_axis == 0:
-                    stokes_i = np.mean(stokes_i[start_idx : end_idx + 1, :], axis=args.time_axis)
-                    stokes_q = np.mean(stokes_q[start_idx : end_idx + 1, :], axis=args.time_axis)
-                    stokes_u = np.mean(stokes_u[start_idx : end_idx + 1, :], axis=args.time_axis)
+                if time_axis == 0:
+                    stokes_i = np.mean(stokes_i[start_idx : end_idx + 1, :], axis=time_axis)
+                    stokes_q = np.mean(stokes_q[start_idx : end_idx + 1, :], axis=time_axis)
+                    stokes_u = np.mean(stokes_u[start_idx : end_idx + 1, :], axis=time_axis)
                     if stokes_v is not None:
-                        stokes_v = np.mean(stokes_v[start_idx : end_idx + 1, :], axis=args.time_axis)
+                        stokes_v = np.mean(stokes_v[start_idx : end_idx + 1, :], axis=time_axis)
                 else:
-                    stokes_i = np.mean(stokes_i[:, start_idx : end_idx + 1], axis=args.time_axis)
-                    stokes_q = np.mean(stokes_q[:, start_idx : end_idx + 1], axis=args.time_axis)
-                    stokes_u = np.mean(stokes_u[:, start_idx : end_idx + 1], axis=args.time_axis)
+                    stokes_i = np.mean(stokes_i[:, start_idx : end_idx + 1], axis=time_axis)
+                    stokes_q = np.mean(stokes_q[:, start_idx : end_idx + 1], axis=time_axis)
+                    stokes_u = np.mean(stokes_u[:, start_idx : end_idx + 1], axis=time_axis)
                     if stokes_v is not None:
-                        stokes_v = np.mean(stokes_v[:, start_idx : end_idx + 1], axis=args.time_axis)
+                        stokes_v = np.mean(stokes_v[:, start_idx : end_idx + 1], axis=time_axis)
             else:
-                stokes_i = np.mean(stokes_i, axis=args.time_axis)
-                stokes_q = np.mean(stokes_q, axis=args.time_axis)
-                stokes_u = np.mean(stokes_u, axis=args.time_axis)
+                stokes_i = np.mean(stokes_i, axis=time_axis)
+                stokes_q = np.mean(stokes_q, axis=time_axis)
+                stokes_u = np.mean(stokes_u, axis=time_axis)
                 if stokes_v is not None:
-                    stokes_v = np.mean(stokes_v, axis=args.time_axis)
+                    stokes_v = np.mean(stokes_v, axis=time_axis)
 
             print(f"  Averaged data shape: {stokes_i.shape}")
 
@@ -669,7 +725,7 @@ def main() -> None:
             )
             print("  Proceeding with first time sample...")
             idx = [slice(None)] * stokes_i.ndim
-            idx[args.time_axis] = 0
+            idx[time_axis] = 0
             stokes_i = stokes_i[tuple(idx)]
             stokes_q = stokes_q[tuple(idx)]
             stokes_u = stokes_u[tuple(idx)]
@@ -809,6 +865,44 @@ def main() -> None:
             )
 
             if args.poincare:
+                freq_band_ranges: Optional[List[Tuple[int, int]]] = None
+                if args.poincare_freq_bands_manual:
+                    freq_band_ranges = select_frequency_bands_manual(
+                        freq_hz / 1e6,
+                        stokes_i,
+                    )
+                elif args.poincare_freq_bands is not None or args.poincare_freq_bands_snr is not None:
+                    if args.poincare_freq_bands_snr is not None:
+                        n_bands = args.poincare_freq_bands_snr
+                        n_common = len(freq_hz)
+                        if sigma_i_chan is not None:
+                            n_common = min(n_common, len(sigma_i_chan))
+                        n_common = min(n_common, len(stokes_i))
+                        freq_mhz_common = (freq_hz[:n_common] / 1e6) if n_common > 0 else freq_hz / 1e6
+                        stokes_i_common = stokes_i[:n_common] if n_common > 0 else stokes_i
+                        if sigma_i_chan is not None:
+                            sigma_i_common = sigma_i_chan[:n_common] if n_common > 0 else sigma_i_chan
+                            snr_weights = np.where(
+                                np.isfinite(sigma_i_common),
+                                np.abs(stokes_i_common) / (sigma_i_common + 1e-10),
+                                0.0,
+                            )
+                        else:
+                            snr_weights = np.abs(stokes_i_common)
+                        freq_band_ranges = split_frequency_bands_equal_snr(
+                            freq_mhz_common,
+                            snr_weights,
+                            n_bands,
+                            min_channels=args.poincare_freq_bands_min_channels,
+                        )
+                    else:
+                        freq_band_ranges = split_frequency_bands_equal(
+                            freq_hz / 1e6,
+                            args.poincare_freq_bands,
+                        )
+                    if freq_band_ranges is not None and len(freq_band_ranges) == 0:
+                        freq_band_ranges = None
+
                 plot_poincare_sphere_frequency(
                     freq_hz,
                     stokes_i,
@@ -852,12 +946,59 @@ def main() -> None:
                         else None,
                     )
 
+                if freq_band_ranges is not None:
+                    for band_idx, (start_idx, stop_idx) in enumerate(freq_band_ranges, start=1):
+                        band_slice = slice(start_idx, stop_idx)
+                        band_tag = f"band{band_idx:02d}"
+                        plot_poincare_sphere_frequency(
+                            freq_hz[band_slice],
+                            stokes_i[band_slice],
+                            stokes_q[band_slice],
+                            stokes_u[band_slice],
+                            stokes_v[band_slice] if stokes_v is not None else None,
+                            f"{args.output}_poincare_frequency_{band_tag}.{args.ext}",
+                            sigma_i=sigma_i_chan[band_slice] if sigma_i_chan is not None else None,
+                            sigma_q=sigma_q_chan[band_slice] if sigma_q_chan is not None else None,
+                            sigma_u=sigma_u_chan[band_slice] if sigma_u_chan is not None else None,
+                            sigma_v=sigma_v_chan[band_slice] if sigma_v_chan is not None else None,
+                            snr_threshold=2.0,
+                            exclude_edge_bins=args.exclude_edge_bins,
+                            interactive=args.poincare_interactive,
+                            force_surface=args.poincare_surface,
+                            circle_fit_mode=args.poincare_circle_fit,
+                            circle_fit_segments=circle_segments,
+                        )
+
+                        if args.poincare_projections:
+                            proj_tag = str(args.poincare_projections).lower()
+                            plot_poincare_projections_frequency(
+                                freq_hz[band_slice],
+                                stokes_i[band_slice],
+                                stokes_q[band_slice],
+                                stokes_u[band_slice],
+                                stokes_v[band_slice] if stokes_v is not None else None,
+                                f"{args.output}_poincare_projections_{proj_tag}_{band_tag}.{args.ext}",
+                                projection_type=args.poincare_projections,
+                                sigma_i=sigma_i_chan[band_slice] if sigma_i_chan is not None else None,
+                                sigma_q=sigma_q_chan[band_slice] if sigma_q_chan is not None else None,
+                                sigma_u=sigma_u_chan[band_slice] if sigma_u_chan is not None else None,
+                                sigma_v=sigma_v_chan[band_slice] if sigma_v_chan is not None else None,
+                                snr_threshold=2.0,
+                                exclude_edge_bins=args.exclude_edge_bins,
+                                force_surface=args.poincare_surface,
+                                circle_fit_mode=args.poincare_circle_fit,
+                                circle_fit_segments=circle_segments,
+                                center=tuple(args.poincare_proj_center)
+                                if args.poincare_proj_center is not None
+                                else None,
+                            )
+
         if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i_full_noise is not None:
             for i_extra, (pk_start, pk_end) in enumerate(time_avg_extra_regions, start=2):
                 print(f"\nProcessing additional selected peak {i_extra}: bins {pk_start} to {pk_end}")
                 n_time_pk = max(1, pk_end - pk_start + 1)
 
-                if args.time_axis == 0:
+                if time_axis == 0:
                     stokes_i_pk = np.mean(stokes_i_full_noise[pk_start : pk_end + 1, :], axis=0)
                     stokes_q_pk = np.mean(stokes_q_full_noise[pk_start : pk_end + 1, :], axis=0)
                     stokes_u_pk = np.mean(stokes_u_full_noise[pk_start : pk_end + 1, :], axis=0)
@@ -1056,12 +1197,12 @@ def main() -> None:
         if args.method == "rmnest":
             print("\nNote: RMNest time-series fitting can be slow. Outputs will be written per time bin.")
 
-        print(f"\nProcessing time series data: {stokes_i.shape[args.time_axis]} time samples")
+        print(f"\nProcessing time series data: {stokes_i.shape[time_axis]} time samples")
         print(f"Using method: {args.method}")
         print("This may take a while...")
 
         full_time_series_data = {
-            "time": time_array if time_array is not None else np.arange(stokes_i.shape[args.time_axis]),
+            "time": time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]),
             "I": stokes_i,
             "Q": stokes_q,
             "U": stokes_u,
@@ -1073,12 +1214,12 @@ def main() -> None:
             start_idx, end_idx = onpulse_mask
             print(f"  Processing only on-pulse bins {start_idx} to {end_idx}")
 
-            if args.time_axis == 0:
+            if time_axis == 0:
                 time_series_data = {
                     "time": (
                         time_array
                         if time_array is not None
-                        else np.arange(stokes_i.shape[args.time_axis])
+                        else np.arange(stokes_i.shape[time_axis])
                     )[start_idx : end_idx + 1],
                     "I": stokes_i[start_idx : end_idx + 1, :],
                     "Q": stokes_q[start_idx : end_idx + 1, :],
@@ -1091,7 +1232,7 @@ def main() -> None:
                     "time": (
                         time_array
                         if time_array is not None
-                        else np.arange(stokes_i.shape[args.time_axis])
+                        else np.arange(stokes_i.shape[time_axis])
                     )[start_idx : end_idx + 1],
                     "I": stokes_i[:, start_idx : end_idx + 1],
                     "Q": stokes_q[:, start_idx : end_idx + 1],
@@ -1103,7 +1244,7 @@ def main() -> None:
             print(f"  Reduced to {len(time_series_data['time'])} time samples")
         else:
             time_series_data = {
-                "time": time_array if time_array is not None else np.arange(stokes_i.shape[args.time_axis]),
+                "time": time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]),
                 "I": stokes_i,
                 "Q": stokes_q,
                 "U": stokes_u,
@@ -1155,7 +1296,7 @@ def main() -> None:
 
         if not args.no_plot:
             if args.separate_peaks:
-                if args.time_axis == 0:
+                if time_axis == 0:
                     if onpulse_mask is not None:
                         start_idx, end_idx = onpulse_mask
                         full_time_profile = np.zeros(end_idx - start_idx + 1)
@@ -1208,7 +1349,7 @@ def main() -> None:
                         n_subbands=args.poincare_subbands,
                         n_time_bins=pt_bins,
                         noise_fraction=args.noise_fraction,
-                        time_unit=args.time_unit,
+                        time_unit=time_unit,
                         interactive=args.poincare_interactive,
                         force_surface=args.poincare_surface,
                         noise_reference_data=full_time_series_data,
@@ -1222,7 +1363,7 @@ def main() -> None:
                         f"{args.output}_poincare.{args.ext}",
                         n_time_bins=pt_bins,
                         noise_fraction=args.noise_fraction,
-                        time_unit=args.time_unit,
+                        time_unit=time_unit,
                         interactive=args.poincare_interactive,
                         force_surface=args.poincare_surface,
                         rm_results=rm_results,
@@ -1238,7 +1379,7 @@ def main() -> None:
                         projection_type=args.poincare_projections,
                         n_time_bins=pt_bins,
                         noise_fraction=args.noise_fraction,
-                        time_unit=args.time_unit,
+                        time_unit=time_unit,
                         force_surface=args.poincare_surface,
                         rm_results=rm_results,
                         noise_reference_data=full_time_series_data,

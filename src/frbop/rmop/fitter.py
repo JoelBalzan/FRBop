@@ -485,6 +485,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     v_bin = np.zeros(n_bins_actual)
     time_binned = np.zeros(n_bins_actual)
     i_snr_array = np.zeros(n_bins_actual)
+    time_bin_start = np.zeros(n_bins_actual, dtype=int)
+    time_bin_end = np.zeros(n_bins_actual, dtype=int)
 
     # prepare noise estimate for Stokes V if available
     if 'V' in time_series_data:
@@ -505,6 +507,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         if bin_end <= bin_start:
             continue
 
+        time_bin_start[i] = bin_start
+        time_bin_end[i] = bin_end
         time_binned[i] = np.nanmean(times[bin_start:bin_end])
 
         # Extract data for this time bin and average in time
@@ -646,6 +650,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         'is_binned': n_bins_actual != n_time,
         'time_bin_size': bin_size,
         'time_bin_count': n_bins_actual,
+        'time_bin_start': time_bin_start,
+        'time_bin_end': time_bin_end,
         'i_snr': i_snr_array,
         'valid_bins': valid_bins,
         'pa_ea_valid': pa_ea_valid,

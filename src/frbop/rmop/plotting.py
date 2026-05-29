@@ -15,29 +15,20 @@ the sphere and projections plots.
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 import numpy as np
+from matplotlib.gridspec import GridSpec
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import savefig_rasterized, pub_figsize, IBM_PALETTE
-from frbop.utils.peaks import (
-    select_frequency_bands_manual,
-    split_frequency_bands_equal,
-    split_frequency_bands_equal_snr,
-)
+from frbop.utils.peaks import (select_frequency_bands_manual,
+                               split_frequency_bands_equal,
+                               split_frequency_bands_equal_snr)
+from frbop.utils.plotting import IBM_PALETTE, pub_figsize, savefig_rasterized
 
-from .constants import (
-    TWO_COLUMN_WIDTH_IN,
-    SINGLE_COLUMN_WIDTH_IN,
-    plot_style,
-)
+from .constants import SINGLE_COLUMN_WIDTH_IN, TWO_COLUMN_WIDTH_IN, plot_style
 from .fitter import RMFitter
-from .physics import (
-    sigma_rm_detection_threshold,
-    sigma_rm_detection_threshold_snr,
-    depolarising_medium_delta_ne_b_parallel,
-)
-
+from .physics import (depolarising_medium_delta_ne_b_parallel,
+                      sigma_rm_detection_threshold,
+                      sigma_rm_detection_threshold_snr)
 
 # ---------------------------------------------------------------------------
 # Internal save wrapper
@@ -335,14 +326,6 @@ def _poincare_circle_weights(sigma_q: np.ndarray,
     return w
 
 
-def _poincare_point_sizes(p_frac: np.ndarray,
-                          min_size: float,
-                          max_size: float) -> np.ndarray:
-    p = np.asarray(p_frac, dtype=float)
-    p = np.clip(p, 0.0, 1.0)
-    return min_size + (max_size - min_size) * p
-
-
 def _split_lon_lat_segments(lon_deg: np.ndarray,
                             lat_deg: np.ndarray,
                             lon0_deg: float,
@@ -544,9 +527,7 @@ def plot_poincare_sphere(
         u_filt *= 1.002
         v_filt *= 1.002
 
-    point_sizes = 60.0
-    if force_surface:
-        point_sizes = _poincare_point_sizes(p_frac, 8.0, 120.0)
+    point_sizes = 40.0
 
     sigma_q, sigma_u, sigma_v = _compute_poincare_point_errors(
         noise_ref,
@@ -791,9 +772,7 @@ def plot_poincare_sphere_frequency(
         u_filt *= 1.002
         v_filt *= 1.002
 
-    point_sizes = 60.0
-    if force_surface:
-        point_sizes = _poincare_point_sizes(p_frac, 8.0, 120.0)
+    point_sizes = 40.0
 
     sigma_lon_deg, sigma_lat_deg = _poincare_angle_errors_deg(
         q_filt, u_filt, v_filt, sigma_q_filt, sigma_u_filt, sigma_v_filt
@@ -1118,7 +1097,7 @@ def plot_poincare_projections_frequency(
     half = max(half, np.tan(np.radians(30)))
 
     ang_half = np.degrees(np.arctan(half))
-    grid_step = 10 if ang_half < 45 else 30
+    grid_step = 30
 
     projection_map = {
         'gnom': ('gnom', 'Gnomonic\n(great circles → straight lines)'),
@@ -1165,7 +1144,9 @@ def plot_poincare_projections_frequency(
     norm = plt.Normalize(vmin=np.nanmin(freq_mhz), vmax=np.nanmax(freq_mhz))
 
     for ax, (proj, _title) in zip(axes, projections):
-        lon0_use = 0.0 if proj == 'robin' else lon0
+        #lon0_use = 0.0 if proj == 'robin' else lon0
+        lon0_use = lon0
+
         if proj == 'ortho':
             bsmp = _Basemap(
                 projection='ortho', lat_0=lat0, lon_0=lon0_use,
@@ -1283,11 +1264,7 @@ def plot_poincare_projections_frequency(
             sigma_lat_deg = sigma_lat_deg[:n_plot]
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
-            if force_surface:
-                point_sizes = _poincare_point_sizes(p_frac, 6.0, 90.0)
-                scatter_sizes = point_sizes[fin_s]
-            else:
-                scatter_sizes = 55.0
+            scatter_sizes = 40.0
             ax.scatter(sx[fin_s], sy[fin_s],
                        c=freq_mhz[fin_s], cmap='plasma', norm=norm,
                        s=scatter_sizes, edgecolors='black', linewidths=0.6,
@@ -1613,9 +1590,7 @@ def plot_poincare_sphere_subbands(
     legend_handles = []
     for i_track, track in enumerate(band_tracks):
         edge_color = band_colors[i_track]
-        point_sizes = 60.0
-        if force_surface:
-            point_sizes = _poincare_point_sizes(track['p_frac'], 8.0, 120.0)
+        point_sizes = 40.0
         sc = ax.scatter(
             track['q'], track['u'], track['v'],
             c=track['color'], cmap='plasma', norm=norm,
@@ -2014,7 +1989,8 @@ def plot_poincare_projections(
     norm = plt.Normalize(vmin=np.nanmin(c_f), vmax=np.nanmax(c_f))
 
     for ax, (proj, _title) in zip(axes, projections):
-        lon0_use = 0.0 if proj == 'robin' else lon0
+        #lon0_use = 0.0 if proj == 'robin' else lon0
+        lon0_use = lon0
         if proj == 'ortho':
             bsmp = _Basemap(
                 projection='ortho', lat_0=lat0, lon_0=lon0_use,
@@ -2098,11 +2074,7 @@ def plot_poincare_projections(
         sx = np.array(sx, dtype=float); sy = np.array(sy, dtype=float)
         fin_s = np.isfinite(sx) & np.isfinite(sy)
         if np.any(fin_s):
-            if force_surface:
-                point_sizes = _poincare_point_sizes(p_frac, 6.0, 90.0)
-                scatter_sizes = point_sizes[fin_s]
-            else:
-                scatter_sizes = 55.0
+            scatter_sizes = 40.0
             ax.scatter(sx[fin_s], sy[fin_s],
                        c=c_f[fin_s], cmap='plasma', norm=norm,
                        s=scatter_sizes, edgecolors='black', linewidths=0.6,
@@ -2257,14 +2229,27 @@ def plot_rm_time_series(time_array: np.ndarray,
             V_frac_full = V_full / (I_full + 1e-10)
 
             if len(time_peak) > 0:
-                tmin = time_peak.min()
-                tmax = time_peak.max()
-                if len(full_time) > 1:
-                    dt = np.median(np.diff(full_time))
-                    pad = dt / 2.0
+                bin_start_idx = None
+                bin_end_idx = None
+                bin_start = rm_results.get('time_bin_start')
+                bin_end = rm_results.get('time_bin_end')
+                if bin_start is not None and bin_end is not None:
+                    if len(bin_start) == len(time_array) and len(bin_end) == len(time_array):
+                        bin_start_idx = int(bin_start[start_idx])
+                        bin_end_idx = int(bin_end[end_idx])
+
+                if bin_start_idx is not None and bin_end_idx is not None:
+                    full_mask = np.zeros_like(full_time, dtype=bool)
+                    full_mask[bin_start_idx:bin_end_idx] = True
                 else:
-                    pad = 0.0
-                full_mask = (full_time >= (tmin - pad)) & (full_time <= (tmax + pad))
+                    tmin = time_peak.min()
+                    tmax = time_peak.max()
+                    if len(full_time) > 1:
+                        dt = np.median(np.diff(full_time))
+                        pad = dt / 2.0
+                    else:
+                        pad = 0.0
+                    full_mask = (full_time >= (tmin - pad)) & (full_time <= (tmax + pad))
             else:
                 full_mask = np.ones_like(full_time, dtype=bool)
 
@@ -2579,12 +2564,6 @@ def plot_rm_time_series(time_array: np.ndarray,
             signal_mask = ~badi_full[full_mask]
             if not np.any(signal_mask):
                 signal_mask = np.ones_like(signal_mask, dtype=bool)
-            rm_mask = np.ones_like(times_ms, dtype=bool)
-            if np.any(good_signal_peak):
-                good_times = time_peak[good_signal_peak] * 1e3
-                dt = np.median(np.diff(time_peak)) * 1e3 if len(time_peak) > 1 else 0
-                tol = dt/2 + 1e-9
-                rm_mask = np.array([np.any(np.abs(t - good_times) <= tol) for t in times_ms])
             combined = signal_mask
 
             full_indices = np.where(full_mask)[0]
@@ -2633,14 +2612,11 @@ def plot_rm_time_series(time_array: np.ndarray,
                             errs[idx] = fallback[0] if fallback.size else np.nan
                     return errs
 
-                if 'valid_bins' in rm_results:
-                    bin_mask = np.asarray(rm_results['valid_bins'], dtype=bool)
+                if full_time is not None:
+                    idx = np.argmin(np.abs(full_time[:, None] - (bt / 1e3)[None, :]), axis=0)
+                    bin_mask = combined[idx]
                 else:
-                    if full_time is not None:
-                        idx = np.argmin(np.abs(full_time[:, None] - (bt/1e3)[None, :]), axis=0)
-                        bin_mask = combined[idx]
-                    else:
-                        bin_mask = np.ones_like(bt, dtype=bool)
+                    bin_mask = np.ones_like(bt, dtype=bool)
 
                 if np.any(bin_mask):
                     pf_err = _bin_frac_err(bt, p_full_masked)
@@ -2969,7 +2945,8 @@ def plot_burns_law_fits(fitter: RMFitter,
     - P_const(λ)      = P_i
     where P is the linear polarisation fraction (L/I).
     """
-    from scipy.constants import c as _c  # avoid shadowing the module-level name
+    from scipy.constants import \
+        c as _c  # avoid shadowing the module-level name
 
     style = plot_style()
 
@@ -3567,56 +3544,6 @@ def plot_polarisation_fraction_acf_ccf(
         return
 
     conf = 1.96 / np.sqrt(grid.size)
-    pos = lags > 0
-    best_q_idx = int(np.nanargmax(np.where(pos, acf_q, np.nan)))
-    best_q_lag = float(lags[best_q_idx])
-    best_q_val = float(acf_q[best_q_idx])
-    q_oscillatory = bool(np.isfinite(best_q_val) and best_q_val > conf)
-
-    best_u_idx = int(np.nanargmax(np.where(pos, acf_u, np.nan)))
-    best_u_lag = float(lags[best_u_idx])
-    best_u_val = float(acf_u[best_u_idx])
-    u_oscillatory = bool(np.isfinite(best_u_val) and best_u_val > conf)
-
-    best_l_idx = int(np.nanargmax(np.where(pos, acf_l, np.nan)))
-    best_l_lag = float(lags[best_l_idx])
-    best_l_val = float(acf_l[best_l_idx])
-    l_oscillatory = bool(np.isfinite(best_l_val) and best_l_val > conf)
-
-    v_summary = None
-    if acf_v is not None:
-        best_v_idx = int(np.nanargmax(np.where(pos, acf_v, np.nan)))
-        best_v_lag = float(lags[best_v_idx])
-        best_v_val = float(acf_v[best_v_idx])
-        v_oscillatory = bool(np.isfinite(best_v_val) and best_v_val > conf)
-        v_summary = (best_v_lag, best_v_val, v_oscillatory)
-
-    ccf_summary = None
-    if ccf_lv is not None:
-        ccf_best_idx = int(np.nanargmax(np.abs(ccf_lv)))
-        ccf_summary = (float(lags[ccf_best_idx]), float(ccf_lv[ccf_best_idx]), bool(abs(ccf_lv[ccf_best_idx]) > conf))
-
-    ccf_qu_summary = None
-    if ccf_qu is not None:
-        ccf_qu_best_idx = int(np.nanargmax(np.abs(ccf_qu)))
-        ccf_qu_summary = (float(lags[ccf_qu_best_idx]), float(ccf_qu[ccf_qu_best_idx]), bool(abs(ccf_qu[ccf_qu_best_idx]) > conf))
-
-    print("\nPolarisation-fraction correlation diagnostics (ACFs computed on original fractions):")
-    print(f"  Uniform frequency grid: {grid.size} samples, Δν={dx:.6e} MHz")
-    print(f"  Q/I ACF peak: lag={best_q_lag:.6e} MHz, r={best_q_val:.3f}, above 95% white-noise band={q_oscillatory}")
-    print(f"  U/I ACF peak: lag={best_u_lag:.6e} MHz, r={best_u_val:.3f}, above 95% white-noise band={u_oscillatory}")
-    print(f"  L/I ACF peak: lag={best_l_lag:.6e} MHz, r={best_l_val:.3f}, above 95% white-noise band={l_oscillatory}")
-    if v_summary is not None:
-        best_v_lag, best_v_val, v_oscillatory = v_summary
-        print(f"  V/I ACF peak: lag={best_v_lag:.6e} MHz, r={best_v_val:.3f}, above 95% white-noise band={v_oscillatory}")
-    else:
-        print("  V/I ACF peak: skipped (no valid V data)")
-    if ccf_qu_summary is not None:
-        ccf_lag, ccf_val, ccf_sig = ccf_qu_summary
-        print(f"  Q/I vs U/I cross-correlation peak: lag={ccf_lag:.6e} MHz, r={ccf_val:.3f}, above 95% white-noise band={ccf_sig}")
-    if ccf_summary is not None:
-        ccf_lag, ccf_val, ccf_sig = ccf_summary
-        print(f"  L/I vs V/I cross-correlation peak: lag={ccf_lag:.6e} MHz, r={ccf_val:.3f}, above 95% white-noise band={ccf_sig}")
 
     style = plot_style()
     fig, axes = plt.subplots(
@@ -3655,15 +3582,15 @@ def plot_polarisation_fraction_acf_ccf(
     axes[2].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
     axes[2].plot(lags, acf_q, color='#6a3d9a', linewidth=1.3, label='ACF Q/I')
     axes[2].plot(lags, acf_u, color='#ff7f00', linewidth=1.3, label='ACF U/I')
-    #axes[2].plot(lags, acf_l, color='r', linewidth=1.5, label='ACF L/I')
+    axes[2].plot(lags, acf_l, color='r', linewidth=1.5, label='ACF L/I')
     axes[2].axhline(conf, color='0.4', linestyle=':', linewidth=1.0, label='95% band')
     axes[2].axhline(-conf, color='0.4', linestyle=':', linewidth=1.0)
     if acf_v is not None:
         axes[2].plot(lags, acf_v, color='b', linewidth=1.5, label='ACF V/I')
-    #if ccf_qu is not None:
-    #    axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=1.2, linestyle='--', label='CCF Q/I vs U/I')
-    #if ccf_lv is not None:
-    #    axes[2].plot(lags, ccf_lv, color='k', linewidth=1.2, linestyle='--', label='CCF L/I vs V/I')
+    if ccf_qu is not None:
+        axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=1.2, linestyle='--', label='CCF Q/I vs U/I')
+    if ccf_lv is not None:
+        axes[2].plot(lags, ccf_lv, color='k', linewidth=1.2, linestyle='--', label='CCF L/I vs V/I')
     axes[2].set_xlabel(r'Lag in Frequency (MHz)', fontsize=style['label'])
     axes[2].set_ylabel('Correlation', fontsize=style['label'])
     axes[2].grid(True, alpha=0.3)
