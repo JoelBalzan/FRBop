@@ -11,6 +11,7 @@ from frbop.utils.plotting import set_pub_style
 
 from .optimiser import DMOptimiser
 
+
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(
 		description="DM correction optimisation with configurable inputs",
@@ -173,23 +174,23 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--methods",
 		nargs="+",
-		choices=["structure", "snr", "pa", "pa-shrine", "li"],
+		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
-		help="Methods to run (default: all). Choices: structure, snr, pa, pa-shrine, li",
+		help="Methods to run (default: all). Choices: structure, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li",
 	)
 	parser.add_argument(
 		"--exclude-methods",
 		nargs="+",
-		choices=["structure", "snr", "pa", "pa-shrine", "li"],
+		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Methods to exclude from run/plots/analysis",
 	)
 	parser.add_argument(
 		"--disable-method-errors",
 		nargs="+",
-		choices=["structure", "snr", "pa", "pa-shrine", "li"],
+		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
-		help="Disable error/uncertainty overlays for specified methods in comparison plots (use aliases: structure,snr,pa,pa-shrine,li)",
+		help="Disable error/uncertainty overlays for specified methods in comparison plots (use aliases: structure,snr,min-uncertainty,minimise-uncertainty,pa,pa-shrine,li)",
 	)
 	parser.add_argument(
 		"--label",
@@ -225,6 +226,15 @@ def parse_args() -> argparse.Namespace:
 			"Select which plots show uncertainty/errors. "
 			"Choices: comparison-summary, comparison-scan, comparison-overlay, "
 			"component-dm, component-dne, none. Default: all enabled."
+		),
+	)
+	parser.add_argument(
+		"--structure-max-cubes-dir", "--struct-dir",
+		default=None,
+		help=(
+			"Optional output directory for saving per-component Stokes cubes at the "
+			"SHRINE structure-max DM. Files are saved as .npy arrays with shape "
+			"(n_stokes, freq, time)."
 		),
 	)
 	return parser.parse_args()
@@ -296,6 +306,8 @@ def main():
 		print(f"  - Excluded methods (CLI): {', '.join(args.exclude_methods)}")
 	if args.seed is not None:
 		print(f"  - Random seed: {args.seed}")
+	if args.structure_max_cubes_dir:
+		print(f"  - Structure-max Stokes cube output dir: {args.structure_max_cubes_dir}")
 	if len(error_plot_targets) == 0:
 		print("  - Error/uncertainty overlays on plots: none")
 	else:
@@ -346,11 +358,13 @@ def main():
 	method_alias_to_key = {
 		'structure': 'structure',
 		'snr': 'snr',
+		'min-uncertainty': 'min_uncertainty',
+		'minimise-uncertainty': 'min_uncertainty',
 		'pa': 'pa_slope',
 		'pa-shrine': 'pa_slope_shrine',
 		'li': 'l_i_mean',
 	}
-	default_method_order = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+	default_method_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
 	if args.methods is None:
 		selected_method_keys = default_method_order.copy()
 	else:
@@ -383,6 +397,7 @@ def main():
 	method_key_to_name = {
 		'structure': 'structure',
 		'snr': 'snr',
+		'min_uncertainty': 'min-uncertainty',
 		'pa_slope': 'pa',
 		'pa_slope_shrine': 'pa-shrine',
 		'l_i_mean': 'li',
@@ -488,10 +503,11 @@ def main():
 		print("\n" + "="*70)
 		print(f"Analyzing {label} {i+1}")
 		print("="*70)
+		segment_tag = f"{label.lower()}{i+1}"
 		
 		# Compare methods
 		results = optimiser.compare_methods(dm_range, peak_region, n_points=grid_n_points, dm_step=args.dm_step, 
-											segment_tag=f"{label.lower()}{i+1}",
+										segment_tag=segment_tag,
 											label=args.label,
 											selected_methods=selected_method_keys)
 		all_results.append(results)
@@ -526,6 +542,46 @@ def main():
 			disabled_error_methods=disabled_method_keys,
 		)
 
+		if args.structure_max_cubes_dir:
+			output_dir = Path(args.structure_max_cubes_dir)
+			output_dir.mkdir(parents=True, exist_ok=True)
+			structure_result = results.get('structure')
+			if structure_result is None:
+				print("  - Skipping structure-max cube save (structure method not run).")
+			else:
+				dedisp_i = structure_result.get('dedispersed')
+				dedisp_q = structure_result.get('dedispersed_q')
+				dedisp_u = structure_result.get('dedispersed_u')
+				if dedisp_i is not None:
+					out_path_i = output_dir / f"{args.label}_{segment_tag}_structure_max_I.npy"
+					flipped_i = np.flip(np.asarray(dedisp_i, dtype=float), axis=0)
+					np.save(out_path_i, flipped_i)
+					print(f"  - Saved structure-max Stokes I: {out_path_i}")
+				if dedisp_q is not None:
+					out_path_q = output_dir / f"{args.label}_{segment_tag}_structure_max_Q.npy"
+					flipped_q = np.flip(np.asarray(dedisp_q, dtype=float), axis=0)
+					np.save(out_path_q, flipped_q)
+					print(f"  - Saved structure-max Stokes Q: {out_path_q}")
+				if dedisp_u is not None:
+					out_path_u = output_dir / f"{args.label}_{segment_tag}_structure_max_U.npy"
+					flipped_u = np.flip(np.asarray(dedisp_u, dtype=float), axis=0)
+					np.save(out_path_u, flipped_u)
+					print(f"  - Saved structure-max Stokes U: {out_path_u}")
+				cube_parts = []
+				if dedisp_i is not None:
+					cube_parts.append(np.flip(np.asarray(dedisp_i, dtype=float), axis=0))
+				if dedisp_q is not None:
+					cube_parts.append(np.flip(np.asarray(dedisp_q, dtype=float), axis=0))
+				if dedisp_u is not None:
+					cube_parts.append(np.flip(np.asarray(dedisp_u, dtype=float), axis=0))
+				if len(cube_parts) == 0:
+					print("  - Skipping structure-max cube save (no dedispersed Stokes data available).")
+				else:
+					stokes_cube = np.stack(cube_parts, axis=0)
+					out_path = output_dir / f"{args.label}_{segment_tag}_structure_max_stokes.npy"
+					np.save(out_path, stokes_cube)
+					print(f"  - Saved structure-max Stokes cube: {out_path}")
+
 	if len(all_results) > 1:
 		# Compute component peak times for physical time ordering and L~c*Delta t.
 		component_peak_times_ms = np.zeros(len(peak_regions), dtype=float)
@@ -542,12 +598,11 @@ def main():
 		sort_idx = np.argsort(component_peak_times_ms)
 		sorted_all_results = [all_results[int(i)] for i in sort_idx]
 		sorted_peak_times_ms = component_peak_times_ms[sort_idx]
-		sorted_component_ids = (sort_idx + 1).astype(int)
 
 		print(f"\nGenerating multi-{label.lower()} DM diagnostics plot (time-ordered)...")
 		optimiser.plot_component_dm_diagnostics(
 			sorted_all_results,
-			component_ids=sorted_component_ids,
+			component_times_ms=sorted_peak_times_ms,
 			label=label.lower(),
 			save_path=f'dm_component_dm_diagnostics.{fig_ext}',
 			show_errors=show_component_dm_errors,
@@ -560,11 +615,10 @@ def main():
 		)
 
 		# Re-label pairs with original segment/component IDs after time-order sorting.
-		pair_labels_time = []
-		for idx_a, idx_b in dne_diag['pair_indices']:
-			pair_labels_time.append(
-				f"comp{int(sorted_component_ids[idx_a])}->comp{int(sorted_component_ids[idx_b])}"
-			)
+		pair_labels_time = [
+			f"{idx_a + 1}-{idx_b + 1}"
+			for idx_a, idx_b in dne_diag['pair_indices']
+		]
 		dne_diag['pair_labels'] = pair_labels_time
 		print("\nComponent-to-component dn_e diagnostics (adjacent pairs, L~cΔt):")
 		for i, pair_label in enumerate(dne_diag['pair_labels']):

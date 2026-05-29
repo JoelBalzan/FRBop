@@ -84,8 +84,6 @@ def _main():
         results.append(DM_data[max_index])
 
     if args.save_all:
-        plt.rcParams['font.family'] = 'cm'
-        plt.rcParams['mathtext.fontset'] = 'cm'
         plt.rcParams['font.size'] = 14
         plt.plot(kc_set, results, color='black', label='Structure Maximising\nDelta DM')
         plt.plot(kc_set, uncertainty_lower, '--', color='black', label='Uncertainty Bounds')

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+
 class ComparisonMixin:
 	def compare_methods(self, dm_range: Tuple[float, float], 
 					   peak_region: Optional[Tuple[int, int]] = None,
@@ -41,7 +42,7 @@ class ComparisonMixin:
 
 		has_qu = data_q is not None and data_u is not None
 		results: Dict[str, Dict] = {}
-		all_method_keys = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		all_method_keys = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
 		if selected_methods is None:
 			selected = set(all_method_keys)
 		else:
@@ -52,6 +53,7 @@ class ComparisonMixin:
 
 		run_structure = 'structure' in selected
 		run_snr = 'snr' in selected
+		run_min_uncertainty = 'min_uncertainty' in selected
 		run_pa = 'pa_slope' in selected
 		run_pa_shrine = 'pa_slope_shrine' in selected
 		run_li_mean = 'l_i_mean' in selected
@@ -63,7 +65,7 @@ class ComparisonMixin:
 			run_li_mean = False
 			run_qu_methods = False
 
-		if not (run_structure or run_snr or run_qu_methods):
+		if not (run_structure or run_snr or run_min_uncertainty or run_qu_methods):
 			print("  - No methods selected after filtering; returning empty results.")
 			return results
 
@@ -198,6 +200,64 @@ class ComparisonMixin:
 				n_time_out = results['snr']['dedispersed'].shape[1]
 				results['snr']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
 				results['snr']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
+
+		if run_min_uncertainty:
+			print("  - Testing Minimise Uncertainty (SHRINE)...")
+			run_prefix_unc = f"{label}_{segment_tag}_min_uncertainty"
+			run_dir_unc = self.run_shrine_method(
+				script_name="minimise_uncertainty.py",
+				run_prefix=run_prefix_unc,
+				dm_values=dm_values,
+				i_data=i_data,
+				include_input_dm=False,
+				save_all=True,
+			)
+			unc_path = run_dir_unc / f"{run_prefix_unc}_uncertainly_kc.dat"
+			if not unc_path.exists():
+				raise FileNotFoundError(f"Expected SHRINE uncertainty output not found: {unc_path}")
+			unc_table = np.loadtxt(unc_path)
+			if unc_table.ndim == 1:
+				unc_table = unc_table[np.newaxis, :]
+			if unc_table.shape[1] < 4:
+				raise ValueError(
+					"Unexpected minimise_uncertainty output format; expected 4 columns (kc, low, dm, high)"
+				)
+			kc_vals = np.asarray(unc_table[:, 0], dtype=float)
+			low_dm = np.asarray(unc_table[:, 1], dtype=float)
+			best_dm = np.asarray(unc_table[:, 2], dtype=float)
+			high_dm = np.asarray(unc_table[:, 3], dtype=float)
+			unc_ranges = high_dm - low_dm
+			finite_mask = np.isfinite(unc_ranges)
+			if not np.any(finite_mask):
+				raise ValueError("No finite uncertainty ranges returned by minimise_uncertainty")
+			min_unc = float(np.nanmin(unc_ranges))
+			min_indices = np.where(np.isclose(unc_ranges, min_unc))[0]
+			if min_indices.size == 0:
+				min_indices = np.array([int(np.nanargmin(unc_ranges))])
+			best_idx = int(min_indices[len(min_indices) // 2])
+			optimal_dm_unc = float(best_dm[best_idx])
+			unc_low_dm = float(low_dm[best_idx])
+			unc_high_dm = float(high_dm[best_idx])
+			unc_minus = max(0.0, optimal_dm_unc - unc_low_dm)
+			unc_plus = max(0.0, unc_high_dm - optimal_dm_unc)
+			dedispersed_unc = self.dedisperse(data, optimal_dm_unc, mode=self.dedisp_mode)
+			results['min_uncertainty'] = {
+				'dm': optimal_dm_unc,
+				'metric': float(unc_ranges[best_idx]),
+				'dedispersed': dedispersed_unc,
+				'method': 'Minimise Uncertainty (SHRINE)',
+				'kc': int(round(float(kc_vals[best_idx]))),
+				'run_dir': str(run_dir_unc),
+				'uncertainty_method': 'minimise_uncertainty',
+				'uncertainty_low_dm': unc_low_dm,
+				'uncertainty_high_dm': unc_high_dm,
+				'uncertainty_minus': unc_minus,
+				'uncertainty_plus': unc_plus,
+			}
+			if has_qu:
+				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
+				results['min_uncertainty']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
+				results['min_uncertainty']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
 
 		if not run_qu_methods:
 			return results

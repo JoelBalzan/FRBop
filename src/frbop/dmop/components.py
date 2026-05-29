@@ -5,15 +5,18 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import savefig_rasterized, colour_manager, pub_figsize
+from frbop.utils.plotting import (colour_manager, pub_figsize,
+                                  savefig_rasterized)
+
 
 class ComponentsMixin:
 	def plot_component_dm_diagnostics(self,
-							 all_results: List[Dict],
-							 component_ids: Optional[np.ndarray] = None,
-							 label: str = "segment",
-							 save_path: Optional[str] = None,
-							 show_errors: bool = True):
+						 all_results: List[Dict],
+						 component_ids: Optional[np.ndarray] = None,
+						 component_times_ms: Optional[np.ndarray] = None,
+						 label: str = "segment",
+						 save_path: Optional[str] = None,
+						 show_errors: bool = True):
 		"""
 		Plot DM diagnostics across multiple components.
 
@@ -25,6 +28,16 @@ class ComponentsMixin:
 			print("Component DM diagnostics skipped (need at least 2 components).")
 			return
 
+		if component_times_ms is not None:
+			component_times_ms = np.asarray(component_times_ms, dtype=float)
+			if component_times_ms.ndim != 1 or component_times_ms.shape[0] != n_components:
+				raise ValueError("component_times_ms must be 1D with one value per component")
+			if not np.all(np.isfinite(component_times_ms)):
+				raise ValueError("component_times_ms must be finite")
+			sort_idx = np.argsort(component_times_ms)
+			all_results = [all_results[int(i)] for i in sort_idx]
+			component_ids = np.arange(1, n_components + 1, dtype=int)
+
 		if component_ids is None:
 			component_ids = np.arange(1, n_components + 1, dtype=int)
 		else:
@@ -32,7 +45,7 @@ class ComponentsMixin:
 			if component_ids.ndim != 1 or component_ids.shape[0] != n_components:
 				raise ValueError("component_ids must be 1D with one value per component")
 
-		preferred_order = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
 		first_methods = list(all_results[0].keys())
 		common_methods = [m for m in first_methods if all(m in comp for comp in all_results)]
 		if len(common_methods) == 0:
@@ -45,6 +58,7 @@ class ComponentsMixin:
 		method_display = {
 			'structure': 'Structure',
 			'snr': 'S/N',
+			'min_uncertainty': 'Min. uncertainty',
 			'pa_slope': 'PA slope',
 			'pa_slope_shrine': 'PA slope (SHRINE)',
 			'l_i_mean': 'L/I mean',
@@ -128,12 +142,7 @@ class ComponentsMixin:
 		component_names = []
 		for cid in component_ids:
 			cid_int = int(cid)
-			if cid_int == 1:
-				component_names.append('Main component')
-			elif cid_int == 2:
-				component_names.append('Precursor')
-			else:
-				component_names.append(f'Precursor {cid_int - 1}')
+			component_names.append(f'Component {cid_int}')
 		ax.set_xticklabels(component_names)
 		x_pad = 0.2
 		ax.set_xlim(1 - x_pad, n_components + x_pad)
@@ -215,7 +224,7 @@ class ComponentsMixin:
 				if j != reference_component
 			]
 
-		pair_labels = [f"comp{a + 1}->comp{b + 1}" for a, b in pair_indices]
+		pair_labels = [f"{a + 1}-{b + 1}" for a, b in pair_indices]
 		c_pc_per_ms = 9.715611890180196e-12
 		pair_separations_pc = np.zeros(len(pair_indices), dtype=float)
 		for i, (idx_a, idx_b) in enumerate(pair_indices):
@@ -312,13 +321,14 @@ class ComponentsMixin:
 			print("dn_e diagnostics plot skipped (no dn_e data).")
 			return
 
-		preferred_order = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
 		method_names = [m for m in preferred_order if m in methods]
 		method_names.extend([m for m in methods.keys() if m not in method_names])
 
 		method_display = {
 			'structure': 'Structure',
 			'snr': 'S/N',
+			'min_uncertainty': 'Min. uncertainty',
 			'pa_slope': 'PA slope',
 			'pa_slope_shrine': 'PA slope (SHRINE)',
 			'l_i_mean': 'L/I mean',

@@ -1,12 +1,14 @@
 """Plotting and DM-space scanning utilities."""
 
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, pub_grid_figsize, colour_manager
+from frbop.utils.plotting import (colour_manager, pub_figsize,
+                                  pub_grid_figsize, savefig_rasterized)
+
 
 class PlottingMixin:
 	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
@@ -59,6 +61,7 @@ class PlottingMixin:
 		scan_labels = {
 			'structure': 'Structure',
 			'snr': 'S/N',
+			'min_uncertainty': 'Min. Uncertainty',
 			'pa_slope': 'PA',
 			'pa_slope_shrine': 'PA (SHRINE)',
 			'l_i_mean': 'L/I mean',
@@ -571,8 +574,14 @@ class PlottingMixin:
 		if len(metrics) == 1:
 			axes = [axes]
 		
-		colors = {'structure': 'blue', 'snr': 'red', 'pa_slope': 'green', 'pa_slope_shrine': 'teal',
-				  'l_i_mean': 'purple'}
+		colors = {
+			'structure': 'blue',
+			'snr': 'red',
+			'min_uncertainty': 'brown',
+			'pa_slope': 'green',
+			'pa_slope_shrine': 'teal',
+			'l_i_mean': 'purple',
+		}
 		labels = {
 			'structure': 'Structure Metric (SHRINE)',
 			'snr': 'S/N',
