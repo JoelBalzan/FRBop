@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
 from frbop.utils.plotting import pub_figsize, savefig_rasterized
-from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
+from frbop.utils.peaks import select_peaks_manual
 
 class PeaksMixin:
 	def separate_peaks(self, min_separation_ms: float = 1.0,
@@ -81,7 +81,7 @@ class PeaksMixin:
 	def select_peaks_manual(self) -> List[Tuple[int, int]]:
 		"""Manually select peak bounds by clicking on the pulse profile."""
 		time_series = np.nansum(self.stokes_i, axis=0)
-		return shared_select_peaks_manual(
+		return select_peaks_manual(
 			self.time_ms,
 			time_series,
 			title='Click start/end bounds for each peak (close window to finish)',

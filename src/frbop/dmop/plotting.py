@@ -1,6 +1,6 @@
 """Plotting and DM-space scanning utilities."""
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np

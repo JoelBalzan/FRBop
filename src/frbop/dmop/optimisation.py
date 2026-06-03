@@ -1,6 +1,5 @@
 """DM optimisation drivers for each method."""
 
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np

@@ -3,10 +3,6 @@
 from typing import Optional, Tuple
 
 import numpy as np
-from scipy.fftpack import dct
-
-from .common import shrine_get_kc, shrine_lowpass_smooth
-from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 class PolarisationMixin:
 	@staticmethod

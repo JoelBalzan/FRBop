@@ -5,8 +5,6 @@ import io
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from astropy.units import dm
-from astropy.units import dm
 import numpy as np
 from scipy.fftpack import dct
 

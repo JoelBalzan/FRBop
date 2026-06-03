@@ -1,25 +1,10 @@
 """Shared imports and SHRINE setup for dm_optimisation."""
 
-import argparse
-import contextlib
 import importlib.util
-import io
-import subprocess
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.ticker import MaxNLocator
-from scipy.fftpack import dct
-from scipy.ndimage import gaussian_filter1d
-from scipy.signal import find_peaks
-
-from frbop.utils.plotting import savefig_rasterized, set_pub_style
-from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 try:
 	from numba import njit

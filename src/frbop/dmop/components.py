@@ -1,6 +1,6 @@
 """Multi-component DM and dn_e diagnostics."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
