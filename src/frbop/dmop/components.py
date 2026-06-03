@@ -259,15 +259,12 @@ class ComponentsMixin:
 				minus_b = 0.0 if res_b.get('uncertainty_minus') is None else max(float(res_b.get('uncertainty_minus')), 0.0)
 				plus_b = 0.0 if res_b.get('uncertainty_plus') is None else max(float(res_b.get('uncertainty_plus')), 0.0)
 
-				# Conservative asymmetric interval propagation for delta DM = DM_b - DM_a.
-				dm_a_low = dm_a - minus_a
-				dm_a_high = dm_a + plus_a
-				dm_b_low = dm_b - minus_b
-				dm_b_high = dm_b + plus_b
-
+				# Quadrature propagation for delta DM = DM_b - DM_a using asymmetric errors.
 				delta = dm_b - dm_a
-				delta_low = dm_b_low - dm_a_high
-				delta_high = dm_b_high - dm_a_low
+				sigma_minus = float(np.sqrt(plus_a**2 + minus_b**2))
+				sigma_plus = float(np.sqrt(minus_a**2 + plus_b**2))
+				delta_low = delta - sigma_minus
+				delta_high = delta + sigma_plus
 
 				delta_dm[i] = delta
 				delta_dm_low[i] = delta_low
