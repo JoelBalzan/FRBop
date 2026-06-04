@@ -31,7 +31,44 @@ class ShrineMixin:
 		i_smooth, _, _, _ = shrine_lowpass_smooth(ci_data, kc_eff, order=3)
 		return i_smooth
 
+	def build_nonshrine_L_dm_reference(self,
+									   dm_values: np.ndarray,
+									   data_q: np.ndarray,
+									   data_u: np.ndarray,
+									   output_size: int) -> np.ndarray:
+		"""
+		Build L(t, DM) from dedispersed linear-polarisation dynamic spectra.
+
+		Rows are DM trials; columns are time samples (frequency-summed L).
+		This matches the (delta_DM, time) layout expected by SHRINE get_kc.
+		"""
+		dm_values = np.asarray(dm_values, dtype=float)
+		n_dm = dm_values.shape[0]
+		L_dm = np.zeros((n_dm, output_size), dtype=float)
+		for i, dm in enumerate(dm_values):
+			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
+			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
+			L_dm[i] = self._linear_time_profile_from_qu(dedisp_q, dedisp_u)
+		self._nonshrine_L_dm_reference = L_dm
+		return L_dm
+
+	def _maybe_prepare_nonshrine_L_dm_reference(self,
+												dm_values: np.ndarray,
+												data_q: Optional[np.ndarray],
+												data_u: Optional[np.ndarray],
+												output_size: int) -> None:
+		"""
+		Precompute L(t, DM) for polarisation kc selection and structure-style uncertainties.
+		"""
+		if data_q is None or data_u is None:
+			return
+		if self._nonshrine_L_dm_reference is not None:
+			return
+		self.build_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
+
 	def resolve_nonshrine_kc(self, reference_data_2d: np.ndarray) -> int:
+		if self._nonshrine_L_dm_reference is not None:
+			reference_data_2d = self._nonshrine_L_dm_reference
 		if self._nonshrine_resolved_kc is not None:
 			if not self._nonshrine_kc_printed:
 				print(f"Found kc of: {self._nonshrine_resolved_kc}")
@@ -87,6 +124,7 @@ class ShrineMixin:
 	def _reset_nonshrine_kc_state(self) -> None:
 		self._nonshrine_resolved_kc = None
 		self._nonshrine_kc_printed = False
+		self._nonshrine_L_dm_reference = None
 
 	def maybe_kc_smooth_nonshrine(self,
 									   data_i: Optional[np.ndarray],
@@ -98,11 +136,16 @@ class ShrineMixin:
 		if not self.nonshrine_kc_smooth:
 			return data_i, data_q, data_u
 
-		reference = data_i if data_i is not None else data_q
-		if reference is None:
-			return data_i, data_q, data_u
-
-		kc = self.resolve_nonshrine_kc(reference)
+		if self._nonshrine_L_dm_reference is not None:
+			kc = self.resolve_nonshrine_kc(self._nonshrine_L_dm_reference)
+		elif data_q is not None and data_u is not None:
+			l_profile = self._linear_time_profile_from_qu(data_q, data_u)
+			kc = self.resolve_nonshrine_kc(l_profile[np.newaxis, :])
+		else:
+			reference = data_i if data_i is not None else data_q
+			if reference is None:
+				return data_i, data_q, data_u
+			kc = self.resolve_nonshrine_kc(reference)
 
 		sm_i = self.apply_kc_lowpass_2d(data_i, kc) if data_i is not None else None
 		sm_q = self.apply_kc_lowpass_2d(data_q, kc) if data_q is not None else None

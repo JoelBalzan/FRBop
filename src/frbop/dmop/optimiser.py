@@ -47,6 +47,7 @@ class DMOptimiser(
                  nonshrine_shrine_like_errors: bool = False,
                  nonshrine_kc_minimise_uncertainty: bool = False,
                  nonshrine_kc: Optional[int] = None,
+                 shrine_kc: Optional[int] = None,
                  li_i_sigma_cut: float = 2.0,
                  debias_linear: bool = False,
                  random_seed: Optional[int] = None,
@@ -97,8 +98,12 @@ class DMOptimiser(
         self.nonshrine_kc = None if nonshrine_kc is None else int(nonshrine_kc)
         if self.nonshrine_kc is not None and self.nonshrine_kc <= 0:
             raise ValueError("nonshrine_kc must be positive")
+        self.shrine_kc = None if shrine_kc is None else int(shrine_kc)
+        if self.shrine_kc is not None and self.shrine_kc <= 0:
+            raise ValueError("shrine_kc must be positive")
         self._nonshrine_resolved_kc: Optional[int] = None
         self._nonshrine_kc_printed = False
+        self._nonshrine_L_dm_reference: Optional[np.ndarray] = None
         self.li_i_sigma_cut = float(li_i_sigma_cut)
         if self.li_i_sigma_cut <= 0:
             raise ValueError("li_i_sigma_cut must be positive")

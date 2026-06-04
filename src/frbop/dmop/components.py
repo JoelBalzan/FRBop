@@ -1,10 +1,11 @@
 """Multi-component DM and dn_e diagnostics."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from frbop.dmop.common import add_asym
 from frbop.utils.plotting import (colour_manager, pub_figsize,
                                   savefig_rasterized)
 
@@ -16,13 +17,15 @@ class ComponentsMixin:
 						 component_times_ms: Optional[np.ndarray] = None,
 						 label: str = "segment",
 						 save_path: Optional[str] = None,
-						 show_errors: bool = True):
+						 show_errors: bool = True,
+						 excluded_methods: Optional[Set[str]] = None):
 		"""
 		Plot DM diagnostics across multiple components.
 
 		Creates a single-panel diagnostic showing absolute best DM per
 		component for each method, including asymmetric error bars.
 		"""
+		excluded = excluded_methods or set()
 		n_components = len(all_results)
 		if n_components < 2:
 			print("Component DM diagnostics skipped (need at least 2 components).")
@@ -54,6 +57,10 @@ class ComponentsMixin:
 
 		ordered_methods = [m for m in preferred_order if m in common_methods]
 		ordered_methods.extend([m for m in common_methods if m not in ordered_methods])
+		ordered_methods = [m for m in ordered_methods if m not in excluded]
+		if len(ordered_methods) == 0:
+			print("Component DM diagnostics skipped (no methods left after exclusions).")
+			return
 
 		method_display = {
 			'structure': 'Structure',
@@ -108,7 +115,7 @@ class ComponentsMixin:
 					zorder=2 + draw_rank,
 				)
 
-		ax.set_ylabel(rf'Best DM (pc cm$^{{-3}}$)')
+		ax.set_ylabel(r'Best DM [$\mathrm{pc cm}^{{-3}}$]')
 		ax.grid(True, alpha=0.3)
 		ax.legend()
 		#handles, labels = ax.get_legend_handles_labels()
@@ -161,6 +168,7 @@ class ComponentsMixin:
 		component_times_ms: Optional[np.ndarray] = None,
 		comparison: str = 'adjacent',
 		reference_component: int = 0,
+		excluded_methods: Optional[Set[str]] = None,
 	) -> Dict:
 		"""
 		Calculate delta-DM and dn_e between components.
@@ -208,8 +216,8 @@ class ComponentsMixin:
 
 		first_methods = list(all_results[0].keys())
 		common_methods = [m for m in first_methods if all(m in comp for comp in all_results)]
-		if len(common_methods) == 0:
-			raise ValueError("No common methods across components")
+		excluded = excluded_methods or set()
+		common_methods = [m for m in common_methods if m not in excluded]
 
 		if comparison == 'adjacent':
 			pair_indices = [(i, i + 1) for i in range(n_components - 1)]
@@ -224,7 +232,7 @@ class ComponentsMixin:
 				if j != reference_component
 			]
 
-		pair_labels = [f"{a + 1}-{b + 1}" for a, b in pair_indices]
+		pair_labels = [f"{b + 1}-{a + 1}" for a, b in pair_indices]
 		c_pc_per_ms = 9.715611890180196e-12
 		pair_separations_pc = np.zeros(len(pair_indices), dtype=float)
 		for i, (idx_a, idx_b) in enumerate(pair_indices):
@@ -238,14 +246,24 @@ class ComponentsMixin:
 				pair_separations_pc[i] = float(component_separation_pc)
 
 		method_diagnostics: Dict[str, Dict[str, np.ndarray]] = {}
+		if len(common_methods) == 0:
+			return {
+				'comparison': comparison,
+				'component_separation_pc': None if component_separation_pc is None else float(component_separation_pc),
+				'component_times_ms': None if component_times_ms is None else component_times_ms.copy(),
+				'pair_indices': pair_indices,
+				'pair_labels': pair_labels,
+				'pair_separations_pc': pair_separations_pc,
+				'methods': method_diagnostics,
+			}
 
 		for method_name in common_methods:
 			delta_dm = np.zeros(len(pair_indices), dtype=float)
-			delta_dm_low = np.zeros(len(pair_indices), dtype=float)
-			delta_dm_high = np.zeros(len(pair_indices), dtype=float)
+			delta_dm_sigma_minus = np.zeros(len(pair_indices), dtype=float)
+			delta_dm_sigma_plus = np.zeros(len(pair_indices), dtype=float)
 			dn_e = np.zeros(len(pair_indices), dtype=float)
-			dn_e_low = np.zeros(len(pair_indices), dtype=float)
-			dn_e_high = np.zeros(len(pair_indices), dtype=float)
+			dn_e_sigma_minus = np.zeros(len(pair_indices), dtype=float)
+			dn_e_sigma_plus = np.zeros(len(pair_indices), dtype=float)
 
 			for i, (idx_a, idx_b) in enumerate(pair_indices):
 				sep_pc = float(pair_separations_pc[i])
@@ -259,28 +277,28 @@ class ComponentsMixin:
 				minus_b = 0.0 if res_b.get('uncertainty_minus') is None else max(float(res_b.get('uncertainty_minus')), 0.0)
 				plus_b = 0.0 if res_b.get('uncertainty_plus') is None else max(float(res_b.get('uncertainty_plus')), 0.0)
 
-				# Quadrature propagation for delta DM = DM_b - DM_a using asymmetric errors.
-				delta = dm_b - dm_a
-				sigma_minus = float(np.sqrt(plus_a**2 + minus_b**2))
-				sigma_plus = float(np.sqrt(minus_a**2 + plus_b**2))
-				delta_low = delta - sigma_minus
-				delta_high = delta + sigma_plus
-
+				# Delta DM = DM_b - DM_a
+				delta, sigma_minus, sigma_plus = add_asym(
+					x0s=[dm_b, -dm_a],
+					siglos=[minus_b, plus_a],  # note swap for -DM_a
+					sighis=[plus_b, minus_a],  # note swap for -DM_a
+					order=2
+				)
 				delta_dm[i] = delta
-				delta_dm_low[i] = delta_low
-				delta_dm_high[i] = delta_high
+				delta_dm_sigma_minus[i] = sigma_minus
+				delta_dm_sigma_plus[i] = sigma_plus
 
 				dn_e[i] = delta / sep_pc
-				dn_e_low[i] = delta_low / sep_pc
-				dn_e_high[i] = delta_high / sep_pc
+				dn_e_sigma_minus[i] = sigma_minus / sep_pc
+				dn_e_sigma_plus[i] = sigma_plus / sep_pc
 
 			method_diagnostics[method_name] = {
 				'delta_dm': delta_dm,
-				'delta_dm_low': delta_dm_low,
-				'delta_dm_high': delta_dm_high,
+				'delta_dm_sigma_minus': delta_dm_sigma_minus,
+				'delta_dm_sigma_plus': delta_dm_sigma_plus,
 				'dn_e': dn_e,
-				'dn_e_low': dn_e_low,
-				'dn_e_high': dn_e_high,
+				'dn_e_sigma_minus': dn_e_sigma_minus,
+				'dn_e_sigma_plus': dn_e_sigma_plus,
 			}
 
 		return {
@@ -299,6 +317,7 @@ class ComponentsMixin:
 		label: str = "segment",
 		save_path: Optional[str] = None,
 		show_errors: bool = True,
+		excluded_methods: Optional[Set[str]] = None,
 	):
 		"""
 		Plot dn_e diagnostics between component pairs for all methods.
@@ -314,13 +333,17 @@ class ComponentsMixin:
 		"""
 		pair_labels = dne_diag.get('pair_labels', [])
 		methods = dne_diag.get('methods', {})
+		excluded = excluded_methods or set()
 		if len(pair_labels) == 0 or len(methods) == 0:
 			print("dn_e diagnostics plot skipped (no dn_e data).")
 			return
 
 		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
-		method_names = [m for m in preferred_order if m in methods]
-		method_names.extend([m for m in methods.keys() if m not in method_names])
+		method_names = [m for m in preferred_order if m in methods and m not in excluded]
+		method_names.extend([m for m in methods.keys() if m not in method_names and m not in excluded])
+		if len(method_names) == 0:
+			print("dn_e diagnostics plot skipped (no methods left after exclusions).")
+			return
 
 		method_display = {
 			'structure': 'Structure',
@@ -336,7 +359,7 @@ class ComponentsMixin:
 
 		# Small x-offset per method so uncertainty bars are readable.
 		n_methods = max(1, len(method_names))
-		offset_span = 0.18
+		offset_span = 0.18 * (n_methods / max(n_methods, 4))
 		if n_methods == 1:
 			offsets = np.array([0.0])
 		else:
@@ -346,17 +369,14 @@ class ComponentsMixin:
 		for i, method_name in enumerate(method_names):
 			vals = methods[method_name]
 			y = np.asarray(vals.get('dn_e', np.zeros_like(x)), dtype=float)
-			y_low = np.asarray(vals.get('dn_e_low', y), dtype=float)
-			y_high = np.asarray(vals.get('dn_e_high', y), dtype=float)
-
-			err_minus = np.abs(y - y_low)
-			err_plus = np.abs(y_high - y)
+			err_minus = np.asarray(vals.get('dn_e_sigma_minus', np.zeros_like(y)), dtype=float)
+			err_plus = np.asarray(vals.get('dn_e_sigma_plus', np.zeros_like(y)), dtype=float)
 			yerr = np.vstack((err_minus, err_plus))
 			x_plot = x + offsets[i]
 
 			all_abs.extend(np.abs(y[np.isfinite(y)]).tolist())
-			all_abs.extend(np.abs(y_low[np.isfinite(y_low)]).tolist())
-			all_abs.extend(np.abs(y_high[np.isfinite(y_high)]).tolist())
+			all_abs.extend(np.abs(y - err_minus)[np.isfinite(err_minus)].tolist())
+			all_abs.extend(np.abs(y + err_plus)[np.isfinite(err_plus)].tolist())
 
 			if show_errors:
 				ax.errorbar(
@@ -379,9 +399,11 @@ class ComponentsMixin:
 
 		ax.axhline(0.0, color='0.35', linestyle='--', alpha=0.8)
 		ax.set_xticks(x)
+		x_pad = 0.2
+		ax.set_xlim(x[0] - x_pad, x[-1] + x_pad)
 		ax.set_xticklabels([])
 		#ax.set_xlabel('Component pair')
-		ax.set_ylabel(r'$\Delta n_e (\text{cm}^{-3})$')
+		ax.set_ylabel(r'$\Delta n_e [\mathrm{cm}^{-3}]$')
 		#ax.set_title(f'dn_e between components ({label})')
 		ax.grid(True, alpha=0.3)
 		#ax.legend(loc='best')

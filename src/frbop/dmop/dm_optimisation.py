@@ -156,6 +156,12 @@ def parse_args() -> argparse.Namespace:
 		help="Fixed kc value for non-SHRINE smoothing (default: auto per trial)",
 	)
 	parser.add_argument(
+		"--shrine-kc",
+		type=int,
+		default=None,
+		help="Fixed kc for SHRINE structure and S/N methods (default: auto from I(t,DM))",
+	)
+	parser.add_argument(
 		"--nonshrine-kc-minimise-uncertainty",
 		action="store_true",
 		help="Find non-SHRINE kc by running SHRINE minimise_uncertainty.py (writes/reads kc.txt in run dir)",
@@ -190,7 +196,9 @@ def parse_args() -> argparse.Namespace:
 		nargs="+",
 		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
-		help="Disable error/uncertainty overlays for specified methods in comparison plots (use aliases: structure,snr,min-uncertainty,minimise-uncertainty,pa,pa-shrine,li)",
+		help="Exclude specified methods from component DM/dn_e comparison plots and disable "
+		"their uncertainty overlays in per-segment comparison plots "
+		"(aliases: structure, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li)",
 	)
 	parser.add_argument(
 		"--label",
@@ -298,6 +306,8 @@ def main():
 	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
 	if args.nonshrine_kc is not None:
 		print(f"  - Non-SHRINE kc value: {args.nonshrine_kc}")
+	if args.shrine_kc is not None:
+		print(f"  - SHRINE structure/S/N kc value: {args.shrine_kc}")
 	print(f"  - Non-SHRINE kc via minimise_uncertainty: {args.nonshrine_kc_minimise_uncertainty}")
 	print(f"  - L/I sigma cutoff: {args.li_sig}")
 	if args.methods is not None:
@@ -404,7 +414,10 @@ def main():
 	}
 	selected_method_labels = [method_key_to_name[m] for m in selected_method_keys]
 	print(f"  Active methods: {', '.join(selected_method_labels)}")
-	
+	if disabled_method_keys:
+		disabled_labels = [method_key_to_name.get(k, k) for k in sorted(disabled_method_keys)]
+		print(f"  - Omitted from component DM/dn_e plots: {', '.join(disabled_labels)}")
+
 	print(f"\nData loaded successfully!")
 	print(f"  Shape: {stokes_i.shape} (freq x time)")
 	print(f"  Frequency range: {freq_mhz[0]:.1f} - {freq_mhz[-1]:.1f} MHz")
@@ -429,6 +442,7 @@ def main():
 		nonshrine_shrine_like_errors=args.nonshrine_shrine_like_errors,
 		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
 		nonshrine_kc=args.nonshrine_kc,
+		shrine_kc=args.shrine_kc,
 		li_i_sigma_cut=args.li_sig,
 		debias_linear=args.debias_linear,
 		random_seed=args.seed,
@@ -606,17 +620,19 @@ def main():
 			label=label.lower(),
 			save_path=f'dm_component_dm_diagnostics.{fig_ext}',
 			show_errors=show_component_dm_errors,
+			excluded_methods=disabled_method_keys,
 		)
 
 		dne_diag = optimiser.calculate_dn_e_between_components(
 			sorted_all_results,
 			component_times_ms=sorted_peak_times_ms,
 			comparison='adjacent',
+			excluded_methods=disabled_method_keys,
 		)
 
 		# Re-label pairs with original segment/component IDs after time-order sorting.
 		pair_labels_time = [
-			f"{idx_a + 1}-{idx_b + 1}"
+			f"{idx_b + 1}-{idx_a + 1}"
 			for idx_a, idx_b in dne_diag['pair_indices']
 		]
 		dne_diag['pair_labels'] = pair_labels_time
@@ -626,35 +642,35 @@ def main():
 			print(f"  {pair_label}: L = {sep_pc:.6e} pc")
 			for method_name, method_vals in dne_diag['methods'].items():
 				delta_dm = float(method_vals['delta_dm'][i])
-				delta_dm_low = float(method_vals['delta_dm_low'][i])
-				delta_dm_high = float(method_vals['delta_dm_high'][i])
+				dm_err_minus = float(method_vals['delta_dm_sigma_minus'][i])
+				dm_err_plus = float(method_vals['delta_dm_sigma_plus'][i])
 				dn_e = float(method_vals['dn_e'][i])
-				dn_e_low = float(method_vals['dn_e_low'][i])
-				dn_e_high = float(method_vals['dn_e_high'][i])
+				dne_err_minus = float(method_vals['dn_e_sigma_minus'][i])
+				dne_err_plus = float(method_vals['dn_e_sigma_plus'][i])
 				print(
 					f"    {method_name}: "
-					f"ΔDM={delta_dm:.6f} [{delta_dm_low:.6f}, {delta_dm_high:.6f}] pc cm⁻³, "
-					f"dn_e={dn_e:.6e} [{dn_e_low:.6e}, {dn_e_high:.6e}] cm⁻³"
+					f"ΔDM={delta_dm:.6f} (-{dm_err_minus:.6f}, +{dm_err_plus:.6f}) pc cm⁻³, "
+					f"dn_e={dn_e:.6e} (-{dne_err_minus:.6e}, +{dne_err_plus:.6e}) cm⁻³"
 				)
 
-		#dne_path = Path(f'dm_component_dne_diagnostics_{label.lower()}.txt')
-		#with open(dne_path, 'w') as f:
-		#	f.write("# dn_e diagnostics between components\n")
-		#	f.write("# Assumption: L ~ c * Delta t using component peak arrival times\n")
-		#	f.write("# Columns: pair method separation_pc delta_dm delta_dm_low delta_dm_high dn_e dn_e_low dn_e_high\n")
-		#	for i, pair_label in enumerate(dne_diag['pair_labels']):
-		#		sep_pc = float(dne_diag['pair_separations_pc'][i])
-		#		for method_name, method_vals in dne_diag['methods'].items():
-		#			f.write(
-		#				f"{pair_label} {method_name} {sep_pc:.10e} "
-		#				f"{float(method_vals['delta_dm'][i]):.10e} "
-		#				f"{float(method_vals['delta_dm_low'][i]):.10e} "
-		#				f"{float(method_vals['delta_dm_high'][i]):.10e} "
-		#				f"{float(method_vals['dn_e'][i]):.10e} "
-		#				f"{float(method_vals['dn_e_low'][i]):.10e} "
-		#				f"{float(method_vals['dn_e_high'][i]):.10e}\n"
-		#			)
-		#print(f"Saved dn_e diagnostics to: {dne_path}")
+		dne_path = Path(f'dm_component_dne_diagnostics_{label.lower()}.txt')
+		with open(dne_path, 'w') as f:
+			f.write("# dn_e diagnostics between components\n")
+			f.write("# Assumption: L ~ c * Delta t using component peak arrival times\n")
+			f.write("# Columns: pair method separation_pc delta_dm delta_dm_low delta_dm_high dn_e dn_e_low dn_e_high\n")
+			for i, pair_label in enumerate(dne_diag['pair_labels']):
+				sep_pc = float(dne_diag['pair_separations_pc'][i])
+				for method_name, method_vals in dne_diag['methods'].items():
+					f.write(
+						f"{pair_label} {method_name} {sep_pc:.10e} "
+						f"{float(method_vals['delta_dm'][i]):.10e} "
+						f"{float(method_vals['delta_dm_sigma_minus'][i]):.10e} "
+						f"{float(method_vals['delta_dm_sigma_plus'][i]):.10e} "
+						f"{float(method_vals['dn_e'][i]):.10e} "
+						f"{float(method_vals['dn_e_sigma_minus'][i]):.10e} "
+						f"{float(method_vals['dn_e_sigma_plus'][i]):.10e}\n"
+					)
+		print(f"Saved dn_e diagnostics to: {dne_path}")
 
 		dne_plot_path = f'dm_component_dne_diagnostics_{label.lower()}.{fig_ext}'
 		optimiser.plot_component_dne_diagnostics(
@@ -662,6 +678,7 @@ def main():
 			label=label.lower(),
 			save_path=dne_plot_path,
 			show_errors=show_component_dne_errors,
+			excluded_methods=disabled_method_keys,
 		)
 	
 	print("\n" + "="*70)

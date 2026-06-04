@@ -389,38 +389,27 @@ class UncertaintyMixin:
 		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE metric uncertainty")
 
-	def _nonshrine_uncertainty_reference_profile(self,
-										 data_i: Optional[np.ndarray],
-										 data_q: Optional[np.ndarray],
-										 data_u: Optional[np.ndarray]) -> np.ndarray:
+	def _uncertainty_from_polarisation_L_dm(self,
+											dm_values: np.ndarray,
+											metric_values: np.ndarray,
+											kc: Optional[int] = None) -> Dict[str, Optional[float]]:
 		"""
-		Build a per-DM reference time profile for SHRINE-style uncertainty.
-		"""
-		if data_i is not None:
-			return np.nansum(data_i, axis=0)
-		if data_q is not None and data_u is not None:
-			linear = np.sqrt(data_q**2 + data_u**2)
-			return np.nansum(linear, axis=0)
-		if data_q is not None:
-			return np.nansum(data_q, axis=0)
-		if data_u is not None:
-			return np.nansum(data_u, axis=0)
-		raise ValueError("At least one of data_i/data_q/data_u must be provided")
+		Structure-style DM uncertainty from L(t, DM) and the metric-vs-DM curve.
 
-	def _li_uncertainty_reference_profile(self,
-								 data_q: np.ndarray,
-								 data_u: np.ndarray,
-								 data_i: np.ndarray) -> np.ndarray:
+		Uses the same relative-uncertainty recipe as maximise_structure (via
+		_uncertainty_from_shrine_relative), with rows of the precomputed
+		_nonshrine_L_dm_reference array.
 		"""
-		Build a SHRINE-compatible time profile for L/I uncertainty.
-
-		Using the Stokes I mean profile matches SHRINE's uncertainty recipe and
-		avoids flat L/I profiles inflating the error range.
-		"""
-		profile = self._nonshrine_uncertainty_reference_profile(data_i, data_q, data_u)
-		profile = np.asarray(profile, dtype=float)
-		profile[~np.isfinite(profile)] = 0.0
-		return profile
+		profiles = getattr(self, "_nonshrine_L_dm_reference", None)
+		if profiles is not None:
+			kc_use = kc if kc is not None else getattr(self, "_nonshrine_resolved_kc", None)
+			return self._uncertainty_from_shrine_relative(
+				dm_values,
+				metric_values,
+				profiles,
+				kc=kc_use,
+			)
+		return self._uncertainty_from_metric_shrine(dm_values, metric_values, kc=kc)
 
 	def _uncertainty_from_shrine_relative(self,
 								 dm_values: np.ndarray,

@@ -118,8 +118,8 @@ class PlottingMixin:
 			vmax=vmax0,
 		)
 		axes[0, 0].set_title("Original Data (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc cm$^{{-3}}$")
-		axes[0, 0].set_ylabel('Frequency (MHz)')
-		axes[0, 0].set_xlabel('Time (ms)')
+		axes[0, 0].set_ylabel('Frequency [MHz]')
+		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)
 		axes[0, 0].xaxis.label.set_size(fs_label)
 		axes[0, 0].yaxis.label.set_size(fs_label)
@@ -147,7 +147,7 @@ class PlottingMixin:
 			h1, l1 = axes[0, 1].get_legend_handles_labels()
 			h2, l2 = ax0r.get_legend_handles_labels()
 			axes[0, 1].legend(h1 + h2, l1 + l2, loc='best', fontsize=fs_legend)
-			ax0r.set_ylabel('PA (deg)')
+			ax0r.set_ylabel('PA [deg.]')
 			ax0r.yaxis.label.set_size(fs_label)
 			ax0r.yaxis.labelpad = fs_labelpad
 			ax0r.tick_params(axis='y', labelsize=fs_tick)
@@ -156,8 +156,8 @@ class PlottingMixin:
 		else:
 			axes[0, 1].legend(loc='best', fontsize=fs_legend)
 		axes[0, 1].set_title('Original Time Series')
-		axes[0, 1].set_ylabel(rf'S (arb.)')
-		axes[0, 1].set_xlabel('Time (ms)')
+		axes[0, 1].set_ylabel(r'S [arb.]')
+		axes[0, 1].set_xlabel('Time [ms]')
 		axes[0, 1].grid(True, alpha=0.3)
 		axes[0, 1].title.set_fontsize(fs_title)
 		axes[0, 1].xaxis.label.set_size(fs_label)
@@ -210,8 +210,8 @@ class PlottingMixin:
 			all_scan_ax.set_yticks(y_pos)
 			all_scan_ax.set_yticklabels(y_labels)
 			all_scan_ax.invert_yaxis()
-			all_scan_ax.set_title('Best DM Summary')
-			all_scan_ax.set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+			#all_scan_ax.set_title('Best DM Summary')
+			all_scan_ax.set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
 			all_scan_ax.set_ylabel('')
 			all_scan_ax.grid(True, axis='x', alpha=0.3)
 			all_scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -268,8 +268,8 @@ class PlottingMixin:
 				vmax=vmax,
 			)
 			axes[idx, 0].set_title(f"{result['method']}")
-			axes[idx, 0].set_ylabel('Frequency (MHz)')
-			axes[idx, 0].set_xlabel('Time (ms)')
+			axes[idx, 0].set_ylabel('Frequency [MHz]')
+			axes[idx, 0].set_xlabel('Time [ms]')
 			axes[idx, 0].title.set_fontsize(fs_title)
 			axes[idx, 0].xaxis.label.set_size(fs_label)
 			axes[idx, 0].yaxis.label.set_size(fs_label)
@@ -347,7 +347,7 @@ class PlottingMixin:
 					h2, l2 = axr.get_legend_handles_labels()
 					axes[idx, 1].legend(h1 + h2, l1 + l2, loc='best', fontsize=fs_legend)
 					show_time_legend = False
-				axr.set_ylabel('PA (deg.)')
+				axr.set_ylabel('PA [deg.]')
 				axr.yaxis.label.set_size(fs_label)
 				axr.yaxis.labelpad = fs_labelpad
 				axr.tick_params(axis='y', labelsize=fs_tick)
@@ -359,8 +359,8 @@ class PlottingMixin:
 					show_time_legend = False
 
 			axes[idx, 1].set_title(f"Metric = {result['metric']:.3f}")
-			axes[idx, 1].set_ylabel(rf'S (arb.)')
-			axes[idx, 1].set_xlabel('Time (ms)')
+			axes[idx, 1].set_ylabel(rf'S [arb.]')
+			axes[idx, 1].set_xlabel('Time [ms]')
 			axes[idx, 1].grid(True, alpha=0.3)
 			axes[idx, 1].title.set_fontsize(fs_title)
 			axes[idx, 1].xaxis.label.set_size(fs_label)
@@ -417,7 +417,7 @@ class PlottingMixin:
 							)
 						)
 				scan_ax.set_xlim(dm_range[0], dm_range[1])
-				scan_ax.set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+				scan_ax.set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
 				scan_ax.set_ylabel('Metric')
 				scan_ax.grid(True, alpha=0.3)
 				scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -492,6 +492,8 @@ class PlottingMixin:
 		print(f"Scanning {len(dm_values)} DM values...")
 		dt = float(np.nanmedian(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 		time_axis = np.arange(output_size) * dt
+		if pa_slope_values is not None:
+			self._maybe_prepare_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
 		for i, dm in enumerate(dm_values):
 			if i % 20 == 0:
 				print(f"\r  Progress: {i}/{len(dm_values)}", end='', flush=True)
@@ -516,6 +518,7 @@ class PlottingMixin:
 			i_data=i_data,
 			include_input_dm=True,
 			save_all=True,
+			force_kc=self.shrine_kc,
 		)
 		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
 
@@ -527,6 +530,7 @@ class PlottingMixin:
 			i_data=i_data,
 			include_input_dm=False,
 			save_all=True,
+			force_kc=self.shrine_kc,
 		)
 		sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
 		if not sn_path.exists():
@@ -594,7 +598,7 @@ class PlottingMixin:
 			axes[idx].plot(dm_values, metric_values, 
 						  color=colors.get(metric_name, 'black'),
 						  linewidth=2)
-			axes[idx].set_xlabel(rf'DM (pc cm$^{{-3}}$)')
+			axes[idx].set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
 			axes[idx].set_ylabel('Metric Value')
 			axes[idx].set_title(labels.get(metric_name, metric_name))
 			axes[idx].grid(True, alpha=0.3)

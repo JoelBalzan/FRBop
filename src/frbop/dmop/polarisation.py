@@ -76,13 +76,13 @@ class PolarisationMixin:
 
 		weights = w_l
 
-		if data_i is not None:
-			i_ts = np.nansum(data_i, axis=0)
-			i_noise_std = float(self.full_i_noise_std)
-			i_noise_med = float(self.full_i_noise_median)
-			if i_noise_std > 0:
-				w_i = np.maximum((i_ts - i_noise_med) / i_noise_std, 0.0)
-				weights = weights * w_i
+		#if data_i is not None:
+		#	i_ts = np.nansum(data_i, axis=0)
+		#	i_noise_std = float(self.full_i_noise_std)
+		#	i_noise_med = float(self.full_i_noise_median)
+		#	if i_noise_std > 0:
+		#		w_i = np.maximum((i_ts - i_noise_med) / i_noise_std, 0.0)
+		#		weights = weights * w_i
 
 		weights = np.where(valid, weights, 0.0)
 		max_w = float(np.max(weights)) if np.any(valid) else 0.0
@@ -132,6 +132,20 @@ class PolarisationMixin:
 		q_rms = np.std(data_q[:, :n_edge], axis=1, keepdims=True)
 		u_rms = np.std(data_u[:, :n_edge], axis=1, keepdims=True)
 		return q_rms, u_rms
+
+	def _linear_dspec_from_qu(self, data_q: np.ndarray, data_u: np.ndarray) -> np.ndarray:
+		"""
+		Build a debiased linear-polarisation dynamic spectrum (freq x time).
+		"""
+		q_rms, u_rms = self._qu_noise_rms_from_full(data_q, data_u)
+		L_dspec, _, _ = self._debiased_linear_from_qu(data_q, data_u, q_rms, u_rms)
+		return L_dspec
+
+	def _linear_time_profile_from_qu(self, data_q: np.ndarray, data_u: np.ndarray) -> np.ndarray:
+		"""
+		Integrate the linear-polarisation dynamic spectrum over frequency.
+		"""
+		return np.nansum(self._linear_dspec_from_qu(data_q, data_u), axis=0)
 
 	def _debiased_linear_from_qu(self, data_q: np.ndarray, data_u: np.ndarray,
 						   q_rms: np.ndarray, u_rms: np.ndarray,

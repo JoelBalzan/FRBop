@@ -24,11 +24,6 @@ class OptimisationMixin:
 		pa_values = np.zeros(len(dm_values))
 		base_data = data_i if data_i is not None else data_q
 		output_size = self._max_output_size_for_dm_range(base_data, dm_range)
-		use_relative = self.use_nonshrine_shrine_like_uncertainty
-		uncertainty_reference_profiles = None
-		if use_relative:
-			uncertainty_reference_profiles = np.zeros((len(dm_values), output_size), dtype=float)
-
 		if data_i is not None and data_i.shape[1] > 0:
 			dt_diag = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 			time_axis = self.time_ms[0] + np.arange(output_size) * dt_diag
@@ -36,13 +31,13 @@ class OptimisationMixin:
 			dt_diag = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 			time_axis = self.time_ms[0] + np.arange(output_size) * dt_diag
 
+		self._maybe_prepare_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
+
 		for i, dm in enumerate(dm_values):
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
 			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
-			if use_relative and uncertainty_reference_profiles is not None:
-				uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 
 		max_idx = int(np.argmax(pa_values))
@@ -60,19 +55,11 @@ class OptimisationMixin:
 			mode=self.dedisp_mode,
 		)
 		metric = float(pa_values[max_idx])
-		if use_relative and uncertainty_reference_profiles is not None:
-			pa_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				pa_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-		else:
-			pa_uncertainty = self._uncertainty_from_metric_shrine(
-				dm_values,
-				pa_values,
-				kc=self._nonshrine_resolved_kc,
-			)
+		pa_uncertainty = self._uncertainty_from_polarisation_L_dm(
+			dm_values,
+			pa_values,
+			kc=self._nonshrine_resolved_kc,
+		)
 		run_prefix = f"{label}_{segment or 'segment1'}_pa_slope"
 		dedispersed_i_for_logs = (
 			dedispersed_display
@@ -128,20 +115,16 @@ class OptimisationMixin:
 		pa_values = np.zeros(len(dm_values))
 		base_data = data_i if data_i is not None else data_q
 		output_size = self._max_output_size_for_dm_range(base_data, dm_range)
-		use_relative = self.use_nonshrine_shrine_like_uncertainty
-		uncertainty_reference_profiles = None
-		if use_relative:
-			uncertainty_reference_profiles = np.zeros((len(dm_values), output_size), dtype=float)
 		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 		time_axis = self.time_ms[0] + np.arange(output_size) * dt
+
+		self._maybe_prepare_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
 
 		for i, dm in enumerate(dm_values):
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode) if data_i is not None else None
 			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
-			if use_relative and uncertainty_reference_profiles is not None:
-				uncertainty_reference_profiles[i] = self._nonshrine_uncertainty_reference_profile(sm_i, sm_q, sm_u)
 			pa_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
 
 		max_idx = int(np.argmax(pa_values))
@@ -165,19 +148,11 @@ class OptimisationMixin:
 			mode=self.dedisp_mode,
 		)
 		metric = float(pa_values[max_idx])
-		if use_relative and uncertainty_reference_profiles is not None:
-			pa_shrine_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				pa_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-		else:
-			pa_shrine_uncertainty = self._uncertainty_from_metric_shrine(
-				dm_values,
-				pa_values,
-				kc=self._nonshrine_resolved_kc,
-			)
+		pa_shrine_uncertainty = self._uncertainty_from_polarisation_L_dm(
+			dm_values,
+			pa_values,
+			kc=self._nonshrine_resolved_kc,
+		)
 		run_prefix = f"{label}_{segment or 'segment1'}_pa_slope_shrine"
 		dedispersed_i_for_logs = (
 			dedispersed_display
@@ -238,42 +213,29 @@ class OptimisationMixin:
 		dm_values = self._build_dm_values(dm_range, n_points=n_points, dm_step=dm_step)
 		li_values = np.zeros(len(dm_values))
 		output_size = self._max_output_size_for_dm_range(data_i, dm_range)
-		use_relative = self.use_nonshrine_shrine_like_uncertainty
-		uncertainty_reference_profiles = None
-		if use_relative:
-			uncertainty_reference_profiles = np.zeros((len(dm_values), output_size), dtype=float)
+		self._maybe_prepare_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
 
 		for i, dm in enumerate(dm_values):
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_i = self.dedisperse(data_i, dm, output_size=output_size, mode=self.dedisp_mode)
 			sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
-			if use_relative and uncertainty_reference_profiles is not None:
-				uncertainty_reference_profiles[i] = self._li_uncertainty_reference_profile(sm_q, sm_u, sm_i)
 			li_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode=mode)
 
 		max_idx = int(np.argmax(li_values))
 		optimal_dm = float(dm_values[max_idx])
 		dedispersed_i = self.dedisperse(data_i, optimal_dm, mode=self.dedisp_mode)
 		metric = float(li_values[max_idx])
-		if use_relative and uncertainty_reference_profiles is not None:
-			li_uncertainty = self._uncertainty_from_shrine_relative(
-				dm_values,
-				li_values,
-				uncertainty_reference_profiles,
-				kc=self._nonshrine_resolved_kc,
-			)
-		else:
-			li_uncertainty = self._uncertainty_from_metric_shrine(
-				dm_values,
-				li_values,
-				kc=self._nonshrine_resolved_kc,
-			)
+		li_uncertainty = self._uncertainty_from_polarisation_L_dm(
+			dm_values,
+			li_values,
+			kc=self._nonshrine_resolved_kc,
+		)
 		li_uncertainty = self._clamp_uncertainty_to_dm_bounds(
 			optimal_dm,
 			li_uncertainty,
 			dm_values,
-			fill_missing_with_bounds=not self.use_nonshrine_shrine_like_uncertainty,
+			fill_missing_with_bounds=False,
 		)
 		run_prefix = f"{label}_{segment or 'segment'}_l_i_{mode}"
 		run_dir = self.save_nonshrine_run_outputs(
@@ -349,11 +311,12 @@ class OptimisationMixin:
 			i_data=i_data,
 			include_input_dm=True,
 			save_all=True,
+			force_kc=self.shrine_kc,
 		)
 		structure_values = np.loadtxt(run_dir / f"{run_prefix}_SPs.dat")
 		summary_path = run_dir / f"{run_prefix}_structure_summaryfile.txt"
-		kc = None
-		if summary_path.exists():
+		kc = self.shrine_kc
+		if kc is None and summary_path.exists():
 			with open(summary_path, "r") as f:
 				for line in f:
 					if line.strip().startswith("kc:"):
@@ -429,6 +392,7 @@ class OptimisationMixin:
 			i_data=i_data,
 			include_input_dm=False,
 			save_all=True,
+			force_kc=self.shrine_kc,
 		)
 		sn_path = run_dir / f"{run_prefix}_SNs.dat"
 		if not sn_path.exists():
