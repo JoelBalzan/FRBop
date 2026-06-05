@@ -297,10 +297,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--noise-fraction",
+        "--offpulse",
         type=float,
         default=0.1,
-        help="Fraction of Stokes I samples used for noise estimation (default: 0.10)",
+        help="Fraction of Stokes I samples used for offpulse noise estimation (default: 0.10)",
     )
 
     # Physics helpers
@@ -381,48 +381,25 @@ def main() -> None:
     sigma_u_chan_base = None
     sigma_v_chan_base = None
     freq_hz_unbinned = None
-    stokes_v_full_noise = None
-    stokes_i_full_noise = None
-    stokes_q_full_noise = None
-    stokes_u_full_noise = None
     onpulse_mask = None
 
     if stokes_i.ndim == 2:
         print(f"\n  Detected 2D data with shape: {stokes_i.shape}")
         print(f"  Time axis: {time_axis}, Frequency axis: {freq_axis}")
 
-        stokes_i_full_noise = stokes_i
-        stokes_q_full_noise = stokes_q
-        stokes_u_full_noise = stokes_u
-        stokes_v_full_noise = stokes_v
-        if time_axis == 0:
-            n_time_noise = stokes_i_full_noise.shape[0]
-            n_frac_noise = max(1, int(n_time_noise * args.noise_fraction))
-            i_off = stokes_i_full_noise[:n_frac_noise, :]
-            q_off = stokes_q_full_noise[:n_frac_noise, :]
-            u_off = stokes_u_full_noise[:n_frac_noise, :]
-            sigma_i_chan = np.nanstd(i_off, axis=0)
-            sigma_q_chan = np.nanstd(q_off, axis=0)
-            sigma_u_chan = np.nanstd(u_off, axis=0)
-            sigma_v_chan = (
-                np.nanstd(stokes_v_full_noise[:n_frac_noise, :], axis=0)
-                if stokes_v_full_noise is not None
-                else None
-            )
-        else:
-            n_time_noise = stokes_i_full_noise.shape[1]
-            n_frac_noise = max(1, int(n_time_noise * args.noise_fraction))
-            i_off = stokes_i_full_noise[:, :n_frac_noise]
-            q_off = stokes_q_full_noise[:, :n_frac_noise]
-            u_off = stokes_u_full_noise[:, :n_frac_noise]
-            sigma_i_chan = np.nanstd(i_off, axis=1)
-            sigma_q_chan = np.nanstd(q_off, axis=1)
-            sigma_u_chan = np.nanstd(u_off, axis=1)
-            sigma_v_chan = (
-                np.nanstd(stokes_v_full_noise[:, :n_frac_noise], axis=1)
-                if stokes_v_full_noise is not None
-                else None
-            )
+        n_time_noise = stokes_i.shape[1]
+        n_frac_noise = max(1, int(n_time_noise * args.offpulse))
+        i_off = stokes_i[:, :n_frac_noise]
+        q_off = stokes_q[:, :n_frac_noise]
+        u_off = stokes_u[:, :n_frac_noise]
+        v_off = stokes_v[:, :n_frac_noise]
+
+        sigma_i_chan = np.nanstd(i_off, axis=1)
+        sigma_q_chan = np.nanstd(q_off, axis=1)
+        sigma_u_chan = np.nanstd(u_off, axis=1)
+        sigma_v_chan = np.nanstd(v_off, axis=1)
+
+        off_std = np.array([sigma_i_chan, sigma_q_chan, sigma_u_chan, sigma_v_chan])
 
         sigma_i_chan = np.where(
             np.isfinite(sigma_i_chan) & (sigma_i_chan > 0), sigma_i_chan, 1e-10
@@ -993,29 +970,15 @@ def main() -> None:
                                 else None,
                             )
 
-        if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i_full_noise is not None:
+        if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i is not None:
             for i_extra, (pk_start, pk_end) in enumerate(time_avg_extra_regions, start=2):
                 print(f"\nProcessing additional selected peak {i_extra}: bins {pk_start} to {pk_end}")
                 n_time_pk = max(1, pk_end - pk_start + 1)
 
-                if time_axis == 0:
-                    stokes_i_pk = np.mean(stokes_i_full_noise[pk_start : pk_end + 1, :], axis=0)
-                    stokes_q_pk = np.mean(stokes_q_full_noise[pk_start : pk_end + 1, :], axis=0)
-                    stokes_u_pk = np.mean(stokes_u_full_noise[pk_start : pk_end + 1, :], axis=0)
-                    stokes_v_pk = (
-                        np.mean(stokes_v_full_noise[pk_start : pk_end + 1, :], axis=0)
-                        if stokes_v_full_noise is not None
-                        else None
-                    )
-                else:
-                    stokes_i_pk = np.mean(stokes_i_full_noise[:, pk_start : pk_end + 1], axis=1)
-                    stokes_q_pk = np.mean(stokes_q_full_noise[:, pk_start : pk_end + 1], axis=1)
-                    stokes_u_pk = np.mean(stokes_u_full_noise[:, pk_start : pk_end + 1], axis=1)
-                    stokes_v_pk = (
-                        np.mean(stokes_v_full_noise[:, pk_start : pk_end + 1], axis=1)
-                        if stokes_v_full_noise is not None
-                        else None
-                    )
+                stokes_i_pk = np.mean(stokes_i[:, pk_start : pk_end + 1], axis=1)
+                stokes_q_pk = np.mean(stokes_q[:, pk_start : pk_end + 1], axis=1)
+                stokes_u_pk = np.mean(stokes_u[:, pk_start : pk_end + 1], axis=1)
+                stokes_v_pk = np.mean(stokes_v[:, pk_start : pk_end + 1], axis=1) if stokes_v is not None else None
 
                 freq_pk = (
                     freq_hz_unbinned.copy()
@@ -1188,7 +1151,7 @@ def main() -> None:
                         print(f"  RMNest output directory: {result_pk['rmnest_outdir']}")
                     except ImportError as exc:
                         print(f"  RMNest unavailable for peak {i_extra}: {exc}")
-
+# TIME SERIES MODE
     else:
         if stokes_i.ndim != 2:
             print("\nError: Time series mode requires 2D data arrays.")
@@ -1265,7 +1228,8 @@ def main() -> None:
             rmnest_sampler=args.rmnest_sampler,
             n_time_bins=args.time_bins,
             exclude_edge_bins=args.exclude_edge_bins,
-            noise_fraction=args.noise_fraction,
+            noise_fraction=args.offpulse,
+            offpulse_std=off_std
         )
 
         l_weights = None
@@ -1336,7 +1300,8 @@ def main() -> None:
                 freq_hz=freq_hz,
                 n_rm_bins=args.time_bins if args.time_bins and args.time_bins > 0 else None,
                 n_pa_bins=args.time_bins*3 if args.time_bins and args.time_bins > 0 else None,
-                noise_fraction=args.noise_fraction,
+                noise_fraction=args.offpulse,
+                offpulse_std=off_std
             )
 
             if args.poincare:
@@ -1348,11 +1313,11 @@ def main() -> None:
                         f"{args.output}_poincare.{args.ext}",
                         n_subbands=args.poincare_subbands,
                         n_time_bins=pt_bins,
-                        noise_fraction=args.noise_fraction,
+                        noise_fraction=args.offpulse,
                         time_unit=time_unit,
                         interactive=args.poincare_interactive,
                         force_surface=args.poincare_surface,
-                        noise_reference_data=full_time_series_data,
+                        offpulse_std=full_time_series_data,
                         rm_results=rm_results,
                         circle_fit_mode=args.poincare_circle_fit,
                         circle_fit_segments=circle_segments,
@@ -1362,12 +1327,12 @@ def main() -> None:
                         time_series_data,
                         f"{args.output}_poincare.{args.ext}",
                         n_time_bins=pt_bins,
-                        noise_fraction=args.noise_fraction,
+                        noise_fraction=args.offpulse,
                         time_unit=time_unit,
                         interactive=args.poincare_interactive,
                         force_surface=args.poincare_surface,
                         rm_results=rm_results,
-                        noise_reference_data=full_time_series_data,
+                        offpulse_std=full_time_series_data,
                         circle_fit_mode=args.poincare_circle_fit,
                         circle_fit_segments=circle_segments,
                     )
@@ -1378,11 +1343,11 @@ def main() -> None:
                         f"{args.output}_poincare_projections_{proj_tag}.{args.ext}",
                         projection_type=args.poincare_projections,
                         n_time_bins=pt_bins,
-                        noise_fraction=args.noise_fraction,
+                        noise_fraction=args.offpulse,
                         time_unit=time_unit,
                         force_surface=args.poincare_surface,
                         rm_results=rm_results,
-                        noise_reference_data=full_time_series_data,
+                        offpulse_std=full_time_series_data,
                         circle_fit_mode=args.poincare_circle_fit,
                         circle_fit_segments=circle_segments,
                         center=tuple(args.poincare_proj_center)

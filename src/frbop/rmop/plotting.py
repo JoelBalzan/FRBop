@@ -361,7 +361,7 @@ def plot_poincare_sphere(
         interactive: bool = False,
         force_surface: bool = False,
         rm_results: Optional[Dict] = None,
-        noise_reference_data: Optional[Dict] = None,
+        offpulse_std: Optional[Dict] = None,
         circle_fit_mode: Optional[str] = None,
         circle_fit_segments: Optional[List[Tuple[int, int]]] = None):
     """
@@ -401,7 +401,7 @@ def plot_poincare_sphere(
     times  = time_series_data['time']
 
     n_time = len(times)
-    noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
+    noise_ref = offpulse_std if offpulse_std is not None else time_series_data
 
     use_rm = rm_results is not None and 'q_bin' in rm_results
     if use_rm:
@@ -1332,8 +1332,8 @@ def plot_poincare_sphere_subbands(
         time_unit: str = 's',
         interactive: bool = False,
         force_surface: bool = False,
-        noise_reference_data: Optional[Dict] = None,
-    rm_results: Optional[Dict] = None,
+        offpulse_std: Optional[Dict] = None,
+        rm_results: Optional[Dict] = None,
         circle_fit_mode: Optional[str] = None,
         circle_fit_segments: Optional[List[Tuple[int, int]]] = None,
         band_method: str = 'equal',
@@ -1430,7 +1430,7 @@ def plot_poincare_sphere_subbands(
     unit = time_unit.lower()
     time_scale = 1e3 if unit == 'ms' else (1e6 if unit in ('us', 'µs') else 1.0)
     color_label = "Time (ms)" if unit == 'ms' else ("Time (µs)" if unit in ('us', 'µs') else "Time (s)")
-    noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
+    noise_ref = offpulse_std if offpulse_std is not None else time_series_data
 
     band_tracks = []
     for band_idx, (b_start, b_stop) in enumerate(band_regions):
@@ -1719,7 +1719,7 @@ def plot_poincare_projections(
         force_surface: bool = False,
         rm_results: Optional[Dict] = None,
         center: Optional[Tuple[float, float, float]] = None,
-        noise_reference_data: Optional[Dict] = None,
+        offpulse_std: Optional[Dict] = None,
         circle_fit_mode: Optional[str] = None,
         circle_fit_segments: Optional[List[Tuple[int, int]]] = None):
     """
@@ -1788,7 +1788,7 @@ def plot_poincare_projections(
     V_cube = time_series_data.get('V', None)
     times  = time_series_data['time']
     n_time = len(times)
-    noise_ref = noise_reference_data if noise_reference_data is not None else time_series_data
+    noise_ref = offpulse_std if offpulse_std is not None else time_series_data
 
     use_rm = rm_results is not None and 'q_bin' in rm_results
     if use_rm:
@@ -2144,7 +2144,9 @@ def plot_rm_time_series(time_array: np.ndarray,
                         freq_hz: Optional[np.ndarray] = None,
                         n_rm_bins: int = 20,
                         n_pa_bins: int = 50,
-                        noise_fraction: float = 0.1):
+                        noise_fraction: float = 0.1,
+                        offpulse_std: Optional[np.ndarray] = None
+                        ):
     """
     Plot RM as a function of time.
     """
@@ -2290,18 +2292,27 @@ def plot_rm_time_series(time_array: np.ndarray,
             ea_deg = np.degrees(ea_rad)
 
             n_frac_pa = max(1, int(len(I_full) * noise_fraction))
-            sigma_Q = np.nanstd(Q_full[:n_frac_pa])
-            sigma_U = np.nanstd(U_full[:n_frac_pa])
-            sigma_V = np.nanstd(V_full[:n_frac_pa]) if 'V' in time_series_data else 0.0
-            if sigma_Q <= 0:
-                mad_q = np.nanmedian(np.abs(Q_full - np.nanmedian(Q_full)))
-                sigma_Q = mad_q / 0.6745 if mad_q > 0 else 1e-10
-            if sigma_U <= 0:
-                mad_u = np.nanmedian(np.abs(U_full - np.nanmedian(U_full)))
-                sigma_U = mad_u / 0.6745 if mad_u > 0 else 1e-10
-            if sigma_V <= 0 and 'V' in time_series_data:
-                mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
-                sigma_V = mad_v / 0.6745 if mad_v > 0 else 1e-10
+            if offpulse_std is not None:
+                # Per-channel noise; take median across channels for scalar estimate,
+                # then scale for frequency averaging over n_freq channels
+                n_freq_plot = offpulse_std.shape[1] if offpulse_std.ndim > 1 else 1
+                sigma_Q = float(np.nanmedian(offpulse_std[1])) / np.sqrt(n_freq_plot)
+                sigma_U = float(np.nanmedian(offpulse_std[2])) / np.sqrt(n_freq_plot)
+                sigma_V = float(np.nanmedian(offpulse_std[3])) / np.sqrt(n_freq_plot) if offpulse_std.shape[0] > 3 else 0.0
+            else:
+                n_frac_pa = max(1, int(len(I_full) * noise_fraction))
+                sigma_Q = np.nanstd(Q_full[:n_frac_pa])
+                sigma_U = np.nanstd(U_full[:n_frac_pa])
+                sigma_V = np.nanstd(V_full[:n_frac_pa]) if 'V' in time_series_data else 0.0
+                if sigma_Q <= 0:
+                    mad_q = np.nanmedian(np.abs(Q_full - np.nanmedian(Q_full)))
+                    sigma_Q = mad_q / 0.6745 if mad_q > 0 else 1e-10
+                if sigma_U <= 0:
+                    mad_u = np.nanmedian(np.abs(U_full - np.nanmedian(U_full)))
+                    sigma_U = mad_u / 0.6745 if mad_u > 0 else 1e-10
+                if sigma_V <= 0 and 'V' in time_series_data:
+                    mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
+                    sigma_V = mad_v / 0.6745 if mad_v > 0 else 1e-10
 
             P_lin_sq = Q_vals**2 + U_vals**2 + 1e-20
             pa_sigma_rad = 0.5 * np.sqrt((U_vals**2 * sigma_Q**2 + Q_vals**2 * sigma_U**2) / (P_lin_sq**2))

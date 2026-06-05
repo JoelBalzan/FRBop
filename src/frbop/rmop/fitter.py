@@ -376,11 +376,12 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                        rmnest_label: Optional[str] = None, rmnest_sampler: str = 'dynesty',
                        n_time_bins: Optional[int] = None,
                        noise_fraction: float = 0.1,
+                       offpulse_std: Optional[np.ndarray] = None,
                        exclude_edge_bins: int = 0) -> Dict:
     """
     Fit RM for time-series data (multiple time samples).
 
-        n_time = len(times) if 'time' in time_series_data else 0
+    Parameters
     -----------
     freq_hz : array
         Frequency array in Hz
@@ -390,11 +391,17 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     method : str
         Fitting method: 'simple', 'rm_synthesis', 'qu_fitting', or 'rmnest'
     rm_range : tuple
-        Range of RM values to search (rad/m²) for rm_synthesis
+        Range of RM values to search (rad/m^2) for rm_synthesis
     n_rm : int
         Number of RM trial values for rm_synthesis
     n_time_bins : int, optional
         Number of time bins to fit (default: no binning)
+    noise_fraction : float
+        Fraction of time samples used for off-pulse noise estimation (default: 0.1)
+    offpulse_std : np.ndarray, optional
+        Pre-computed per-channel noise as array of shape (4, n_freq) with rows
+        [sigma_i, sigma_q, sigma_u, sigma_v]. When provided, internal noise
+        estimation is skipped entirely.
     exclude_edge_bins : int
         Number of frequency bins to exclude from each spectrum edge before
         fitting (default: 0)
@@ -425,39 +432,66 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     else:
         time_axis = 0  # default
 
-    # Compute off-pulse-based Q/U noise estimates using the same fraction of
-    # samples used elsewhere for I noise estimation.
-    if time_axis == 0:
-        I_full_for_noise = np.nanmean(time_series_data['I'], axis=1)
-        Q_time = time_series_data['Q']
-        U_time = time_series_data['U']
-    else:
-        I_full_for_noise = np.nanmean(time_series_data['I'], axis=0)
-        Q_time = time_series_data['Q']
-        U_time = time_series_data['U']
+    # -------------------------------------------------------------------------
+    # Noise estimation
+    # Use pre-computed per-channel noise if provided, otherwise estimate from
+    # the first noise_fraction of the time axis of time_series_data.
+    # -------------------------------------------------------------------------
+    if offpulse_std is not None:
+        sigma_i_chan = np.asarray(offpulse_std[0], dtype=float)
+        sigma_q_chan = np.asarray(offpulse_std[1], dtype=float)
+        sigma_u_chan = np.asarray(offpulse_std[2], dtype=float)
+        sigma_v_chan = np.asarray(offpulse_std[3], dtype=float) if offpulse_std.shape[0] > 3 else None
 
-    n_frac_noise = max(1, int(len(I_full_for_noise) * noise_fraction))
-    # select initial (off-pulse) samples
-    if time_axis == 0:
-        q_off = Q_time[:n_frac_noise, :]
-        u_off = U_time[:n_frac_noise, :]
+        noise_i = float(np.nanmedian(sigma_i_chan[sigma_i_chan > 0])) if np.any(sigma_i_chan > 0) else 1e-10
+        noise_q = float(np.nanmedian(sigma_q_chan[sigma_q_chan > 0])) if np.any(sigma_q_chan > 0) else 1e-10
+        noise_u = float(np.nanmedian(sigma_u_chan[sigma_u_chan > 0])) if np.any(sigma_u_chan > 0) else 1e-10
+        noise_v = float(np.nanmedian(sigma_v_chan[sigma_v_chan > 0])) if (sigma_v_chan is not None and np.any(sigma_v_chan > 0)) else 0.0
     else:
-        q_off = Q_time[:, :n_frac_noise]
-        u_off = U_time[:, :n_frac_noise]
-
-    q_std_chan = np.nanstd(q_off, axis=0 if time_axis == 0 else 1)
-    u_std_chan = np.nanstd(u_off, axis=0 if time_axis == 0 else 1)
-    noise_q = np.nanmedian(q_std_chan) if np.nanmedian(q_std_chan) > 0 else (np.nanmean(q_std_chan) if np.nanmean(q_std_chan) > 0 else 1e-10)
-    noise_u = np.nanmedian(u_std_chan) if np.nanmedian(u_std_chan) > 0 else (np.nanmean(u_std_chan) if np.nanmean(u_std_chan) > 0 else 1e-10)
-    # Off-pulse noise estimate for Stokes I (time-domain)
-    noise_i = np.nanstd(I_full_for_noise[:n_frac_noise])
-    if noise_i <= 0:
-        mad = np.nanmedian(np.abs(I_full_for_noise - np.nanmedian(I_full_for_noise)))
-        if mad > 0:
-            noise_i = mad / 0.6745
+        # Estimate noise from the first noise_fraction of time bins
+        if time_axis == 0:
+            I_full_for_noise = np.nanmean(time_series_data['I'], axis=1)
+            Q_time_noise = time_series_data['Q']
+            U_time_noise = time_series_data['U']
         else:
-            noise_i = max(np.nanmedian(I_full_for_noise) * 0.1, 1e-10)
+            I_full_for_noise = np.nanmean(time_series_data['I'], axis=0)
+            Q_time_noise = time_series_data['Q']
+            U_time_noise = time_series_data['U']
 
+        n_frac_noise = max(1, int(len(I_full_for_noise) * noise_fraction))
+
+        if time_axis == 0:
+            q_off = Q_time_noise[:n_frac_noise, :]
+            u_off = U_time_noise[:n_frac_noise, :]
+        else:
+            q_off = Q_time_noise[:, :n_frac_noise]
+            u_off = U_time_noise[:, :n_frac_noise]
+
+        q_std_chan = np.nanstd(q_off, axis=0 if time_axis == 0 else 1)
+        u_std_chan = np.nanstd(u_off, axis=0 if time_axis == 0 else 1)
+        noise_q = np.nanmedian(q_std_chan) if np.nanmedian(q_std_chan) > 0 else (np.nanmean(q_std_chan) if np.nanmean(q_std_chan) > 0 else 1e-10)
+        noise_u = np.nanmedian(u_std_chan) if np.nanmedian(u_std_chan) > 0 else (np.nanmean(u_std_chan) if np.nanmean(u_std_chan) > 0 else 1e-10)
+
+        noise_i = np.nanstd(I_full_for_noise[:n_frac_noise])
+        if noise_i <= 0:
+            mad = np.nanmedian(np.abs(I_full_for_noise - np.nanmedian(I_full_for_noise)))
+            noise_i = mad / 0.6745 if mad > 0 else max(np.nanmedian(I_full_for_noise) * 0.1, 1e-10)
+
+        if 'V' in time_series_data:
+            if time_axis == 0:
+                V_full_for_noise = np.nanmean(time_series_data['V'], axis=1)
+            else:
+                V_full_for_noise = np.nanmean(time_series_data['V'], axis=0)
+            noise_v = np.nanstd(V_full_for_noise[:n_frac_noise])
+            if noise_v <= 0:
+                mad_v = np.nanmedian(np.abs(V_full_for_noise - np.nanmedian(V_full_for_noise)))
+                noise_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
+        else:
+            noise_v = 0.0
+
+    # -------------------------------------------------------------------------
+    # Binning setup
+    # -------------------------------------------------------------------------
     if n_time_bins is None or n_time_bins <= 0 or n_time_bins >= n_time:
         bin_size = 1
         n_bins_actual = n_time
@@ -467,6 +501,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         n_bins_actual = (n_time + bin_size - 1) // bin_size
         n_bins_actual = min(n_bins_actual, n_time_bins)
 
+    # -------------------------------------------------------------------------
+    # Output arrays
+    # -------------------------------------------------------------------------
     rm_array = np.zeros(n_bins_actual)
     rm_err_array = np.zeros(n_bins_actual)
     pol_angle_0_array = np.zeros(n_bins_actual)
@@ -488,18 +525,10 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     time_bin_start = np.zeros(n_bins_actual, dtype=int)
     time_bin_end = np.zeros(n_bins_actual, dtype=int)
 
-    # prepare noise estimate for Stokes V if available
-    if 'V' in time_series_data:
-        if time_axis == 0:
-            V_full_for_noise = np.nanmean(time_series_data['V'], axis=1)
-        else:
-            V_full_for_noise = np.nanmean(time_series_data['V'], axis=0)
-        noise_v = np.nanstd(V_full_for_noise[:n_frac_noise])
-        if noise_v <= 0:
-            mad_v = np.nanmedian(np.abs(V_full_for_noise - np.nanmedian(V_full_for_noise)))
-            noise_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
-    else:
-        noise_v = 0.0
+    # -------------------------------------------------------------------------
+    # Main loop over time bins
+    # -------------------------------------------------------------------------
+    n_freq_used = len(freq_fit)
 
     for i in range(n_bins_actual):
         bin_start = i * bin_size
@@ -511,23 +540,17 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         time_bin_end[i] = bin_end
         time_binned[i] = np.nanmean(times[bin_start:bin_end])
 
-        # Extract data for this time bin and average in time
+        # Extract and time-average data for this bin
         if time_axis == 0:
             stokes_i = np.nanmean(time_series_data['I'][bin_start:bin_end, :], axis=0)
             stokes_q = np.nanmean(time_series_data['Q'][bin_start:bin_end, :], axis=0)
             stokes_u = np.nanmean(time_series_data['U'][bin_start:bin_end, :], axis=0)
-            if 'V' in time_series_data:
-                stokes_v = np.nanmean(time_series_data['V'][bin_start:bin_end, :], axis=0)
-            else:
-                stokes_v = None
+            stokes_v = np.nanmean(time_series_data['V'][bin_start:bin_end, :], axis=0) if 'V' in time_series_data else None
         else:
             stokes_i = np.nanmean(time_series_data['I'][:, bin_start:bin_end], axis=1)
             stokes_q = np.nanmean(time_series_data['Q'][:, bin_start:bin_end], axis=1)
             stokes_u = np.nanmean(time_series_data['U'][:, bin_start:bin_end], axis=1)
-            if 'V' in time_series_data:
-                stokes_v = np.nanmean(time_series_data['V'][:, bin_start:bin_end], axis=1)
-            else:
-                stokes_v = None
+            stokes_v = np.nanmean(time_series_data['V'][:, bin_start:bin_end], axis=1) if 'V' in time_series_data else None
 
         if n_edge > 0:
             stokes_i = stokes_i[n_edge:-n_edge]
@@ -539,55 +562,77 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         # Initialize fitter
         fitter = RMFitter(freq_fit, stokes_i, stokes_q, stokes_u, stokes_v)
 
+        # Frequency- and time-averaged Stokes values for this bin
         q_val = np.nanmean(stokes_q)
         u_val = np.nanmean(stokes_u)
         i_val = np.nanmean(stokes_i)
         v_val = np.nanmean(stokes_v) if stokes_v is not None else 0.0
+
         i_snr_array[i] = i_val / (noise_i + 1e-10)
         q_bin[i] = q_val / (i_val + 1e-10)
         u_bin[i] = u_val / (i_val + 1e-10)
         v_bin[i] = v_val / (i_val + 1e-10)
+
         P_amp = np.sqrt(q_val**2 + u_val**2 + v_val**2) + 1e-10
         pa_array[i] = np.degrees(0.5 * np.arctan2(u_val, q_val))
-        ea_array[i] = np.degrees(0.5 * np.arcsin(v_val / P_amp))
-
-        P_lin_sq = q_val**2 + u_val**2 + 1e-20
-        pa_sigma_rad = 0.5 * np.sqrt((u_val**2 * noise_q**2 + q_val**2 * noise_u**2) / (P_lin_sq**2))
-        pa_err_array[i] = np.degrees(pa_sigma_rad)
-        sigma_P = np.sqrt((q_val**2 * noise_q**2 + u_val**2 * noise_u**2)) / (P_amp + 1e-10)
-        sigma_VoverP = np.sqrt((noise_v**2 / (P_amp**2)) + ((v_val**2) * (sigma_P**2) / (P_amp**2 + 1e-20)))
-        denom = np.sqrt(1.0 - (v_val / P_amp)**2 + 1e-20)
-        ea_sigma_rad = 0.5 * (sigma_VoverP / denom)
-        ea_err_array[i] = np.degrees(ea_sigma_rad)
+        ea_array[i] = np.degrees(0.5 * np.arcsin(np.clip(v_val / P_amp, -1.0, 1.0)))
 
         P_frac_bins[i] = P_amp / (i_val + 1e-10)
         L_frac_bins[i] = np.sqrt(q_val**2 + u_val**2) / (i_val + 1e-10)
         V_frac_bins[i] = v_val / (i_val + 1e-10)
 
+        # ----------------------------------------------------------------
+        # PA / EA error propagation
+        # noise_q/noise_u are per single-channel single-time-bin estimates.
+        # After averaging over n_freq_used channels and n_time_in_bin time
+        # bins the noise on the mean is reduced by sqrt(n_freq * n_time).
+        # ----------------------------------------------------------------
+        n_time_in_bin = bin_end - bin_start
+        noise_scale = np.sqrt(n_freq_used * n_time_in_bin)
+        noise_q_bin = noise_q / noise_scale
+        noise_u_bin = noise_u / noise_scale
+        noise_v_bin = noise_v / noise_scale if noise_v > 0 else 0.0
+
+        P_lin_sq = q_val**2 + u_val**2 + 1e-20
+        pa_sigma_rad = 0.5 * np.sqrt(
+            (u_val**2 * noise_q_bin**2 + q_val**2 * noise_u_bin**2) / (P_lin_sq**2)
+        )
+
+        sigma_P = np.sqrt(q_val**2 * noise_q_bin**2 + u_val**2 * noise_u_bin**2) / (P_amp + 1e-10)
+        sigma_VoverP = np.sqrt(
+            (noise_v_bin**2 / (P_amp**2))
+            + (v_val**2 * sigma_P**2 / (P_amp**4 + 1e-20))
+        )
+        denom = np.sqrt(max(1.0 - (v_val / P_amp)**2, 1e-10))
+        ea_sigma_rad = 0.5 * (sigma_VoverP / denom)
+
+        noise_L_bin = np.sqrt(noise_q_bin**2 + noise_u_bin**2) / np.sqrt(2.0)
+        L_snr = np.sqrt(P_lin_sq) / (noise_L_bin + 1e-10)
+
+        if L_snr < 3.0:
+            pa_err_array[i] = np.nan
+            ea_err_array[i] = np.nan
+            pa_array[i] = np.nan
+            ea_array[i] = np.nan
+        else:
+            pa_err_array[i] = np.degrees(pa_sigma_rad)
+            ea_err_array[i] = np.degrees(ea_sigma_rad)
+
         # Store polarisation angle at reference frequency
         ref_idx = len(freq_fit) // 2
         pol_angle_ref_array[i] = fitter.pol_angle[ref_idx]
 
-        # Fit based on method
-        if method == 'simple':
-            result = fitter._fit_rm_with_rmtools(rm_range=rm_range, n_rm=n_rm,
-                                                 noise_i=noise_i,
-                                                 noise_q=noise_q, noise_u=noise_u)
-            rm_val = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
-            rm_err_val = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
-            rm_array[i] = rm_val
+        # ----------------------------------------------------------------
+        # RM fitting
+        # ----------------------------------------------------------------
+        if method in ('simple', 'rm_synthesis'):
+            result = fitter._fit_rm_with_rmtools(
+                rm_range=rm_range, n_rm=n_rm,
+                noise_i=noise_i, noise_q=noise_q, noise_u=noise_u,
+            )
+            rm_array[i] = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
+            rm_err_array[i] = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
             snr_array[i] = result.get('rm_peak_snr', np.nan)
-            rm_err_array[i] = rm_err_val
-
-        elif method == 'rm_synthesis':
-            result = fitter._fit_rm_with_rmtools(rm_range=rm_range, n_rm=n_rm,
-                                                 noise_i=noise_i,
-                                                 noise_q=noise_q, noise_u=noise_u)
-            rm_val = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
-            rm_err_val = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
-            rm_array[i] = rm_val
-            snr_array[i] = result.get('rm_peak_snr', np.nan)
-            rm_err_array[i] = rm_err_val
 
         elif method == 'qu_fitting':
             result = fitter.fit_rm_qufitting()
@@ -605,7 +650,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                 free_alpha=rmnest_free_alpha,
                 outdir=step_outdir,
                 label=step_label,
-                sampler=rmnest_sampler
+                sampler=rmnest_sampler,
             )
             median = result['median']
             low = result['low']
@@ -613,24 +658,16 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
             rm_array[i] = median
             rm_err_array[i] = max(median - low, high - median)
 
+    # -------------------------------------------------------------------------
+    # Masking
+    # -------------------------------------------------------------------------
     valid_bins = i_snr_array >= 2.0
 
-    if valid_bins.size == rm_array.size:
-        rm_array[~valid_bins] = np.nan
-        rm_err_array[~valid_bins] = np.nan
-        snr_array[~valid_bins] = np.nan
+    rm_array[~valid_bins] = np.nan
+    rm_err_array[~valid_bins] = np.nan
+    snr_array[~valid_bins] = np.nan
 
-    bad_pa = pa_err_array > 50.0
-    bad_ea = ea_err_array > 50.0
-    bad_bins = (~valid_bins) | bad_pa | bad_ea
-    pa_ea_valid = ~bad_bins
-
-    pa_array[bad_bins] = np.nan
-    ea_array[bad_bins] = np.nan
-    pa_err_array[bad_bins] = np.nan
-    ea_err_array[bad_bins] = np.nan
-
-    results = {
+    return {
         'time': time_binned,
         'rm': rm_array,
         'rm_err': rm_err_array,
@@ -654,7 +691,4 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         'time_bin_end': time_bin_end,
         'i_snr': i_snr_array,
         'valid_bins': valid_bins,
-        'pa_ea_valid': pa_ea_valid,
     }
-
-    return results
