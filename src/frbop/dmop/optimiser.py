@@ -10,7 +10,6 @@ from .comparison import ComparisonMixin
 from .components import ComponentsMixin
 from .dedispersion import DedispersionMixin
 from .metrics import MetricsMixin
-from .optimisation import OptimisationMixin
 from .peaks import PeaksMixin
 from .plotting import PlottingMixin
 from .polarisation import PolarisationMixin
@@ -24,7 +23,6 @@ class DMOptimiser(
     DedispersionMixin,
     PolarisationMixin,
     MetricsMixin,
-    OptimisationMixin,
     PeaksMixin,
     ComparisonMixin,
     PlottingMixin,
@@ -125,13 +123,14 @@ class DMOptimiser(
             full_u_time = np.nansum(self.stokes_u, axis=0)
             self.full_L_time = np.sqrt(full_q_time**2 + full_u_time**2)
             self.full_L_noise_median, self.full_L_noise_std = self._noise_stats_from_series(self.full_L_time)
-            self.full_q_time_series = np.nanmean(self.stokes_q, axis=0)
-            self.full_u_time_series = np.nanmean(self.stokes_u, axis=0)
+            self.full_q_time_series = np.nansum(self.stokes_q, axis=0)
+            self.full_u_time_series = np.nansum(self.stokes_u, axis=0)
             _, self.full_q_time_noise_std = self._noise_stats_from_series(self.full_q_time_series)
             _, self.full_u_time_noise_std = self._noise_stats_from_series(self.full_u_time_series)
             n_edge_full = max(1, int(0.05 * self.stokes_q.shape[1]))
             self.full_q_noise_rms = np.std(self.stokes_q[:, :n_edge_full], axis=1, keepdims=True)
             self.full_u_noise_rms = np.std(self.stokes_u[:, :n_edge_full], axis=1, keepdims=True)
+            self.li_i_peak_fraction = 0.05  # new parameter for linear_to_stokes_i_metric
         else:
             self.full_L_time = None
             self.full_L_noise_median = None

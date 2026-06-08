@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+
 class PolarisationMixin:
 	@staticmethod
 	def _noise_stats_from_series(series: np.ndarray) -> Tuple[float, float]:
@@ -39,8 +40,8 @@ class PolarisationMixin:
 		"""
 		PA slope metric where PA is SHRINE-smoothed before fitting.
 		"""
-		q_ts = np.nanmean(data_q, axis=0)
-		u_ts = np.nanmean(data_u, axis=0)
+		q_ts = np.nansum(data_q, axis=0)
+		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
@@ -162,13 +163,12 @@ class PolarisationMixin:
 			L_out = np.zeros_like(L_meas)
 			L_out[det] = np.sqrt(np.maximum(L_meas[det]**2 - sigma_L[det]**2, 0.0))
 		else:
-			L_out = L_meas.copy()
-			L_out[~det] = 0.0
+			L_out = L_meas
 		return L_out, sigma_L, det
 
 	def _pa_series_deg(self, data_q: np.ndarray, data_u: np.ndarray, data_i: Optional[np.ndarray] = None) -> np.ndarray:
-		q_ts = np.nanmean(data_q, axis=0)
-		u_ts = np.nanmean(data_u, axis=0)
+		q_ts = np.nansum(data_q, axis=0)
+		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 		pa = 0.5 * np.arctan2(u_ts, q_ts)
@@ -225,8 +225,8 @@ class PolarisationMixin:
 		time_axis : np.ndarray
 			Time axis for the data
 		"""
-		q_ts = np.nanmean(data_q, axis=0)
-		u_ts = np.nanmean(data_u, axis=0)
+		q_ts = np.nansum(data_q, axis=0)
+		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 		
@@ -293,8 +293,8 @@ class PolarisationMixin:
 		Get SHRINE-smoothed PA profile and best fit line for plotting.
 		The smoothing is applied to the PA time series itself, then fitting is done on the SHRINE-smoothed PA.
 		"""
-		q_ts = np.nanmean(data_q, axis=0)
-		u_ts = np.nanmean(data_u, axis=0)
+		q_ts = np.nansum(data_q, axis=0)
+		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 

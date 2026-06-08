@@ -59,8 +59,8 @@ class MetricsMixin:
 		
 		If data_i is provided, only fit to data >= the peak of the Stokes I profile.
 		"""
-		q_ts = np.nanmean(data_q, axis=0)
-		u_ts = np.nanmean(data_u, axis=0)
+		q_ts = np.nansum(data_q, axis=0)
+		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
@@ -160,7 +160,12 @@ class MetricsMixin:
 		L_debias, _, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
 		sigma_I = float(self.full_i_noise_std)
-		threshold = float(self.full_i_noise_median) + self.li_i_sigma_cut * sigma_I
+		i_peak = np.nanmax(I_ts)
+		abs_threshold = self.li_i_peak_fraction * i_peak  # new parameter, default 0.05
+		threshold = max(
+		    float(self.full_i_noise_median) + self.li_i_sigma_cut * sigma_I,
+		    abs_threshold
+		)
 		mask = I_ts > threshold
 
 		L_over_I = np.divide(
@@ -169,8 +174,7 @@ class MetricsMixin:
 			out=np.zeros_like(I_ts, dtype=float),
 			where=mask,
 		)
-		#np.clip(L_over_I, 0.0, 1.0, out=L_over_I)
-
+		#np.clip(L_over_I, 0.0, 1.0, out=L_over_I)		
 		if mode == 'peak':
 			if np.any(mask):
 				masked_i = np.where(mask, I_ts, -np.inf)

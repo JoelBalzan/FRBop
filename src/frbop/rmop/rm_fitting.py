@@ -401,6 +401,12 @@ def main() -> None:
 
         off_std = np.array([sigma_i_chan, sigma_q_chan, sigma_u_chan, sigma_v_chan])
 
+        # Save full 2D arrays for later use by extra peaks
+        stokes_i_full_noise = stokes_i
+        stokes_q_full_noise = stokes_q
+        stokes_u_full_noise = stokes_u
+        stokes_v_full_noise = stokes_v
+
         sigma_i_chan = np.where(
             np.isfinite(sigma_i_chan) & (sigma_i_chan > 0), sigma_i_chan, 1e-10
         )
@@ -975,10 +981,10 @@ def main() -> None:
                 print(f"\nProcessing additional selected peak {i_extra}: bins {pk_start} to {pk_end}")
                 n_time_pk = max(1, pk_end - pk_start + 1)
 
-                stokes_i_pk = np.mean(stokes_i[:, pk_start : pk_end + 1], axis=1)
-                stokes_q_pk = np.mean(stokes_q[:, pk_start : pk_end + 1], axis=1)
-                stokes_u_pk = np.mean(stokes_u[:, pk_start : pk_end + 1], axis=1)
-                stokes_v_pk = np.mean(stokes_v[:, pk_start : pk_end + 1], axis=1) if stokes_v is not None else None
+                stokes_i_pk = np.mean(stokes_i_full_noise[:, pk_start : pk_end + 1], axis=1)
+                stokes_q_pk = np.mean(stokes_q_full_noise[:, pk_start : pk_end + 1], axis=1)
+                stokes_u_pk = np.mean(stokes_u_full_noise[:, pk_start : pk_end + 1], axis=1)
+                stokes_v_pk = np.mean(stokes_v_full_noise[:, pk_start : pk_end + 1], axis=1) if stokes_v is not None else None
 
                 freq_pk = (
                     freq_hz_unbinned.copy()
