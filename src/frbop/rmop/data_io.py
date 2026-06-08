@@ -297,7 +297,7 @@ def select_peaks_manual(time_ms: np.ndarray, stokes_i: np.ndarray) -> List[Tuple
         display_time_ms,
         time_series,
         title='Click start/end bounds for each peak (close window to finish)',
-        x_label='Time (ms)',
+        x_label='Time [ms]',
         y_label='Flux',
         exclusive_end=True,
     )

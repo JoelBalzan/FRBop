@@ -25,8 +25,8 @@ def _main():
     # crop the data
     X, Y = do_crop(X, Y, I, args.crop_dur, args.force_peak)
 
-    f0 = args.f0                      # centre frequency (MHz)
-    bw = args.bw                      # bandwidth (MHz)
+    f0 = args.f0                      # centre frequency [MHz]
+    bw = args.bw                      # bandwidth [MHz]
     dDM = args.dDM                    # DM step
     cDM = args.cDM                    # DM count
     dt = args.dt                      # time resolution to return in us

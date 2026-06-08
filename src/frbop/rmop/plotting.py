@@ -483,7 +483,7 @@ def plot_poincare_sphere(
     unit = time_unit.lower()
     if unit == 'ms':
         color_axis = color_axis * 1e3
-        color_label = "Time (ms)"
+        color_label = "Time [ms]"
     elif unit == 'us' or unit == 'µs':
         color_axis = color_axis * 1e6
         color_label = "Time (µs)"
@@ -882,7 +882,7 @@ def plot_poincare_sphere_frequency(
 
     cbar = plt.colorbar(sc, ax=ax, shrink=0.6, pad=0.02,
                         orientation='horizontal', fraction=0.04)
-    cbar.set_label("Frequency (MHz)", fontsize=style['label'], labelpad=5)
+    cbar.set_label("Frequency [MHz]", fontsize=style['label'], labelpad=5)
     cbar.ax.tick_params(labelsize=style['tick'])
 
     ax.set_xlabel('Q', fontsize=style['label'], labelpad=-6)
@@ -1314,7 +1314,7 @@ def plot_poincare_projections_frequency(
     sm = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
     sm.set_array([])
     cb = fig.colorbar(sm, cax=cax, orientation='horizontal')
-    cb.set_label("Frequency (MHz)", fontsize=style['label'])
+    cb.set_label("Frequency [MHz]", fontsize=style['label'])
     cb.ax.tick_params(labelsize=style['tick'])
 
     _savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
@@ -1429,7 +1429,7 @@ def plot_poincare_sphere_subbands(
 
     unit = time_unit.lower()
     time_scale = 1e3 if unit == 'ms' else (1e6 if unit in ('us', 'µs') else 1.0)
-    color_label = "Time (ms)" if unit == 'ms' else ("Time (µs)" if unit in ('us', 'µs') else "Time (s)")
+    color_label = "Time [ms]" if unit == 'ms' else ("Time (µs)" if unit in ('us', 'µs') else "Time (s)")
     noise_ref = offpulse_std if offpulse_std is not None else time_series_data
 
     band_tracks = []
@@ -1839,7 +1839,7 @@ def plot_poincare_projections(
 
     unit = time_unit.lower()
     if unit == 'ms':
-        color_axis *= 1e3; color_label = "Time (ms)"
+        color_axis *= 1e3; color_label = "Time [ms]"
     elif unit in ('us', 'µs'):
         color_axis *= 1e6; color_label = "Time (µs)"
     else:
@@ -2397,7 +2397,7 @@ def plot_rm_time_series(time_array: np.ndarray,
                     ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
                                    fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
 
-        ax_pa.set_ylabel('Angle (deg)', fontsize=style['label'])
+        ax_pa.set_ylabel('Angle [deg.]', fontsize=style['label'])
         if n_peaks > 1:
             ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
         ax_pa.grid(True, alpha=0.3)
@@ -2418,7 +2418,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 
         ax_top_twin.yaxis.set_label_position('right')
         ax_top_twin.yaxis.tick_right()
-        ax_top_twin.set_ylabel(rf'RM (rad m$^{{-2}}$)', fontsize=style['label'])
+        ax_top_twin.set_ylabel(r'RM [rad m$^{{-2}}$]', fontsize=style['label'])
         ax_top_twin.tick_params(axis='y', labelsize=style['tick'])
 
         rm_peak = rm_results['rm'][peak_mask]
@@ -2439,7 +2439,7 @@ def plot_rm_time_series(time_array: np.ndarray,
             label='RM')
 
         ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
-        ax_top.set_ylabel(r'$S$ (arb.)', fontsize=style['label'])
+        ax_top.set_ylabel(r'$S$ [arb.]', fontsize=style['label'])
         ax_top.tick_params(axis='y', labelsize=style['tick'])
         ax_top.tick_params(right=False, labelright=False)
         ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L', alpha=1)
@@ -2517,7 +2517,7 @@ def plot_rm_time_series(time_array: np.ndarray,
             ax_top_twin.errorbar(np.array(binned_time) * 1e3, binned_rm, yerr=binned_rm_err,
                                  fmt='o-', color='red', ecolor='gray', markersize=5, linewidth=2, capsize=3,
                                  label=f'Binned RM ({n_bins_actual} bins)')
-            ax_top_twin.set_ylabel('RM (rad/m²)', fontsize=style['label'], color='red')
+            ax_top_twin.set_ylabel(r'RM [rad m$^{{-2}}$]', fontsize=style['label'], color='red')
             ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'])
 
         if n_peaks > 1:
@@ -2693,7 +2693,7 @@ def plot_rm_time_series(time_array: np.ndarray,
                 min_frac, max_frac = minmax
                 ax3.set_ylim(min_frac - 0.1, max_frac + 0.1)
 
-        ax3.set_xlabel('Time (ms)', fontsize=style['label'])
+        ax3.set_xlabel('Time [ms]', fontsize=style['label'])
         ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
         if n_peaks > 1:
             ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
@@ -2869,7 +2869,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
     ax2.axhline(rm_synthesis_result['noise_estimate'], color='gray',
                 linestyle=':', linewidth=1, label='Noise level')
 
-    ax2.set_xlabel('RM (rad/m²)', fontsize=style['label'])
+    ax2.set_xlabel(r'RM [rad m$^{{-2}}$]', fontsize=style['label'])
     ax2.set_ylabel('|F(RM)|', fontsize=style['label'])
     ax2.legend(fontsize=style['legend'])
     ax2.grid(True, alpha=0.3)
@@ -2927,7 +2927,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
             ax3.plot(freq_sorted, v_plot, 'b-', linewidth=2, label='V/I')
             ax3.fill_between(freq_sorted, v_low, v_high, color='b', alpha=0.14, linewidth=0)
 
-        ax3.set_xlabel('Frequency (MHz)', fontsize=style['label'])
+        ax3.set_xlabel('Frequency [MHz]', fontsize=style['label'])
         ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
         ax3.legend(fontsize=style['legend'])
         ax3.grid(True, alpha=0.3)
@@ -3455,7 +3455,7 @@ def plot_burns_law_fits(fitter: RMFitter,
                 label=r"$m_C(\lambda^2)=C_0$", zorder=20
             )
 
-    ax.set_xlabel('Frequency (MHz)', fontsize=style['label'])
+    ax.set_xlabel('Frequency [MHz]', fontsize=style['label'])
     ax.set_ylabel('Polarisation Fraction', fontsize=style['label'])
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=style['legend'], loc='best')
@@ -3602,7 +3602,7 @@ def plot_polarisation_fraction_acf_ccf(
         axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=1.2, linestyle='--', label='CCF Q/I vs U/I')
     if ccf_lv is not None:
         axes[2].plot(lags, ccf_lv, color='k', linewidth=1.2, linestyle='--', label='CCF L/I vs V/I')
-    axes[2].set_xlabel(r'Lag in Frequency (MHz)', fontsize=style['label'])
+    axes[2].set_xlabel(r'Lag in Frequency [MHz]', fontsize=style['label'])
     axes[2].set_ylabel('Correlation', fontsize=style['label'])
     axes[2].grid(True, alpha=0.3)
     axes[2].legend(fontsize=style['legend'], loc='best')

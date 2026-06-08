@@ -1,7 +1,8 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 
 def _main():
 
@@ -13,7 +14,7 @@ def _main():
 
     plt.plot([i*args.dt/1000 for i in range(smooth_data.shape[1])], smooth_data[args.i_st], label=f"Structure Maximised\n($\Delta$ DM = {round(DM_data[args.i_st], 5)})", color='blue')
     plt.plot([i*args.dt/1000 for i in range(smooth_data.shape[1])], smooth_data[args.i_sn], '--', label=f"S/N Maximised\n($\Delta$ DM = {round(DM_data[args.i_sn], 5)})", color='red')
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel("I")
     plt.legend()
     plt.savefig(f"{args.label}_structure_SN_comparison.png")

@@ -7,8 +7,9 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized
 from frbop.utils.peaks import select_peaks_manual
+from frbop.utils.plotting import pub_figsize, savefig_rasterized
+
 
 class PeaksMixin:
 	def separate_peaks(self, min_separation_ms: float = 1.0,
@@ -44,7 +45,7 @@ class PeaksMixin:
 			plt.plot(self.time_ms, smoothed, color='k', linewidth=1.5, label='Smoothed')
 			if len(peaks) > 0:
 				plt.scatter(self.time_ms[peaks], smoothed[peaks], color='red', s=20, label='Peaks')
-			plt.xlabel('Time (ms)')
+			plt.xlabel('Time [ms]')
 			plt.ylabel('Flux (arb.)')
 			plt.title('Peak Finding Diagnostics')
 			plt.grid(True, alpha=0.3)
@@ -85,7 +86,7 @@ class PeaksMixin:
 			self.time_ms,
 			time_series,
 			title='Click start/end bounds for each peak (close window to finish)',
-			x_label='Time (ms)',
+			x_label='Time [ms]',
 			y_label='Flux',
 			exclusive_end=True,
 		)

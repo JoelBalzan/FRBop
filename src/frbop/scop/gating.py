@@ -2,10 +2,9 @@
 
 import numpy as np
 
-from frbop.utils.peaks import (
-    select_peaks_manual as shared_select_peaks_manual,
-    select_peak_fwhm_manual as shared_select_peak_fwhm_manual,
-)
+from frbop.utils.peaks import \
+    select_peak_fwhm_manual as shared_select_peak_fwhm_manual
+from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
 
 
 def find_burst_window(ts, peak_idx, smooth_win=5, threshold_sigma=3.0, pad=50, fallback_window=200):
@@ -54,7 +53,7 @@ def find_burst_window(ts, peak_idx, smooth_win=5, threshold_sigma=3.0, pad=50, f
 def select_peaks_manual(
     time_axis, profile_or_stokes, *,
     title='Click start/end bounds for each peak (close window when done)',
-    x_label='Time (ms)', y_label='Flux', exclusive_end=True,
+    x_label='Time [ms]', y_label='Flux', exclusive_end=True,
 ):
     ts = np.nanmean(profile_or_stokes, axis=0) if profile_or_stokes.ndim == 2 else profile_or_stokes
     return shared_select_peaks_manual(
@@ -70,7 +69,7 @@ def select_peaks_manual(
 def select_peak_fwhm_manual(
     time_axis, profile_or_stokes, *,
     title="Click peak to measure FWHM (close window when done)",
-    x_label="Time (ms)", y_label="Flux",
+    x_label="Time [ms]", y_label="Flux",
     baseline_percentile=10.0, local_max_window=3, exclusive_end=True,
 ):
     ts = np.nanmean(profile_or_stokes, axis=0) if profile_or_stokes.ndim == 2 else profile_or_stokes

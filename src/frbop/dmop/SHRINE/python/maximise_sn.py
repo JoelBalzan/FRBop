@@ -3,9 +3,10 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy as np
-from .dm_processing import get_kc
 from scipy.fftpack import (  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
     dct, idct)
+
+from .dm_processing import get_kc
 
 
 def _main():
@@ -182,7 +183,7 @@ def plot_SN_v_DM(DM_data: np.ndarray, max_SNR_list: np.ndarray, args):
 
 def plot_max_sn_window(I_smooth: np.ndarray, max_SN_index: int, max_SN_window_starts: np.ndarray, max_SN_window_lengths: np.ndarray, args):
     plt.plot([i*args.dt/1000 for i in range(len(I_smooth[max_SN_index]))], I_smooth[max_SN_index])
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel("I")
     plt.axvspan(
         max_SN_window_starts[max_SN_index]*args.dt/1000,
@@ -206,7 +207,7 @@ def plot_I_at_max(I_series: np.ndarray, I_smooth_series: np.ndarray, args):
     """
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_series, alpha=0.5, color='red')
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_smooth_series, color='red')
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel("I")
     plt.savefig(f"{args.label}_{args.dt}us_I_SN_max.png")
     plt.clf() 

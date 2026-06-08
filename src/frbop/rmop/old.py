@@ -16,22 +16,18 @@ from typing import Dict, List, Optional, Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 import numpy as np
+from matplotlib.gridspec import GridSpec
 from RMtools_1D.do_RMclean_1D import run_rmclean
 from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.constants import c
 from scipy.optimize import curve_fit
 
-from frbop.utils.plotting import (
-	SINGLE_COLUMN_WIDTH_IN,
-	TWO_COLUMN_WIDTH_IN,
-	pub_figsize as base_pub_figsize,
-	savefig_rasterized,
-	set_pub_style,
-)
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
+from frbop.utils.plotting import SINGLE_COLUMN_WIDTH_IN, TWO_COLUMN_WIDTH_IN
+from frbop.utils.plotting import pub_figsize as base_pub_figsize
+from frbop.utils.plotting import savefig_rasterized, set_pub_style
 
 warnings.filterwarnings('ignore')
 
@@ -1122,7 +1118,7 @@ def select_peaks_manual(time_ms: np.ndarray, stokes_i: np.ndarray) -> List[Tuple
 		display_time_ms,
 		time_series,
 		title='Click start/end bounds for each peak (close window to finish)',
-		x_label='Time (ms)',
+		x_label='Time [ms]',
 		y_label='Flux',
 		exclusive_end=True,
 	)
@@ -1596,7 +1592,7 @@ def plot_poincare_sphere(
 	unit = time_unit.lower()
 	if unit == 'ms':
 		color_axis = color_axis * 1e3
-		color_label = "Time (ms)"
+		color_label = "Time [ms]"
 	elif unit == 'us' or unit == 'µs':
 		color_axis = color_axis * 1e6
 		color_label = "Time (µs)"
@@ -1927,7 +1923,7 @@ def plot_poincare_projections(
 	# ---- time-unit scaling ----
 	unit = time_unit.lower()
 	if unit == 'ms':
-		color_axis *= 1e3; color_label = "Time (ms)"
+		color_axis *= 1e3; color_label = "Time [ms]"
 	elif unit in ('us', 'µs'):
 		color_axis *= 1e6; color_label = "Time (µs)"
 	else:
@@ -2698,7 +2694,7 @@ def plot_rm_time_series(time_array: np.ndarray, rm_results: Dict,
 				min_frac, max_frac = minmax
 				ax3.set_ylim(min_frac - 0.05, max_frac + 0.05)
 			
-		ax3.set_xlabel('Time (ms)', fontsize=style['label'])
+		ax3.set_xlabel('Time [ms]', fontsize=style['label'])
 		ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
 		if n_peaks > 1:
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
@@ -2950,7 +2946,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 							 v_high,
 							 color='b', alpha=0.14, linewidth=0)
 
-		ax3.set_xlabel('Frequency (MHz)', fontsize=style['label'])
+		ax3.set_xlabel('Frequency [MHz]', fontsize=style['label'])
 		ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
 		#ax3.set_title('Polarisation Fraction', fontsize=14, fontweight='bold')
 		ax3.legend(fontsize=style['legend'])
@@ -3556,7 +3552,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			lbl = r"$m_C(\lambda^2)=C_0$"
 			ax.plot(freq_model_mhz, y_cc, color='tab:green', linewidth=1.8, linestyle='-', label=lbl)
 
-	ax.set_xlabel('Frequency (MHz)', fontsize=style['label'])
+	ax.set_xlabel('Frequency [MHz]', fontsize=style['label'])
 	ax.set_ylabel('Polarisation Fraction', fontsize=style['label'])
 	#ax.set_title('Depolarisation Fits: Burn, Modified Burn, and Constant', fontsize=13, fontweight='bold')
 	ax.grid(True, alpha=0.3)

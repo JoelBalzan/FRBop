@@ -117,7 +117,7 @@ class PlottingMixin:
 			vmin=vmin0,
 			vmax=vmax0,
 		)
-		axes[0, 0].set_title("Original Data (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc cm$^{{-3}}$")
+		axes[0, 0].set_title("Original (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc\,cm$^{{-3}}$")
 		axes[0, 0].set_ylabel('Frequency [MHz]')
 		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)
@@ -211,7 +211,7 @@ class PlottingMixin:
 			all_scan_ax.set_yticklabels(y_labels)
 			all_scan_ax.invert_yaxis()
 			#all_scan_ax.set_title('Best DM Summary')
-			all_scan_ax.set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
+			all_scan_ax.set_xlabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
 			all_scan_ax.set_ylabel('')
 			all_scan_ax.grid(True, axis='x', alpha=0.3)
 			all_scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -290,7 +290,7 @@ class PlottingMixin:
 			axes[idx, 0].text(
 				0.98,
 				0.98,
-				rf"DM={dm_text} pc cm$^{{-3}}$",
+				rf"DM={dm_text} pc\,cm$^{{-3}}$",
 				transform=axes[idx, 0].transAxes,
 				ha='right',
 				va='top',
@@ -417,7 +417,7 @@ class PlottingMixin:
 							)
 						)
 				scan_ax.set_xlim(dm_range[0], dm_range[1])
-				scan_ax.set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
+				scan_ax.set_xlabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
 				scan_ax.set_ylabel('Metric')
 				scan_ax.grid(True, alpha=0.3)
 				scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -598,7 +598,7 @@ class PlottingMixin:
 			axes[idx].plot(dm_values, metric_values, 
 						  color=colors.get(metric_name, 'black'),
 						  linewidth=2)
-			axes[idx].set_xlabel(r'DM [$\mathrm{pc cm}^{{-3}}$]')
+			axes[idx].set_xlabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
 			axes[idx].set_ylabel('Metric Value')
 			axes[idx].set_title(labels.get(metric_name, metric_name))
 			axes[idx].grid(True, alpha=0.3)

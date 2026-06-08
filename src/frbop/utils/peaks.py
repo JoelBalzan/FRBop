@@ -11,7 +11,7 @@ def select_peaks_manual(
     profile: np.ndarray,
     *,
     title: str = "Click start/end bounds for each peak (close window when done)",
-    x_label: str = "Time (ms)",
+    x_label: str = "Time [ms]",
     y_label: str = rf"S (arb.)",
     exclusive_end: bool = True,
 ) -> List[Tuple[int, int]]:
@@ -87,7 +87,7 @@ def select_peak_fwhm_manual(
     profile: np.ndarray,
     *,
     title: str = "Click peak to measure FWHM (close window when done)",
-    x_label: str = "Time (ms)",
+    x_label: str = "Time [ms]",
     y_label: str = "Flux",
     baseline_percentile: float = 10.0,
     local_max_window: int = 3,
@@ -236,7 +236,7 @@ def select_frequency_bands_manual(
     spectrum: np.ndarray,
     *,
     title: str = "Click start/end bounds for each frequency band (close window when done)",
-    x_label: str = "Frequency (MHz)",
+    x_label: str = "Frequency [MHz]",
     y_label: str = "Flux",
     exclusive_end: bool = True,
 ) -> List[Tuple[int, int]]:
@@ -336,7 +336,7 @@ def split_frequency_bands_equal_snr(
 
     Parameters
     ----------
-    freq_axis   : 1D array of frequencies (MHz), ascending
+    freq_axis   : 1D array of frequencies [MHz], ascending
     snr_weights : per-channel SNR weights (same shape as freq_axis). Non-positive
                   or non-finite values are treated as zero.
     n_bands     : number of bands to split into

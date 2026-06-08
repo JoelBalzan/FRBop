@@ -115,7 +115,7 @@ class ComponentsMixin:
 					zorder=2 + draw_rank,
 				)
 
-		ax.set_ylabel(r'Best DM [$\mathrm{pc cm}^{{-3}}$]')
+		ax.set_ylabel(r'Best DM [$\mathrm{pc\,cm}^{{-3}}$]')
 		ax.grid(True, alpha=0.3)
 		ax.legend()
 		#handles, labels = ax.get_legend_handles_labels()

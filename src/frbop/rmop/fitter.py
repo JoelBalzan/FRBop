@@ -443,10 +443,17 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         sigma_u_chan = np.asarray(offpulse_std[2], dtype=float)
         sigma_v_chan = np.asarray(offpulse_std[3], dtype=float) if offpulse_std.shape[0] > 3 else None
 
-        noise_i = float(np.nanmedian(sigma_i_chan[sigma_i_chan > 0])) if np.any(sigma_i_chan > 0) else 1e-10
-        noise_q = float(np.nanmedian(sigma_q_chan[sigma_q_chan > 0])) if np.any(sigma_q_chan > 0) else 1e-10
-        noise_u = float(np.nanmedian(sigma_u_chan[sigma_u_chan > 0])) if np.any(sigma_u_chan > 0) else 1e-10
-        noise_v = float(np.nanmedian(sigma_v_chan[sigma_v_chan > 0])) if (sigma_v_chan is not None and np.any(sigma_v_chan > 0)) else 0.0
+        # In the offpulse_std branch, scale noise_i for frequency averaging too
+        noise_q_perchan = float(np.nanmedian(sigma_q_chan[sigma_q_chan > 0])) if np.any(sigma_q_chan > 0) else 1e-10
+        noise_u_perchan = float(np.nanmedian(sigma_u_chan[sigma_u_chan > 0])) if np.any(sigma_u_chan > 0) else 1e-10
+        noise_i_perchan = float(np.nanmedian(sigma_i_chan[sigma_i_chan > 0])) if np.any(sigma_i_chan > 0) else 1e-10
+        noise_v_perchan = float(np.nanmedian(sigma_v_chan[sigma_v_chan > 0])) if (sigma_v_chan is not None and np.any(sigma_v_chan > 0)) else 0.0
+
+        n_chan = len(sigma_i_chan)
+        noise_i = noise_i_perchan / np.sqrt(n_chan)
+        noise_q = noise_q_perchan / np.sqrt(n_chan)
+        noise_u = noise_u_perchan / np.sqrt(n_chan)
+        noise_v = noise_v_perchan / np.sqrt(n_chan) if noise_v_perchan > 0 else 0.0
     else:
         # Estimate noise from the first noise_fraction of time bins
         if time_axis == 0:
@@ -628,7 +635,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         if method in ('simple', 'rm_synthesis'):
             result = fitter._fit_rm_with_rmtools(
                 rm_range=rm_range, n_rm=n_rm,
-                noise_i=noise_i, noise_q=noise_q, noise_u=noise_u,
+                noise_i=noise_i_perchan, noise_q=noise_q_perchan, noise_u=noise_u_perchan,
             )
             rm_array[i] = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
             rm_err_array[i] = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
@@ -661,7 +668,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     # -------------------------------------------------------------------------
     # Masking
     # -------------------------------------------------------------------------
-    valid_bins = i_snr_array >= 2.0
+    valid_bins = i_snr_array >= 5.0
 
     rm_array[~valid_bins] = np.nan
     rm_err_array[~valid_bins] = np.nan

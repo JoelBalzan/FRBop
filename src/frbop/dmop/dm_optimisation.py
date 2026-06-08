@@ -39,12 +39,12 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--freq",
 		default="freq.npy",
-		help="Path to frequency array numpy file (MHz)",
+		help="Path to frequency array numpy file [MHz]",
 	)
 	parser.add_argument(
 		"--time",
 		default="time.npy",
-		help="Path to time array numpy file (ms)",
+		help="Path to time array numpy file [ms]",
 	)
 	parser.add_argument(
 		"--dm-min",

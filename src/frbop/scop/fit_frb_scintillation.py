@@ -6,35 +6,32 @@ from scipy.optimize import curve_fit
 
 from frbop.scop import acf
 from frbop.scop.acf import autocorr
-from frbop.scop.band_analysis import (
-    convert_mhz_to_frequency_indices,
-    fit_scintillation_band_power_law,
-    measure_scintillation_bands,
-    select_frequency_bands_manual
-)
-from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts, _decode_lorentzian_components
-from frbop.scop.gating import find_burst_window, select_peak_fwhm_manual, select_peaks_manual
-from frbop.scop.power import (
-    correct_spectrum_powerlaw,
-)
-from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c, scattered_gaussian
-from frbop.scop.ne2025 import (
-    estimate_lg_kpc_from_ne2025,
-    get_cn2_profile,
-    ne2025_scattering_prediction,
-    print_ne2025_scattering_prediction,
-)
-from frbop.scop.physics import estimate_ds_kpc_from_redshift, radec_to_galactic_deg, scale_scintillation_bandwidth
-from frbop.scop.plotting import (
-    plot_lorentzian_diagnostics,
-    plot_spectrum_powerlaw_fit,
-    plot_scintillation_band_power_law,
-)
+from frbop.scop.band_analysis import (convert_mhz_to_frequency_indices,
+                                      fit_scintillation_band_power_law,
+                                      measure_scintillation_bands,
+                                      select_frequency_bands_manual)
+from frbop.scop.fit_utils import (_decode_lorentzian_components,
+                                  build_fit_diagnostics, fit_with_restarts)
+from frbop.scop.gating import (find_burst_window, select_peak_fwhm_manual,
+                               select_peaks_manual)
+from frbop.scop.models import (lorentzian, lorentzian_2c, lorentzian_3c,
+                               scattered_gaussian)
+from frbop.scop.ne2025 import (estimate_lg_kpc_from_ne2025, get_cn2_profile,
+                               ne2025_scattering_prediction,
+                               print_ne2025_scattering_prediction)
+from frbop.scop.physics import (estimate_ds_kpc_from_redshift,
+                                radec_to_galactic_deg,
+                                scale_scintillation_bandwidth)
+from frbop.scop.plotting import (plot_lorentzian_diagnostics,
+                                 plot_scintillation_band_power_law,
+                                 plot_spectrum_powerlaw_fit)
+from frbop.scop.power import correct_spectrum_powerlaw
 from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
-from frbop.utils.peaks import measure_fwhm_region, parse_peak_index_pairs, split_frequency_bands_equal, split_frequency_bands_equal_snr
-
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style, IBM_PALETTE
-
+from frbop.utils.peaks import (measure_fwhm_region, parse_peak_index_pairs,
+                               split_frequency_bands_equal,
+                               split_frequency_bands_equal_snr)
+from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
+                                  set_pub_style)
 
 # ---------------------------------------------------------------------------
 # Main
@@ -67,9 +64,9 @@ def main():
                         help="Minimum per-channel SNR (model/off-pulse RMS) to include "
                          "a channel in the corrected spectrum (default: 1.0).")
     parser.add_argument("--fmin",   type=float, default=None,
-                        help="Lower frequency bound (MHz) for channels used in the Lorentzian ACF fit.")
+                        help="Lower frequency bound [MHz] for channels used in the Lorentzian ACF fit.")
     parser.add_argument("--fmax",   type=float, default=None,
-                        help="Upper frequency bound (MHz) for channels used in the Lorentzian ACF fit.")
+                        help="Upper frequency bound [MHz] for channels used in the Lorentzian ACF fit.")
     parser.add_argument("--pad",               type=int,   default=50)
     parser.add_argument("--fallback-window",   type=int,   default=200)
     parser.add_argument("--fit-max-lag",       type=float, default=8.0)
@@ -99,7 +96,7 @@ def main():
     parser.add_argument("--dec-dms",           type=str,   default=None)
     parser.add_argument("--lg-max-dist-kpc",   type=float, default=50.0)
     parser.add_argument("--scatt-ref-freq-mhz", type=float, default=None,
-                        help="Frequency (MHz) at which to predict τ_scatt, Δν_d, and t_scint "
+                        help="Frequency [MHz] at which to predict τ_scatt, Δν_d, and t_scint "
                              "from the NE2025 Galactic screen (requires --estimate-lg-ne2025). "
                              "Defaults to the observing centre frequency if not supplied.")
     parser.add_argument("--iss-velocity-km-s",  type=float, default=100.0,
@@ -704,7 +701,7 @@ def main():
             print(f"    Δν_d(ν_c) fit        = {band_powerlaw_fit['dnu_ref_fit']:.6f} MHz")
             print(f"    Δν_d(ν_c) Kolmogorov = {band_powerlaw_fit['dnu_ref_44']:.6f} MHz  (α=4.4)")
             print(f"    log-space RMS resid  = {band_powerlaw_fit['residual_rms']:.4e}")
-        print(f"    {'Band':<6} {'ν_c(MHz)':>10} {'Δν_d(MHz)':>12} {'err':>10} "
+        print(f"    {'Band':<6} {'ν_c[MHz]':>10} {'Δν_d[MHz]':>12} {'err':>10} "
               f"{'Δν_d@ν_c(fit)':>15} {'Δν_d@ν_c(4.4)':>15} {'R²':>8}")
         for row in band_scintillation_results:
             sc_fit = np.nan
@@ -935,7 +932,7 @@ def main():
             #    label="Offset C",
             #)
     ax.set_xlim(-lag_zoom, lag_zoom)
-    ax.set_xlabel(rf"Frequency lag (MHz)")
+    ax.set_xlabel(rf"Frequency lag [MHz]")
     ax.set_ylabel("ACF power")
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8, loc="upper right")

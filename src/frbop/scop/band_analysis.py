@@ -5,15 +5,14 @@ import numpy as np
 from frbop.scop.acf import autocorr
 from frbop.scop.fit_utils import build_fit_diagnostics, fit_with_restarts
 from frbop.scop.models import lorentzian
-from frbop.utils.peaks import (
-    select_frequency_bands_manual as shared_select_frequency_bands_manual,
-)
+from frbop.utils.peaks import \
+    select_frequency_bands_manual as shared_select_frequency_bands_manual
 
 
 def select_frequency_bands_manual(
     freq_axis, spectrum, *,
     title='Click start/end bounds for each frequency band (close window when done)',
-    x_label='Frequency (MHz)', y_label='Flux', exclusive_end=True,
+    x_label='Frequency [MHz]', y_label='Flux', exclusive_end=True,
 ):
     return shared_select_frequency_bands_manual(
         freq_axis,
@@ -73,10 +72,10 @@ def measure_scintillation_bands(
 
     Parameters
     ----------
-    freq_mhz      : channel frequencies (MHz), ascending
+    freq_mhz      : channel frequencies [MHz], ascending
     spectrum      : corrected fractional residual spectrum (output of correct_spectrum_powerlaw)
     band_regions  : list of (start_idx, stop_idx) index pairs
-    fit_max_lag_mhz : upper lag limit for Lorentzian fit (MHz)
+    fit_max_lag_mhz : upper lag limit for Lorentzian fit [MHz]
     off_pulse     : 2D off-pulse data (nfreq, n_offpulse) in raw data units, for noise estimation
     raw_spectrum  : 1D raw burst spectrum (nfreq,) in raw data units, for SNR denominator
     """

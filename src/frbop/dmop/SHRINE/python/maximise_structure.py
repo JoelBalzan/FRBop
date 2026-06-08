@@ -2,11 +2,12 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy as np
-from .dm_processing import get_kc, get_ranges_above_max, uncertainty_calc
 from scipy import \
     linalg  # https://docs.scipy.org/doc/scipy/reference/linalg.html
 from scipy.fftpack import (  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
     dct, idct)
+
+from .dm_processing import get_kc, get_ranges_above_max, uncertainty_calc
 
 
 def _main():
@@ -282,7 +283,7 @@ def plot_noisy_I_DM_t(I_data: np.ndarray, DM_data: np.ndarray, args):
     :type args: :class:`argparse.Namespace`
     """
     imgplot_Inoisy = plt.imshow(I_data, aspect="auto", extent=(0, I_data.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_I_DM_t.png")
     plt.clf() 
@@ -300,7 +301,7 @@ def plot_I_at_max(I_series: np.ndarray, I_smooth_series: np.ndarray, args):
     """
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_series, alpha=0.5, color='blue')
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_smooth_series, color='blue')
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel("I")
     plt.savefig(f"{args.label}_{args.dt}us_I_max.png")
     plt.clf() 
@@ -319,7 +320,7 @@ def plot_DCT_spectrum(CI_data: np.ndarray, args, kc):
 
 def plot_smooth_I_DM_t(I_smooth: np.ndarray, DM_data: np.ndarray, args):
     imgplot_Ismooth = plt.imshow(I_smooth, aspect="auto", extent=(0, I_smooth.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_I_DM_t_smoothed.png")
     plt.clf() 
@@ -337,7 +338,7 @@ def plot_SP(SP_data: np.ndarray, DM_data: np.ndarray, args):
 
 def plot_detrended_noise(delta_I: np.ndarray,DM_data: np.ndarray, args):
     imgplot_DeltaI = plt.imshow(delta_I, aspect="auto", extent=(0, delta_I.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_detrended_noise.png")
     plt.clf() 
@@ -345,7 +346,7 @@ def plot_detrended_noise(delta_I: np.ndarray,DM_data: np.ndarray, args):
 
 def plot_relative_detrended_noise(delta_delta_I: np.ndarray, dm_data: np.ndarray, args):
     imgplot_DeltaDeltaI = plt.imshow(delta_delta_I, aspect="auto", extent=(0, delta_delta_I.shape[1]*args.dt/1000, dm_data[-1], dm_data[0]))
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_relative_detrended_noise.png")
     plt.clf() 
@@ -353,7 +354,7 @@ def plot_relative_detrended_noise(delta_delta_I: np.ndarray, dm_data: np.ndarray
 
 def plot_noise_at_max(noise_at_max: np.ndarray, args): 
     plt.plot([time/1000 for time in range(len(noise_at_max*args.dt))], noise_at_max)
-    plt.xlabel("Time (ms)")
+    plt.xlabel("Time [ms]")
     plt.ylabel("I")
     plt.savefig(f"{args.label}_{args.dt}us_noise_max.png")
     plt.clf() 

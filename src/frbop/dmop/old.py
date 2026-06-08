@@ -32,9 +32,9 @@ from scipy.fftpack import dct
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 
 try:
 	from numba import njit
@@ -123,12 +123,12 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--freq",
 		default="freq.npy",
-		help="Path to frequency array numpy file (MHz)",
+		help="Path to frequency array numpy file [MHz]",
 	)
 	parser.add_argument(
 		"--time",
 		default="time.npy",
-		help="Path to time array numpy file (ms)",
+		help="Path to time array numpy file [ms]",
 	)
 	parser.add_argument(
 		"--dm-min",
@@ -2135,7 +2135,7 @@ class DMOptimiser:
 			plt.plot(self.time_ms, smoothed, color='k', linewidth=1.5, label='Smoothed')
 			if len(peaks) > 0:
 				plt.scatter(self.time_ms[peaks], smoothed[peaks], color='red', s=20, label='Peaks')
-			plt.xlabel('Time (ms)')
+			plt.xlabel('Time [ms]')
 			plt.ylabel('Flux (arb.)')
 			plt.title('Peak Finding Diagnostics')
 			plt.grid(True, alpha=0.3)
@@ -2176,7 +2176,7 @@ class DMOptimiser:
 			self.time_ms,
 			time_series,
 			title='Click start/end bounds for each peak (close window to finish)',
-			x_label='Time (ms)',
+			x_label='Time [ms]',
 			y_label='Flux',
 			exclusive_end=True,
 		)
@@ -2655,8 +2655,8 @@ class DMOptimiser:
 			vmax=vmax0,
 		)
 		axes[0, 0].set_title("Original Data (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc cm$^{{-3}}$")
-		axes[0, 0].set_ylabel('Frequency (MHz)')
-		axes[0, 0].set_xlabel('Time (ms)')
+		axes[0, 0].set_ylabel('Frequency [MHz]')
+		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)
 		axes[0, 0].xaxis.label.set_size(fs_label)
 		axes[0, 0].yaxis.label.set_size(fs_label)
@@ -2698,7 +2698,7 @@ class DMOptimiser:
 			axes[0, 1].legend(loc='best', fontsize=fs_legend)
 		axes[0, 1].set_title('Original Time Series')
 		axes[0, 1].set_ylabel('Flux')
-		axes[0, 1].set_xlabel('Time (ms)')
+		axes[0, 1].set_xlabel('Time [ms]')
 		axes[0, 1].grid(True, alpha=0.3)
 		axes[0, 1].title.set_fontsize(fs_title)
 		axes[0, 1].xaxis.label.set_size(fs_label)
@@ -2786,8 +2786,8 @@ class DMOptimiser:
 				vmax=vmax,
 			)
 			axes[idx, 0].set_title(f"{result['method']}")
-			axes[idx, 0].set_ylabel('Frequency (MHz)')
-			axes[idx, 0].set_xlabel('Time (ms)')
+			axes[idx, 0].set_ylabel('Frequency [MHz]')
+			axes[idx, 0].set_xlabel('Time [ms]')
 			axes[idx, 0].title.set_fontsize(fs_title)
 			axes[idx, 0].xaxis.label.set_size(fs_label)
 			axes[idx, 0].yaxis.label.set_size(fs_label)
@@ -2880,7 +2880,7 @@ class DMOptimiser:
 
 			axes[idx, 1].set_title(f"Metric = {result['metric']:.6f}")
 			axes[idx, 1].set_ylabel('Flux')
-			axes[idx, 1].set_xlabel('Time (ms)')
+			axes[idx, 1].set_xlabel('Time [ms]')
 			axes[idx, 1].grid(True, alpha=0.3)
 			axes[idx, 1].title.set_fontsize(fs_title)
 			axes[idx, 1].xaxis.label.set_size(fs_label)

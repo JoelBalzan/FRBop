@@ -14,8 +14,8 @@ from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
 def main():
     parser = argparse.ArgumentParser(description="Fit scattering timescale from dynamic spectrum files")
     parser.add_argument("ds", nargs="?", default="FRB_250607_htr_dsI.npy", help="Dynamic spectrum .npy file (nfreq x ntime)")
-    parser.add_argument("--freq", default="FRB_250607_htr_freq.npy", help="Frequency axis .npy file (MHz)")
-    parser.add_argument("--time", default="FRB_250607_htr_time.npy", help="Time axis .npy file (ms)")
+    parser.add_argument("--freq", default="FRB_250607_htr_freq.npy", help="Frequency axis .npy file [MHz]")
+    parser.add_argument("--time", default="FRB_250607_htr_time.npy", help="Time axis .npy file [ms]")
     parser.add_argument(
         "--ref-freq",
         type=float,
@@ -93,7 +93,7 @@ def main():
             time,
             ts,
             title='Click start/end bounds for each peak (close window when done)',
-            x_label='Time (ms)',
+            x_label='Time [ms]',
             y_label='Flux',
             exclusive_end=True,
         )
@@ -244,7 +244,7 @@ def main():
                 #ax.text(mu, y_text, f'Intrinsic FWHM = {fwhm_intrinsic:.3f} ms', ha='center', va='top', color='C1', fontsize=styles['annotation'])
                 #ax.text(mu, y_text2, f'Scatter FWHM = {fwhm_scatter:.3f} ms', ha='center', va='top', color='C2', fontsize=styles['annotation'])
 
-                ax.set_xlabel('Time (ms)')
+                ax.set_xlabel('Time [ms]')
                 ax.set_ylabel('Flux')
                 ax.legend(loc='best')
                 ax.grid(True, alpha=0.3)
