@@ -117,7 +117,7 @@ class PlottingMixin:
 			vmin=vmin0,
 			vmax=vmax0,
 		)
-		axes[0, 0].set_title("Original (SHRINE structure-maximised)\n"+rf"Input DM = {self._format_dm(self.input_dm, 3)} pc\,cm$^{{-3}}$")
+		axes[0, 0].set_title("Original (SHRINE structure-maximised)\n" + rf"Input DM = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
 		axes[0, 0].set_ylabel('Frequency [MHz]')
 		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)
@@ -290,7 +290,7 @@ class PlottingMixin:
 			axes[idx, 0].text(
 				0.98,
 				0.98,
-				rf"DM={dm_text} pc\,cm$^{{-3}}$",
+				rf"DM={dm_text} $\mathrm{{pc\,cm^{{-3}}}}$",
 				transform=axes[idx, 0].transAxes,
 				ha='right',
 				va='top',
