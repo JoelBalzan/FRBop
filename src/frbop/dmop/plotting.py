@@ -13,6 +13,7 @@ from frbop.utils.plotting import (colour_manager, pub_figsize,
 class PlottingMixin:
 	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
 					   peak_region: Optional[Tuple[int, int]] = None,
+					   label: str = "frb",
 					   save_path: Optional[str] = None,
 					   show_summary_errors: bool = True,
 					   show_scan_uncertainty: bool = True,
@@ -117,7 +118,7 @@ class PlottingMixin:
 			vmin=vmin0,
 			vmax=vmax0,
 		)
-		axes[0, 0].set_title("Original (SHRINE structure-maximised)\n" + rf"Input DM = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
+		axes[0, 0].set_title(f"{label}: Original (SHRINE structure-maximised)\n" + rf"Input DM = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
 		axes[0, 0].set_ylabel('Frequency [MHz]')
 		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)

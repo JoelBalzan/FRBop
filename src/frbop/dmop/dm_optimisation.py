@@ -549,7 +549,8 @@ def main():
 			results,
 			dm_range,
 			peak_region,
-			save_path=f'dm_comparison_{label.lower()}{i+1}.{fig_ext}',
+			label=args.label,
+			save_path=f'{args.label}_dm_comparison_{label.lower()}{i+1}.{fig_ext}',
 			show_summary_errors=show_comparison_summary_errors,
 			show_scan_uncertainty=show_comparison_scan_uncertainty,
 			show_overlay_uncertainty=show_comparison_overlay_uncertainty,
@@ -618,7 +619,8 @@ def main():
 			sorted_all_results,
 			component_times_ms=sorted_peak_times_ms,
 			label=label.lower(),
-			save_path=f'dm_component_dm_diagnostics.{fig_ext}',
+			frb_label=args.label,
+			save_path=f'{args.label}_dm_component_dm_diagnostics.{fig_ext}',
 			show_errors=show_component_dm_errors,
 			excluded_methods=disabled_method_keys,
 		)
@@ -653,7 +655,7 @@ def main():
 					f"dn_e={dn_e:.6e} (-{dne_err_minus:.6e}, +{dne_err_plus:.6e}) cm⁻³"
 				)
 
-		dne_path = Path(f'dm_component_dne_diagnostics_{label.lower()}.txt')
+		dne_path = Path(f'{args.label}_dm_component_dne_diagnostics_{label.lower()}.txt')
 		with open(dne_path, 'w') as f:
 			f.write("# dn_e diagnostics between components\n")
 			f.write("# Assumption: L ~ c * Delta t using component peak arrival times\n")
@@ -672,10 +674,11 @@ def main():
 					)
 		print(f"Saved dn_e diagnostics to: {dne_path}")
 
-		dne_plot_path = f'dm_component_dne_diagnostics_{label.lower()}.{fig_ext}'
+		dne_plot_path = f'{args.label}_dm_component_dne_diagnostics_{label.lower()}.{fig_ext}'
 		optimiser.plot_component_dne_diagnostics(
 			dne_diag,
 			label=label.lower(),
+			frb_label=args.label,
 			save_path=dne_plot_path,
 			show_errors=show_component_dne_errors,
 			excluded_methods=disabled_method_keys,
@@ -685,11 +688,11 @@ def main():
 	print("Analysis complete!")
 	print("="*70)
 	print("\nGenerated files:")
-	print(f"  - dm_comparison_{label.lower()}*.{fig_ext}: Comparison of methods for each {label.lower()}")
+	print(f"  - {args.label}_dm_comparison_{label.lower()}*.{fig_ext}: Comparison of methods for each {label.lower()}")
 	if len(all_results) > 1:
-		print(f"  - dm_component_dm_diagnostics.{fig_ext}: Multi-{label.lower()} DM diagnostics")
-		#print(f"  - dm_component_dne_diagnostics_{label.lower()}.txt: dn_e diagnostics (L~cΔt)")
-		print(f"  - dm_component_dne_diagnostics_{label.lower()}.{fig_ext}: dn_e plot between components")
+		print(f"  - {args.label}_dm_component_dm_diagnostics.{fig_ext}: Multi-{label.lower()} DM diagnostics")
+		#print(f"  - {args.label}_dm_component_dne_diagnostics_{label.lower()}.txt: dn_e diagnostics (L~cΔt)")
+		print(f"  - {args.label}_dm_component_dne_diagnostics_{label.lower()}.{fig_ext}: dn_e plot between components")
 
 
 if __name__ == "__main__":

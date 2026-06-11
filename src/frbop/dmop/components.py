@@ -16,6 +16,7 @@ class ComponentsMixin:
 						 component_ids: Optional[np.ndarray] = None,
 						 component_times_ms: Optional[np.ndarray] = None,
 						 label: str = "segment",
+						 frb_label: str = "frb",
 						 save_path: Optional[str] = None,
 						 show_errors: bool = True,
 						 excluded_methods: Optional[Set[str]] = None):
@@ -115,6 +116,7 @@ class ComponentsMixin:
 					zorder=2 + draw_rank,
 				)
 
+		ax.set_title(f'{frb_label}: Component DM diagnostics ({label})')
 		ax.set_ylabel(r'Best DM [$\mathrm{pc\,cm}^{{-3}}$]')
 		ax.grid(True, alpha=0.3)
 		ax.legend()
@@ -315,6 +317,7 @@ class ComponentsMixin:
 		self,
 		dne_diag: Dict,
 		label: str = "segment",
+		frb_label: str = "frb",
 		save_path: Optional[str] = None,
 		show_errors: bool = True,
 		excluded_methods: Optional[Set[str]] = None,
@@ -404,7 +407,7 @@ class ComponentsMixin:
 		ax.set_xticklabels([])
 		#ax.set_xlabel('Component pair')
 		ax.set_ylabel(r'$\Delta n_e [\mathrm{cm}^{-3}]$')
-		#ax.set_title(f'dn_e between components ({label})')
+		ax.set_title(f'{frb_label}: dn_e between components ({label})')
 		ax.grid(True, alpha=0.3)
 		#ax.legend(loc='best')
 
