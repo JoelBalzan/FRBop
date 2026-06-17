@@ -1469,7 +1469,8 @@ def main() -> None:
                 n_pa_bins=args.pa_bins,
                 noise_fraction=args.offpulse,
                 offpulse_std=off_std,
-                full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None
+                full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None,
+                peak_mask_bounds=onpulse_regions
             )
 
             if args.poincare:

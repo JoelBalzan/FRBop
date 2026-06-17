@@ -2146,7 +2146,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 						n_pa_bins: int = 50,
 						noise_fraction: float = 0.1,
 						offpulse_std: Optional[np.ndarray] = None,
-						full_time_series: Optional[np.ndarray] = None
+						full_time_series: Optional[np.ndarray] = None,
+						peak_mask_bounds: Optional[List[Tuple[int, int]]] = None
 						):
 	"""
 	Plot RM as a function of time.
@@ -2154,6 +2155,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 	from .data_io import find_peak_regions  # local import to avoid circular
 
 	_xlim_full_time = full_time_series  # save before local variable overwrites it
+	_peak_bounds = peak_mask_bounds  # save before local variable overwrites it
 
 	style = plot_style()
 
@@ -2320,9 +2322,14 @@ def plot_rm_time_series(time_array: np.ndarray,
 			snr_i_full_pa = I_full / (noise_est + 1e-10)
 			badi_pa = snr_i_full_pa < 2.0
 			combined_pa = ~badi_pa[full_mask]
-			bad_pa_err = pa_sigma_deg > 50.0
-			bad_ea_err = ea_sigma_deg > 50.0
+			bad_pa_err = pa_sigma_deg > 5.0
+			bad_ea_err = ea_sigma_deg > 5.0
 			mask_pa = combined_pa & ~bad_pa_err & ~bad_ea_err
+			if _peak_bounds is not None:
+				_peak_sel = np.zeros(len(times_ms), dtype=bool)
+				for si, ei in _peak_bounds:
+					_peak_sel |= (times_ms >= full_time[si] * 1e3 - 1.0) & (times_ms <= full_time[ei] * 1e3 + 1.0)
+				mask_pa &= _peak_sel
 
 			if n_pa_bins > 0 and np.any(mask_pa):
 				t_good = times_ms[mask_pa]
@@ -2368,10 +2375,11 @@ def plot_rm_time_series(time_array: np.ndarray,
 					& (counts >= MIN_BIN_POINTS)
 				)
 				if np.any(bin_ok):
-					ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='o', color='b', ecolor='gray',
-								   markersize=4, capsize=2, label='EA', zorder=2)
 					ax_pa.errorbar(bc[bin_ok], pa_b[bin_ok], yerr=pa_be[bin_ok], fmt='o', color='r', ecolor='gray',
 								   markersize=4, capsize=2, label='PA', zorder=2)
+					ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='o', color='b', ecolor='gray',
+								   markersize=4, capsize=2, label='EA', zorder=1)
+
 			else:
 				def scatter_runs(x, y, axis, **kwargs):
 					if len(x) == 0:
@@ -2385,9 +2393,9 @@ def plot_rm_time_series(time_array: np.ndarray,
 				scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2, ecolor='gray')
 				scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2, ecolor='gray')
 				if np.any(mask_pa):
-					ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa],
-								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
 					ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
+								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=2)
+					ax_pa.errorbar(times_ms[mask_pa], ea_deg[mask_pa], yerr=ea_sigma_deg[mask_pa],
 								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=1)
 
 		ax_pa.set_ylabel('Angle [deg.]', fontsize=style['label'])
@@ -2693,7 +2701,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
 		ax3.grid(True, alpha=0.3)
-		ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		ax3.legend(loc='upper right', fontsize=style['legend'], borderaxespad=0.9)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
 	if _xlim_full_time is not None and len(_xlim_full_time) > 1:
