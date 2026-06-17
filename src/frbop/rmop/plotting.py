@@ -1401,7 +1401,7 @@ def plot_poincare_sphere_subbands(
 		method = str(band_method).lower()
 		if method == 'manual':
 			spectrum = np.nanmean(I_cube, axis=0 if time_axis == 0 else 1)
-			band_regions = select_frequency_bands_manual(freq_mhz, spectrum)
+			band_regions = select_frequency_bands_manual(freq_mhz, spectrum, dspec=I_cube)
 		elif method == 'equal_snr':
 			if snr_weights is None:
 				n_off = max(1, int(n_time * noise_fraction))
@@ -2145,12 +2145,15 @@ def plot_rm_time_series(time_array: np.ndarray,
 						n_rm_bins: int = 20,
 						n_pa_bins: int = 50,
 						noise_fraction: float = 0.1,
-						offpulse_std: Optional[np.ndarray] = None
+						offpulse_std: Optional[np.ndarray] = None,
+						full_time_series: Optional[np.ndarray] = None
 						):
 	"""
 	Plot RM as a function of time.
 	"""
 	from .data_io import find_peak_regions  # local import to avoid circular
+
+	_xlim_full_time = full_time_series  # save before local variable overwrites it
 
 	style = plot_style()
 
@@ -2230,42 +2233,32 @@ def plot_rm_time_series(time_array: np.ndarray,
 			L_frac_full = L_full / (I_full + 1e-10)
 			V_frac_full = V_full / (I_full + 1e-10)
 
-			if len(time_peak) > 0:
-				bin_start_idx = None
-				bin_end_idx = None
-				bin_start = rm_results.get('time_bin_start')
-				bin_end = rm_results.get('time_bin_end')
-				if bin_start is not None and bin_end is not None:
-					if len(bin_start) == len(time_array) and len(bin_end) == len(time_array):
-						bin_start_idx = int(bin_start[start_idx])
-						bin_end_idx = int(bin_end[end_idx])
-
-				if bin_start_idx is not None and bin_end_idx is not None:
-					full_mask = np.zeros_like(full_time, dtype=bool)
-					full_mask[bin_start_idx:bin_end_idx] = True
+			if len(full_time) > 0:
+				if separate_peaks:
+					dt = np.median(np.diff(full_time)) if len(full_time) > 1 else 0.0
+					pad = dt / 2.0
+					full_mask = (full_time >= (full_time[start_idx] - pad)) & (full_time <= (full_time[end_idx] + pad))
 				else:
-					tmin = time_peak.min()
-					tmax = time_peak.max()
-					if len(full_time) > 1:
-						dt = np.median(np.diff(full_time))
-						pad = dt / 2.0
-					else:
-						pad = 0.0
-					full_mask = (full_time >= (tmin - pad)) & (full_time <= (tmax + pad))
+					full_mask = np.ones_like(full_time, dtype=bool)
 			else:
 				full_mask = np.ones_like(full_time, dtype=bool)
 
 			if not np.any(full_mask):
 				if len(full_time) > 0:
-					centre = 0.5 * (tmin + tmax) if len(time_peak) > 0 else full_time[0]
+					centre = 0.5 * (full_time[start_idx] + full_time[end_idx]) if separate_peaks else full_time[0]
 					idx = int(np.argmin(np.abs(full_time - centre)))
 					full_mask = np.zeros_like(full_time, dtype=bool)
 					full_mask[idx] = True
 				else:
 					full_mask = np.ones_like(full_time, dtype=bool)
 
-			n_frac = max(1, int(len(I_full) * noise_fraction))
-			noise_est = np.nanstd(I_full[:n_frac])
+			if offpulse_std is not None:
+				n_freq_plot = offpulse_std.shape[1] if offpulse_std.ndim > 1 else 1
+				noise_i_full = float(np.nanmedian(offpulse_std[0])) / np.sqrt(n_freq_plot)
+				noise_est = noise_i_full if noise_i_full > 0 else max(np.nanmedian(I_full) * 0.1, 1e-10)
+			else:
+				n_frac = max(1, int(len(I_full) * noise_fraction))
+				noise_est = np.nanstd(I_full[:n_frac])
 			if noise_est <= 0:
 				mad = np.nanmedian(np.abs(I_full - np.nanmedian(I_full)))
 				if mad > 0:
@@ -2426,15 +2419,20 @@ def plot_rm_time_series(time_array: np.ndarray,
 		rm_err_peak = rm_results.get('rm_err', None)
 		if rm_err_peak is not None:
 			rm_err_peak = rm_err_peak[peak_mask]
-			ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak,
-								 fmt='o-', color=IBM_PALETTE[-1], markersize=5,
-								 linewidth=1.5, capsize=2, alpha=1,
+			xerr_half = None
+			if (full_time is not None and 'time_bin_start' in rm_results
+					and 'time_bin_end' in rm_results):
+				bs = rm_results['time_bin_start'][peak_mask]
+				be = rm_results['time_bin_end'][peak_mask]
+				xerr_half = (full_time[np.maximum(be - 1, 0)] - full_time[bs]) / 2 * 1e3
+			ax_top_twin.errorbar(tms, rm_peak, yerr=rm_err_peak, xerr=xerr_half,
+								 fmt='o', color=IBM_PALETTE[-1], markersize=5,
+								 capsize=2, alpha=1,
 								 markeredgecolor='white', markeredgewidth=1,
 								 label='RM')
 		else:
 			ax_top_twin.plot(tms, rm_peak, 
-			'o-', color=IBM_PALETTE[-1], markersize=5, 
-			linewidth=1.5, 
+			'o', color=IBM_PALETTE[-1], markersize=5, 
 			markeredgecolor='white', markeredgewidth=1,
 			label='RM')
 
@@ -2514,8 +2512,16 @@ def plot_rm_time_series(time_array: np.ndarray,
 				binned_rm_err.append(rm_err)
 				binned_time.append(time_array[(bin_start + bin_end) // 2])
 
-			ax_top_twin.errorbar(np.array(binned_time) * 1e3, binned_rm, yerr=binned_rm_err,
-								 fmt='o-', color='red', ecolor='gray', markersize=5, linewidth=2, capsize=3,
+			binned_xerr = None
+			if full_time is not None and len(binned_time) > 0:
+				binned_xerr = np.zeros(len(binned_time))
+				for bin_idx in range(n_bins_actual):
+					bs = start_idx + bin_idx * bin_size
+					be = min(start_idx + (bin_idx + 1) * bin_size, end_idx + 1)
+					if be > bs:
+						binned_xerr[bin_idx] = (full_time[be - 1] - full_time[bs]) / 2 * 1e3
+			ax_top_twin.errorbar(np.array(binned_time) * 1e3, binned_rm, yerr=binned_rm_err, xerr=binned_xerr,
+								 fmt='o', color='red', ecolor='gray', markersize=5, capsize=3,
 								 label=f'Binned RM ({n_bins_actual} bins)')
 			ax_top_twin.set_ylabel(r'RM [rad m$^{{-2}}$]', fontsize=style['label'], color='red')
 			ax_top_twin.tick_params(axis='y', labelcolor='red', labelsize=style['tick'])
@@ -2555,14 +2561,6 @@ def plot_rm_time_series(time_array: np.ndarray,
 		ax3 = axes[2, peak_idx]
 
 		if time_series_data is not None and full_time is not None:
-			n_frac = max(1, int(len(I_full) * noise_fraction))
-			noise_est = np.nanstd(I_full[:n_frac])
-			if noise_est <= 0:
-				mad = np.nanmedian(np.abs(I_full - np.nanmedian(I_full)))
-				if mad > 0:
-					noise_est = mad / 0.6745
-				else:
-					noise_est = max(np.nanmedian(I_full) * 0.1, 1e-10)
 			err_frac = noise_est / (I_full + 1e-10)
 
 			times_ms = full_time[full_mask] * 1e3
@@ -2623,9 +2621,26 @@ def plot_rm_time_series(time_array: np.ndarray,
 							errs[idx] = fallback[0] if fallback.size else np.nan
 					return errs
 
+				# Always show full-resolution pol fraction as lines
+				combined_idx = full_indices[combined]
+				if combined_idx.size > 0:
+					seg_splits = np.where(np.diff(combined_idx) != 1)[0] + 1
+					segs = np.split(combined_idx, seg_splits) if len(seg_splits) > 0 else [combined_idx]
+					for seg in segs:
+						if seg.size == 0:
+							continue
+						#ax3.plot(full_time[seg] * 1e3, P_frac_full[seg], color='grey', linewidth=1, alpha=0.5)
+						ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='salmon', linewidth=1, alpha=0.5)
+						if 'V' in time_series_data:
+							ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='lightblue', linewidth=1, alpha=0.5)
+
+				# Overlay binned pol fraction if available
 				if full_time is not None:
 					idx = np.argmin(np.abs(full_time[:, None] - (bt / 1e3)[None, :]), axis=0)
-					bin_mask = combined[idx]
+					lookup = np.full(len(full_time), -1)
+					lookup[full_indices] = np.arange(len(full_indices))
+					mask_pos = lookup[idx]
+					bin_mask = (mask_pos >= 0) & combined[mask_pos.clip(0)]
 				else:
 					bin_mask = np.ones_like(bt, dtype=bool)
 
@@ -2633,10 +2648,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 					pf_err = _bin_frac_err(bt, p_full_masked)
 					lf_err = _bin_frac_err(bt, l_full_masked)
 					vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
-					#ax3.plot(bt[bin_mask], pf_bin[bin_mask], 'k--', linewidth=2, zorder=1, label='P/I')
 					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1)
-					#ax3.errorbar(bt[bin_mask], pf_bin[bin_mask], yerr=pf_err[bin_mask], fmt='o',
-					#             color='k', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 					ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label='L/I',
 								 color='r', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
@@ -2646,22 +2658,6 @@ def plot_rm_time_series(time_array: np.ndarray,
 							ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label='V/I',
 										 color='b', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 						ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
-				else:
-					combined_idx = full_indices[combined]
-					if combined_idx.size > 0:
-						seg_splits = np.where(np.diff(combined_idx) != 1)[0] + 1
-						segs = np.split(combined_idx, seg_splits) if len(seg_splits) > 0 else [combined_idx]
-						for seg in segs:
-							if seg.size == 0:
-								continue
-							ax3.plot(full_time[seg] * 1e3, P_frac_full[seg], color='k', linewidth=1.5)
-							ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='r', linewidth=1.5)
-							if 'V' in time_series_data:
-								ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='b', linewidth=1.5)
-						ax3.plot([], [], color='k', linewidth=1.5)
-						ax3.plot([], [], color='r', linewidth=1.5)
-						if 'V' in time_series_data:
-							ax3.plot([], [], color='b', linewidth=1.5)
 
 			def _finite_minmax(arrs: List[np.ndarray]) -> Optional[Tuple[float, float]]:
 				vals = []
@@ -2678,15 +2674,14 @@ def plot_rm_time_series(time_array: np.ndarray,
 				return float(np.nanmin(flat)), float(np.nanmax(flat))
 
 			use_arrays: List[np.ndarray] = []
+			sig_idx = full_indices[signal_mask]
+			use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
+			if 'V' in time_series_data:
+				use_arrays.append(V_frac_full[sig_idx])
 			if bin_mask is not None and np.any(bin_mask):
 				use_arrays.extend([pf_bin[bin_mask], lf_bin[bin_mask]])
 				if 'V_frac_bin' in rm_results and vf_bin.size:
 					use_arrays.append(vf_bin[bin_mask])
-			else:
-				sig_idx = full_indices[signal_mask]
-				use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
-				if 'V' in time_series_data:
-					use_arrays.append(V_frac_full[sig_idx])
 
 			minmax = _finite_minmax(use_arrays)
 			if minmax is not None:
@@ -2700,6 +2695,11 @@ def plot_rm_time_series(time_array: np.ndarray,
 		ax3.grid(True, alpha=0.3)
 		ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
+
+	if _xlim_full_time is not None and len(_xlim_full_time) > 1:
+		tlo, thi = _xlim_full_time[0] * 1e3, _xlim_full_time[-1] * 1e3
+		for col in range(n_peaks):
+			axes[0, col].set_xlim(tlo, thi)
 
 	plt.tight_layout()
 	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')

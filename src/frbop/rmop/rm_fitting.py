@@ -4,7 +4,7 @@ CLI for RM fitting using the split rmop modules.
 
 import argparse
 import warnings
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -25,6 +25,38 @@ from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_rm_time_series)
 
 warnings.filterwarnings("ignore")
+
+
+def _resolve_freq_band_idx(
+    args: argparse.Namespace,
+    freq_hz: np.ndarray,
+    spec_for_band: np.ndarray,
+    dspec: Optional[np.ndarray] = None,
+) -> Optional[slice]:
+    """Return a slice for frequency band cropping, or None if no band selected."""
+    if args.freq_band_mhz is not None:
+        fmin, fmax = args.freq_band_mhz
+        fmin_hz = fmin * 1e6
+        fmax_hz = fmax * 1e6
+        idx = np.where((freq_hz >= fmin_hz) & (freq_hz <= fmax_hz))[0]
+        if len(idx) == 0:
+            print(f"  WARNING: no channels in frequency band [{fmin}, {fmax}] MHz")
+            return None
+        return slice(idx[0], idx[-1] + 1)
+    elif args.freq_band_indices is not None:
+        start, stop = args.freq_band_indices
+        n_freq = len(freq_hz)
+        if start >= stop or start < 0 or stop > n_freq:
+            print(f"  WARNING: invalid freq-band-indices [{start}, {stop}) for {n_freq} channels")
+            return None
+        return slice(start, stop)
+    elif args.manual_freq_bands:
+        bands = select_frequency_bands_manual(freq_hz / 1e6, spec_for_band, dspec=dspec)
+        if bands is None or len(bands) == 0:
+            return None
+        start, stop = bands[0]
+        return slice(start, stop)
+    return None
 
 
 def main() -> None:
@@ -282,6 +314,12 @@ def main() -> None:
         help="Number of time bins to fit in time-series mode (default: no binning)",
     )
     parser.add_argument(
+        "--pa-bins",
+        type=int,
+        default=50,
+        help="Number of PA/EA/pol fraction bins in lower panel of time-series plot (default: 50)",
+    )
+    parser.add_argument(
         "--freq-bins",
         type=int,
         default=None,
@@ -295,6 +333,21 @@ def main() -> None:
             "Exclude N bins from each end of the spectrum for frequency-domain fitting "
             "(default: 0)"
         ),
+    )
+    parser.add_argument(
+        "--freq-band-mhz", "--freq-band",
+        type=float, nargs=2, default=None, metavar=("FMIN", "FMAX"),
+        help="Crop to frequency band [FMIN, FMAX] in MHz",
+    )
+    parser.add_argument(
+        "--freq-band-indices", "--freq-indices",
+        type=int, nargs=2, default=None, metavar=("START", "STOP"),
+        help="Crop to frequency band indices [START, STOP)",
+    )
+    parser.add_argument(
+        "--manual-freq-bands", "--manual-freqs",
+        action="store_true",
+        help="Interactively select frequency band(s) from spectrum",
     )
     parser.add_argument(
         "--offpulse",
@@ -382,6 +435,7 @@ def main() -> None:
     sigma_v_chan_base = None
     freq_hz_unbinned = None
     onpulse_mask = None
+    off_std = None
 
     if stokes_i.ndim == 2:
         print(f"\n  Detected 2D data with shape: {stokes_i.shape}")
@@ -739,11 +793,38 @@ def main() -> None:
             burn_circ_frac_err = np.asarray(burn_circ_frac_err, dtype=float)[trim_slice]
         if burn_circ_valid_mask is not None:
             burn_circ_valid_mask = np.asarray(burn_circ_valid_mask, dtype=bool)[trim_slice]
+        if off_std is not None:
+            off_std = off_std[:, trim_slice]
 
         print(
             f"  Excluded {args.exclude_edge_bins} edge bins per side: "
             f"{n_freq_current} -> {len(freq_hz)} channels"
         )
+
+    if args.freq_band_mhz is not None or args.freq_band_indices is not None or args.manual_freq_bands:
+        spec_for_band = np.nanmean(stokes_i, axis=time_axis) if stokes_i.ndim == 2 else stokes_i
+        freq_band = _resolve_freq_band_idx(args, freq_hz, spec_for_band, dspec=stokes_i if stokes_i.ndim == 2 else None)
+        if freq_band is not None:
+            freq_hz = freq_hz[freq_band]
+            stokes_i = stokes_i[freq_band]
+            stokes_q = stokes_q[freq_band]
+            stokes_u = stokes_u[freq_band]
+            if stokes_v is not None:
+                stokes_v = stokes_v[freq_band]
+            if burn_pol_frac_err is not None:
+                burn_pol_frac_err = burn_pol_frac_err[freq_band]
+            if burn_valid_mask is not None:
+                burn_valid_mask = burn_valid_mask[freq_band]
+            if burn_circ_frac_err is not None:
+                burn_circ_frac_err = burn_circ_frac_err[freq_band]
+            if burn_circ_valid_mask is not None:
+                burn_circ_valid_mask = burn_circ_valid_mask[freq_band]
+            if off_std is not None:
+                off_std = off_std[:, freq_band]
+            print(
+                f"  Cropped to frequency band: {freq_hz.min() / 1e6:.2f} - "
+                f"{freq_hz.max() / 1e6:.2f} MHz ({len(freq_hz)} channels)"
+            )
 
     print(f"  Frequency range: {freq_hz.min() / 1e6:.2f} - {freq_hz.max() / 1e6:.2f} MHz")
     print(f"  Number of channels: {len(freq_hz)}")
@@ -852,7 +933,8 @@ def main() -> None:
                 if args.poincare_freq_bands_manual:
                     freq_band_ranges = select_frequency_bands_manual(
                         freq_hz / 1e6,
-                        stokes_i,
+                        np.nanmean(stokes_i, axis=-1) if stokes_i.ndim > 1 else stokes_i,
+                        dspec=stokes_i if stokes_i.ndim == 2 else None,
                     )
                 elif args.poincare_freq_bands is not None or args.poincare_freq_bands_snr is not None:
                     if args.poincare_freq_bands_snr is not None:
@@ -1068,6 +1150,26 @@ def main() -> None:
                     if sigma_v_pk is not None:
                         sigma_v_pk = np.asarray(sigma_v_pk, dtype=float)[trim_slice_pk]
 
+                if args.freq_band_mhz is not None or args.freq_band_indices is not None or args.manual_freq_bands:
+                    freq_band_pk = _resolve_freq_band_idx(args, freq_pk, stokes_i_pk, dspec=stokes_i_pk if stokes_i_pk.ndim == 2 else None)
+                    if freq_band_pk is not None:
+                        freq_pk = freq_pk[freq_band_pk]
+                        stokes_i_pk = stokes_i_pk[freq_band_pk]
+                        stokes_q_pk = stokes_q_pk[freq_band_pk]
+                        stokes_u_pk = stokes_u_pk[freq_band_pk]
+                        if stokes_v_pk is not None:
+                            stokes_v_pk = stokes_v_pk[freq_band_pk]
+                        sigma_i_pk = sigma_i_pk[freq_band_pk]
+                        sigma_q_pk = sigma_q_pk[freq_band_pk]
+                        sigma_u_pk = sigma_u_pk[freq_band_pk]
+                        if sigma_v_pk is not None:
+                            sigma_v_pk = sigma_v_pk[freq_band_pk]
+                        print(
+                            f"    Cropped peak {i_extra} to frequency band: "
+                            f"{freq_pk.min() / 1e6:.2f} - {freq_pk.max() / 1e6:.2f} MHz "
+                            f"({len(freq_pk)} channels)"
+                        )
+
                 l_pk = np.sqrt(stokes_q_pk ** 2 + stokes_u_pk ** 2)
                 sigma_l_pk = np.sqrt(
                     (stokes_q_pk ** 2 * sigma_q_pk ** 2 + stokes_u_pk ** 2 * sigma_u_pk ** 2)
@@ -1179,71 +1281,127 @@ def main() -> None:
         if stokes_v is not None:
             full_time_series_data["V"] = stokes_v
 
+        ts_regions: List[Tuple[int, int]] = []
+        if onpulse_regions is not None and len(onpulse_regions) > 0:
+            ts_regions = onpulse_regions
+        elif onpulse_mask is not None:
+            ts_regions = [onpulse_mask]
+        else:
+            n_time = stokes_i.shape[time_axis]
+            ts_regions = [(0, n_time - 1)]
+
         if onpulse_mask is not None:
-            start_idx, end_idx = onpulse_mask
-            print(f"  Processing only on-pulse bins {start_idx} to {end_idx}")
+            m_start, m_end = onpulse_mask
+            if time_axis == 0:
+                plot_ts_data = {
+                    "time": (time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]))[m_start:m_end + 1],
+                    "I": stokes_i[m_start:m_end + 1, :],
+                    "Q": stokes_q[m_start:m_end + 1, :],
+                    "U": stokes_u[m_start:m_end + 1, :],
+                }
+                if stokes_v is not None:
+                    plot_ts_data["V"] = stokes_v[m_start:m_end + 1, :]
+            else:
+                plot_ts_data = {
+                    "time": (time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]))[m_start:m_end + 1],
+                    "I": stokes_i[:, m_start:m_end + 1],
+                    "Q": stokes_q[:, m_start:m_end + 1],
+                    "U": stokes_u[:, m_start:m_end + 1],
+                }
+                if stokes_v is not None:
+                    plot_ts_data["V"] = stokes_v[:, m_start:m_end + 1]
+        else:
+            plot_ts_data = full_time_series_data
+
+        all_rm_results: List[Dict] = []
+
+        for region_idx, (r_start, r_end) in enumerate(ts_regions):
+            print(f"\n  --- Fitting region {region_idx + 1}: time bins {r_start} to {r_end} ---")
 
             if time_axis == 0:
-                time_series_data = {
-                    "time": (
-                        time_array
-                        if time_array is not None
-                        else np.arange(stokes_i.shape[time_axis])
-                    )[start_idx : end_idx + 1],
-                    "I": stokes_i[start_idx : end_idx + 1, :],
-                    "Q": stokes_q[start_idx : end_idx + 1, :],
-                    "U": stokes_u[start_idx : end_idx + 1, :],
+                region_data = {
+                    "time": (time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]))[r_start:r_end + 1],
+                    "I": stokes_i[r_start:r_end + 1, :],
+                    "Q": stokes_q[r_start:r_end + 1, :],
+                    "U": stokes_u[r_start:r_end + 1, :],
                 }
                 if stokes_v is not None:
-                    time_series_data["V"] = stokes_v[start_idx : end_idx + 1, :]
+                    region_data["V"] = stokes_v[r_start:r_end + 1, :]
             else:
-                time_series_data = {
-                    "time": (
-                        time_array
-                        if time_array is not None
-                        else np.arange(stokes_i.shape[time_axis])
-                    )[start_idx : end_idx + 1],
-                    "I": stokes_i[:, start_idx : end_idx + 1],
-                    "Q": stokes_q[:, start_idx : end_idx + 1],
-                    "U": stokes_u[:, start_idx : end_idx + 1],
+                region_data = {
+                    "time": (time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]))[r_start:r_end + 1],
+                    "I": stokes_i[:, r_start:r_end + 1],
+                    "Q": stokes_q[:, r_start:r_end + 1],
+                    "U": stokes_u[:, r_start:r_end + 1],
                 }
                 if stokes_v is not None:
-                    time_series_data["V"] = stokes_v[:, start_idx : end_idx + 1]
+                    region_data["V"] = stokes_v[:, r_start:r_end + 1]
 
-            print(f"  Reduced to {len(time_series_data['time'])} time samples")
-        else:
-            time_series_data = {
-                "time": time_array if time_array is not None else np.arange(stokes_i.shape[time_axis]),
-                "I": stokes_i,
-                "Q": stokes_q,
-                "U": stokes_u,
-            }
-            if stokes_v is not None:
-                time_series_data["V"] = stokes_v
+            rm_result = fit_rm_time_series(
+                freq_hz,
+                region_data,
+                method=args.method,
+                rm_range=tuple(args.rm_range),
+                n_rm=args.n_rm,
+                rmnest_gfr=args.rmnest_gfr,
+                rmnest_free_alpha=args.rmnest_free_alpha,
+                rmnest_outdir=args.rmnest_outdir or f"{args.output}_rmnest_ts",
+                rmnest_label=args.rmnest_label or args.output,
+                rmnest_sampler=args.rmnest_sampler,
+                n_time_bins=args.time_bins,
+                exclude_edge_bins=0,
+                noise_fraction=args.offpulse,
+                offpulse_std=off_std
+            )
 
-        rm_results = fit_rm_time_series(
-            freq_hz,
-            time_series_data,
-            method=args.method,
-            rm_range=tuple(args.rm_range),
-            n_rm=args.n_rm,
-            rmnest_gfr=args.rmnest_gfr,
-            rmnest_free_alpha=args.rmnest_free_alpha,
-            rmnest_outdir=args.rmnest_outdir or f"{args.output}_rmnest_ts",
-            rmnest_label=args.rmnest_label or args.output,
-            rmnest_sampler=args.rmnest_sampler,
-            n_time_bins=args.time_bins,
-            exclude_edge_bins=args.exclude_edge_bins,
-            noise_fraction=args.offpulse,
-            offpulse_std=off_std
+            l_weights_region = None
+            if "L_frac_bin" in rm_result:
+                l_weights_region = np.asarray(rm_result["L_frac_bin"], dtype=float) ** 2
+            rm_diag_region = time_series_sigma_rm_diagnostic(rm_result["rm"], weights=l_weights_region)
+
+            print(f"    RM bins used = {rm_diag_region['n_valid']}/{rm_diag_region['n_total']}")
+            print(f"    Mean RM = {rm_diag_region['rm_mean']:.4f} rad/m^2")
+            print(f"    std_RM(time) = {rm_diag_region['std_rm_time']:.4f} rad/m^2")
+            if np.isfinite(rm_diag_region["weighted_std_rm_time"]):
+                print(f"    Weighted Mean RM (L^2) = {rm_diag_region['weighted_rm_mean']:.4f} rad/m^2")
+                print(f"    Weighted std_RM(time) (L^2) = {rm_diag_region['weighted_std_rm_time']:.4f} rad/m^2")
+            print(f"    Min RM = {rm_diag_region['rm_min']:.4f} rad/m^2")
+            print(f"    Max RM = {rm_diag_region['rm_max']:.4f} rad/m^2")
+
+            if "rm_err" in rm_result and np.any(np.isfinite(rm_result["rm_err"])):
+                print(f"    Mean RM err = {np.nanmean(rm_result['rm_err']):.4f} rad/m^2")
+
+            if "snr" in rm_result and np.any(rm_result["snr"] > 0):
+                print(f"    Mean SNR = {np.nanmean(rm_result['snr']):.2f}")
+
+            if "pa_deg" in rm_result:
+                print(f"    Mean PA = {np.nanmean(rm_result['pa_deg']):.2f} deg")
+                print(f"    Mean EA = {np.nanmean(rm_result['ea_deg']):.2f} deg")
+
+            all_rm_results.append(rm_result)
+
+        rm_results = {}
+        _concat_keys = ['time', 'rm', 'rm_err', 'snr', 'pa_deg', 'ea_deg',
+                        'pa_err', 'ea_err', 'i_snr', 'pol_angle_0',
+                        'pol_angle_ref', 'P_frac_bin', 'L_frac_bin',
+                        'V_frac_bin', 'q_bin', 'u_bin', 'v_bin',
+                        'time_bin_start', 'time_bin_end']
+        for key in _concat_keys:
+            parts = [r[key] for r in all_rm_results if key in r]
+            if parts:
+                rm_results[key] = np.concatenate(parts, axis=0)
+            else:
+                rm_results[key] = np.array([])
+        rm_results['is_binned'] = any(
+            r.get('is_binned', False) for r in all_rm_results
         )
 
         l_weights = None
-        if "L_frac_bin" in rm_results:
+        if "L_frac_bin" in rm_results and len(rm_results["L_frac_bin"]) > 0:
             l_weights = np.asarray(rm_results["L_frac_bin"], dtype=float) ** 2
         rm_diag = time_series_sigma_rm_diagnostic(rm_results["rm"], weights=l_weights)
 
-        print("\nTime Series Results:")
+        print("\nCombined Time Series Results:")
         print(f"  RM bins used = {rm_diag['n_valid']}/{rm_diag['n_total']}")
         print(f"  Mean RM = {rm_diag['rm_mean']:.4f} rad/m^2")
         print(f"  std_RM(time) = {rm_diag['std_rm_time']:.4f} rad/m^2")
@@ -1256,6 +1414,9 @@ def main() -> None:
             )
         print(f"  Min RM = {rm_diag['rm_min']:.4f} rad/m^2")
         print(f"  Max RM = {rm_diag['rm_max']:.4f} rad/m^2")
+
+        if "rm_err" in rm_results and np.any(np.isfinite(rm_results["rm_err"])):
+            print(f"  Mean RM err = {np.nanmean(rm_results['rm_err']):.4f} rad/m^2")
 
         if "snr" in rm_results and np.any(rm_results["snr"] > 0):
             print(f"  Mean SNR = {np.nanmean(rm_results['snr']):.2f}")
@@ -1270,24 +1431,24 @@ def main() -> None:
                     if onpulse_mask is not None:
                         start_idx, end_idx = onpulse_mask
                         full_time_profile = np.zeros(end_idx - start_idx + 1)
-                        if time_series_data["I"].ndim == 2:
-                            full_time_profile = np.sum(time_series_data["I"], axis=1)
+                        if plot_ts_data["I"].ndim == 2:
+                            full_time_profile = np.sum(plot_ts_data["I"], axis=1)
                     else:
                         full_time_profile = (
-                            np.sum(time_series_data["I"], axis=1)
-                            if time_series_data["I"].ndim == 2
+                            np.sum(plot_ts_data["I"], axis=1)
+                            if plot_ts_data["I"].ndim == 2
                             else None
                         )
                 else:
                     if onpulse_mask is not None:
                         start_idx, end_idx = onpulse_mask
                         full_time_profile = np.zeros(end_idx - start_idx + 1)
-                        if time_series_data["I"].ndim == 2:
-                            full_time_profile = np.sum(time_series_data["I"], axis=0)
+                        if plot_ts_data["I"].ndim == 2:
+                            full_time_profile = np.sum(plot_ts_data["I"], axis=0)
                     else:
                         full_time_profile = (
-                            np.sum(time_series_data["I"], axis=0)
-                            if time_series_data["I"].ndim == 2
+                            np.sum(plot_ts_data["I"], axis=0)
+                            if plot_ts_data["I"].ndim == 2
                             else None
                         )
             else:
@@ -1302,19 +1463,20 @@ def main() -> None:
                 min_gap_bins=args.min_gap_bins,
                 min_peak_bins=args.min_peak_bins,
                 max_merge_gap=args.max_merge_gap,
-                time_series_data=time_series_data,
+                time_series_data=full_time_series_data,
                 freq_hz=freq_hz,
                 n_rm_bins=args.time_bins if args.time_bins and args.time_bins > 0 else None,
-                n_pa_bins=args.time_bins*3 if args.time_bins and args.time_bins > 0 else None,
+                n_pa_bins=args.pa_bins,
                 noise_fraction=args.offpulse,
-                offpulse_std=off_std
+                offpulse_std=off_std,
+                full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None
             )
 
             if args.poincare:
                 pt_bins = args.time_bins if args.time_bins and args.time_bins > 0 else None
                 if args.poincare_subbands and args.poincare_subbands > 1:
                     plot_poincare_sphere_subbands(
-                        time_series_data,
+                        plot_ts_data,
                         freq_hz,
                         f"{args.output}_poincare.{args.ext}",
                         n_subbands=args.poincare_subbands,
@@ -1330,7 +1492,7 @@ def main() -> None:
                     )
                 else:
                     plot_poincare_sphere(
-                        time_series_data,
+                        plot_ts_data,
                         f"{args.output}_poincare.{args.ext}",
                         n_time_bins=pt_bins,
                         noise_fraction=args.offpulse,
@@ -1345,7 +1507,7 @@ def main() -> None:
                 if args.poincare_projections:
                     proj_tag = str(args.poincare_projections).lower()
                     plot_poincare_projections(
-                        time_series_data,
+                        plot_ts_data,
                         f"{args.output}_poincare_projections_{proj_tag}.{args.ext}",
                         projection_type=args.poincare_projections,
                         n_time_bins=pt_bins,

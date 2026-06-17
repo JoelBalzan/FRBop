@@ -217,6 +217,7 @@ class RMFitter:
         noise_estimate = mDict['dFDFth']  # Theoretical noise from RMtools
         rm_peak_snr = mDict['snrPIfit']  # SNR from RMtools fit
 
+        dphi_peak_pi_fit = mDict.get('dPhiPeakPIfit_rm2', None)
         results = {
             'rm_values': rm_values,
             'rm_spectrum': rm_spectrum,
@@ -224,6 +225,7 @@ class RMFitter:
             'rm_peak': rm_peak,
             'rm_peak_snr': rm_peak_snr,
             'noise_estimate': noise_estimate,
+            'dphi_peak_pi_fit': dphi_peak_pi_fit,
             'rmtools_dict': mDict,  # Store full RMtools output
             'rmtools_arrays': aDict  # Store arrays from RMtools
         }
@@ -495,6 +497,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                 noise_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
         else:
             noise_v = 0.0
+            noise_i_perchan = noise_i
+            noise_q_perchan = noise_q
+            noise_u_perchan = noise_u
 
     # -------------------------------------------------------------------------
     # Binning setup
@@ -575,7 +580,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         i_val = np.nanmean(stokes_i)
         v_val = np.nanmean(stokes_v) if stokes_v is not None else 0.0
 
-        i_snr_array[i] = i_val / (noise_i + 1e-10)
+        n_time_in_bin = bin_end - bin_start
+        i_snr_array[i] = i_val / (noise_i / np.sqrt(n_time_in_bin) + 1e-10)
         q_bin[i] = q_val / (i_val + 1e-10)
         u_bin[i] = u_val / (i_val + 1e-10)
         v_bin[i] = v_val / (i_val + 1e-10)
@@ -635,10 +641,12 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         if method in ('simple', 'rm_synthesis'):
             result = fitter._fit_rm_with_rmtools(
                 rm_range=rm_range, n_rm=n_rm,
-                noise_i=noise_i_perchan, noise_q=noise_q_perchan, noise_u=noise_u_perchan,
+                noise_i=noise_i_perchan / np.sqrt(n_time_in_bin),
+                noise_q=noise_q_perchan / np.sqrt(n_time_in_bin),
+                noise_u=noise_u_perchan / np.sqrt(n_time_in_bin),
             )
             rm_array[i] = result.get('rm_clean_peak', result.get('rm_peak', np.nan))
-            rm_err_array[i] = result.get('rm_clean_err', result.get('rm_err', result.get('noise_estimate', 0) * 2))
+            rm_err_array[i] = result.get('rm_clean_err', result.get('dphi_peak_pi_fit', result.get('noise_estimate', 0) * 2))
             snr_array[i] = result.get('rm_peak_snr', np.nan)
 
         elif method == 'qu_fitting':

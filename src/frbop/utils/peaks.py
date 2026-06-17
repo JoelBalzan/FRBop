@@ -235,12 +235,23 @@ def select_frequency_bands_manual(
     freq_axis: np.ndarray,
     spectrum: np.ndarray,
     *,
+    dspec: np.ndarray | None = None,
     title: str = "Click start/end bounds for each frequency band (close window when done)",
     x_label: str = "Frequency [MHz]",
     y_label: str = "Flux",
     exclusive_end: bool = True,
 ) -> List[Tuple[int, int]]:
-    """Interactively select frequency bands from a 1D spectrum."""
+    """Interactively select frequency bands from a 1D spectrum.
+
+    Parameters
+    ----------
+    freq_axis : 1D array of frequencies [MHz], ascending
+    spectrum  : 1D spectrum values
+    dspec     : optional 2D dynamic spectrum with shape (n_freq, n_time).
+                When provided, shows a 2D dspec panel alongside the 1D spectrum
+                with aligned frequency axes. Clicks are accepted only on the
+                dspec panel.
+    """
     freq_axis = np.asarray(freq_axis, float)
     spectrum = np.asarray(spectrum, float)
 
@@ -253,35 +264,98 @@ def select_frequency_bands_manual(
             f"freq_axis length ({freq_axis.size}) does not match spectrum length ({spectrum.size})"
         )
 
-    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
-    ax.plot(freq_axis, spectrum, color='k', linewidth=1)
-    ax.set_title(title)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.grid(True, alpha=0.3)
-    cursor_line = ax.axvline(freq_axis[0] if freq_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+    if dspec is not None:
+        dspec = np.asarray(dspec, float)
+        if dspec.ndim != 2:
+            raise ValueError(f"dspec must be 2D, got shape={dspec.shape}")
+        if dspec.shape[0] != freq_axis.size:
+            raise ValueError(
+                f"dspec first dimension ({dspec.shape[0]}) does not match freq_axis ({freq_axis.size})"
+            )
 
-    clicks: List[float] = []
+    if dspec is not None:
+        fig, (ax0, ax1) = plt.subplots(
+            1, 2, figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2),
+            sharey=True,
+            gridspec_kw={'width_ratios': [3, 1]},
+        )
+        n_time = dspec.shape[1]
+        extent = [0, n_time - 1, freq_axis[0], freq_axis[-1]]
+        ax0.imshow(dspec, aspect='auto', extent=extent, origin='lower')
+        ax0.set_title(title)
+        ax0.set_xlabel("Time [sample]")
+        ax0.set_ylabel("Frequency [MHz]")
+        ax0.grid(True, alpha=0.3)
+        ax0.invert_yaxis()
 
-    def on_move(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        cursor_line.set_xdata([event.xdata, event.xdata])
-        fig.canvas.draw_idle()
+        ax1.plot(spectrum, freq_axis, color='k', linewidth=1)
+        ax1.set_xlabel(y_label)
+        ax1.grid(True, alpha=0.3)
 
-    def on_click(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        x = float(event.xdata)
-        clicks.append(x)
-        ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
-        if len(clicks) % 2 == 0:
-            start_f, end_f = sorted((clicks[-2], clicks[-1]))
-            ax.axvspan(start_f, end_f, color='tab:orange', alpha=0.2)
-        fig.canvas.draw_idle()
+        cursor_line0 = ax0.axhline(
+            freq_axis[0] if freq_axis.size else 0.0,
+            color='tab:blue', alpha=0.4, linewidth=1,
+        )
+        cursor_line1 = ax1.axhline(
+            freq_axis[0] if freq_axis.size else 0.0,
+            color='tab:blue', alpha=0.4, linewidth=1,
+        )
 
-    fig.canvas.mpl_connect('motion_notify_event', on_move)
-    fig.canvas.mpl_connect('button_press_event', on_click)
+        clicks: List[float] = []
+
+        def on_move(event):
+            if event.inaxes is None or event.ydata is None:
+                return
+            y = float(event.ydata)
+            cursor_line0.set_ydata([y, y])
+            cursor_line1.set_ydata([y, y])
+            fig.canvas.draw_idle()
+
+        def on_click(event):
+            if event.inaxes != ax0 or event.ydata is None:
+                return
+            y = float(event.ydata)
+            clicks.append(y)
+            ax0.axhline(y, color='tab:red', alpha=0.7, linewidth=1)
+            ax1.axhline(y, color='tab:red', alpha=0.7, linewidth=1)
+            if len(clicks) % 2 == 0:
+                start_f, end_f = sorted((clicks[-2], clicks[-1]))
+                ax0.axhspan(start_f, end_f, color='tab:orange', alpha=0.2)
+                ax1.axhspan(start_f, end_f, color='tab:orange', alpha=0.2)
+            fig.canvas.draw_idle()
+
+        fig.canvas.mpl_connect('motion_notify_event', on_move)
+        fig.canvas.mpl_connect('button_press_event', on_click)
+    else:
+        fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
+        ax.plot(freq_axis, spectrum, color='k', linewidth=1)
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.grid(True, alpha=0.3)
+        cursor_line = ax.axvline(freq_axis[0] if freq_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+
+        clicks: List[float] = []
+
+        def on_move(event):
+            if event.inaxes != ax or event.xdata is None:
+                return
+            cursor_line.set_xdata([event.xdata, event.xdata])
+            fig.canvas.draw_idle()
+
+        def on_click(event):
+            if event.inaxes != ax or event.xdata is None:
+                return
+            x = float(event.xdata)
+            clicks.append(x)
+            ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
+            if len(clicks) % 2 == 0:
+                start_f, end_f = sorted((clicks[-2], clicks[-1]))
+                ax.axvspan(start_f, end_f, color='tab:orange', alpha=0.2)
+            fig.canvas.draw_idle()
+
+        fig.canvas.mpl_connect('motion_notify_event', on_move)
+        fig.canvas.mpl_connect('button_press_event', on_click)
 
     plt.show()
 

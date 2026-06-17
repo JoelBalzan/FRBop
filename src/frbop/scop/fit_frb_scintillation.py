@@ -316,7 +316,7 @@ def main():
             band_freq, band_spectrum, band_regions, fit_max_lag_mhz=args.fit_max_lag,
             off_pulse=band_off_pulse, raw_spectrum=raw_spectrum)
     elif args.manual_freq_bands:
-        band_regions = select_frequency_bands_manual(band_freq, band_spectrum)
+        band_regions = select_frequency_bands_manual(band_freq, band_spectrum, dspec=raw_spectrum if raw_spectrum.ndim == 2 else None)
         print(f"Frequency-band gating: manual {len(band_regions)} bands")
         for i, (start, stop) in enumerate(band_regions, start=1):
             print(f"  Band {i}: indices [{start}, {stop}) = {band_freq[start]:.3f}–{band_freq[stop - 1]:.3f} MHz")

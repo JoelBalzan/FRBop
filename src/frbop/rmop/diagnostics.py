@@ -45,7 +45,7 @@ def time_series_sigma_rm_diagnostic(rm_time: np.ndarray,
     if n_valid == 0:
         return {
             'rm_mean': np.nan,
-            'sigma_rm_time': np.nan,
+            'std_rm_time': np.nan,
             'rm_min': np.nan,
             'rm_max': np.nan,
             'weighted_rm_mean': np.nan,
