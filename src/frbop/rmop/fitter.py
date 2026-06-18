@@ -3,6 +3,8 @@ RMFitter class and the fit_rm_time_series driver.
 """
 
 import os
+import re
+import sys
 import warnings
 from typing import Dict, List, Optional, Tuple
 
@@ -14,6 +16,23 @@ from scipy.optimize import curve_fit
 from .diagnostics import summarize_posterior
 
 warnings.filterwarnings('ignore')
+
+
+def _patch_scipy_bilby_compat() -> None:
+    """Patch known bilby/scipy symbol mismatches for older bilby releases."""
+    try:
+        import scipy.special._ufuncs as _ufuncs
+    except Exception:
+        return
+    alias_map = {
+        "btdtr": "bdtr",
+        "btdtri": "bdtri",
+        "btdtria": "bdtria",
+    }
+    for missing_name, fallback_name in alias_map.items():
+        if hasattr(_ufuncs, missing_name) or not hasattr(_ufuncs, fallback_name):
+            continue
+        setattr(_ufuncs, missing_name, getattr(_ufuncs, fallback_name))
 
 
 class RMFitter:
@@ -322,12 +341,39 @@ class RMFitter:
         sampler : str
             bilby sampler name (default: dynesty).
         """
-        try:
-            from rmnest.fit_RM import RMNest
-        except Exception as exc:
+        _patch_scipy_bilby_compat()
+        for _ in range(4):
+            try:
+                from rmnest.fit_RM import RMNest
+                break
+            except ImportError as exc:
+                msg = str(exc)
+                match = re.search(
+                    r"cannot import name '([^']+)' from 'scipy\.special\._ufuncs'",
+                    msg,
+                )
+                if match:
+                    import scipy.special._ufuncs as _ufuncs
+                    missing = match.group(1)
+                    candidates = []
+                    if missing.startswith("btd"):
+                        candidates.append("bd" + missing[3:])
+                    if missing.startswith("std"):
+                        candidates.append("sd" + missing[3:])
+                    for cand in candidates:
+                        if hasattr(_ufuncs, cand):
+                            setattr(_ufuncs, missing, getattr(_ufuncs, cand))
+                            sys.modules.pop("rmnest", None)
+                            sys.modules.pop("bilby", None)
+                            break
+                    else:
+                        raise
+                else:
+                    raise
+        else:
             raise ImportError(
                 "RMNest is not installed. Install with: pip install rmnest"
-            ) from exc
+            )
 
         freq_mhz = self.freq_hz / 1e6
         freq_cen = np.median(freq_mhz)
