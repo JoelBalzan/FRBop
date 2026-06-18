@@ -13,6 +13,17 @@ from itertools import cycle
 
 SINGLE_COLUMN_WIDTH_IN = 4.8
 TWO_COLUMN_WIDTH_IN = 7.1
+THREE_COLUMN_WIDTH_IN = 9.4
+
+_COL_WIDTHS = {1: SINGLE_COLUMN_WIDTH_IN, 2: TWO_COLUMN_WIDTH_IN, 3: THREE_COLUMN_WIDTH_IN}
+_COL_STEP = TWO_COLUMN_WIDTH_IN - SINGLE_COLUMN_WIDTH_IN  # 2.3
+
+_current_pub_col: Optional[int] = None
+
+
+def set_pub_col(n: Optional[int]) -> None:
+    global _current_pub_col
+    _current_pub_col = n
 
 
 class ColorManager:
@@ -45,30 +56,41 @@ IBM_PALETTE = [
 colour_manager = ColorManager(IBM_PALETTE)
 
 
-def pub_width(single_column=True):
+def pub_width(*, single_column: bool = True, triple_column: bool = False, ncol: Optional[int] = None) -> float:
+    if ncol is not None:
+        if ncol in _COL_WIDTHS:
+            return _COL_WIDTHS[ncol]
+        return _COL_WIDTHS[1] + _COL_STEP * (ncol - 1)
+    if triple_column:
+        return THREE_COLUMN_WIDTH_IN
     return SINGLE_COLUMN_WIDTH_IN if single_column else TWO_COLUMN_WIDTH_IN
 
 
 def pub_figsize(
     *,
-    single_column=True,
-    height_ratio=0.62,
-    min_height=3.0,
+    single_column: bool = True,
+    triple_column: bool = False,
+    ncol: Optional[int] = None,
+    height_ratio: float = 0.62,
+    min_height: float = 3.0,
 ):
-    width = pub_width(single_column)
+    effective_ncol = ncol if ncol is not None else _current_pub_col
+    width = pub_width(single_column=single_column, triple_column=triple_column, ncol=effective_ncol)
     height = max(min_height, width * height_ratio)
     return width, height
 
 
 def pub_grid_figsize(
-    n_rows,
+    n_rows: int,
     *,
-    single_column=False,
-    row_height=2.5,
-    width_scale=1.0,
-    min_height=4.0,
+    single_column: bool = False,
+    triple_column: bool = False,
+    ncol: Optional[int] = None,
+    row_height: float = 2.5,
+    width_scale: float = 1.0,
+    min_height: float = 4.0,
 ):
-    width = pub_width(single_column) * width_scale
+    width = pub_width(single_column=single_column, triple_column=triple_column, ncol=ncol) * width_scale
     height = max(min_height, n_rows * row_height)
     return width, height
 

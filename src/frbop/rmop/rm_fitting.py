@@ -16,6 +16,7 @@ from frbop.utils.plotting import set_pub_style
 
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
 from .diagnostics import time_series_sigma_rm_diagnostic
+from .constants import set_pub_col
 from .fitter import RMFitter, fit_rm_time_series
 from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_poincare_projections_frequency,
@@ -169,7 +170,7 @@ def main() -> None:
         help="Generate Poincare sphere plot (time-dependent only; requires --time-series)",
     )
     parser.add_argument(
-        "--poincare-interactive",
+        "--poincare-interactive", "--poincare-int",
         action="store_true",
         help="Display Poincare plot interactively before saving",
     )
@@ -179,13 +180,13 @@ def main() -> None:
         help="Force all Poincare points onto unit sphere surface",
     )
     parser.add_argument(
-        "--poincare-subbands",
+        "--poincare-subbands", "--poincare-sub",
         type=int,
         default=1,
         help="Split the full band into this many subbands and plot one Poincare sphere per band",
     )
     parser.add_argument(
-        "--poincare-projections",
+        "--poincare-projections", "--poincare-proj",
         nargs="?",
         const="all",
         default=None,
@@ -208,7 +209,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--poincare-circle-fit",
+        "--poincare-circle-fit", "--circle-fit",
         nargs="?",
         const="auto",
         default=None,
@@ -216,7 +217,7 @@ def main() -> None:
         help="Fit circles to Poincare segments: auto (default), great, or small.",
     )
     parser.add_argument(
-        "--poincare-circle-segments",
+        "--poincare-circle-segments", "--circle-segments",
         nargs="*",
         type=int,
         default=None,
@@ -226,7 +227,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--poincare-freq-bands",
+        "--poincare-freq-bands", "--poincare-freq",
         type=int,
         default=None,
         help=(
@@ -235,19 +236,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--poincare-freq-bands-snr",
-        type=int,
-        default=None,
+        "--poincare-freq-bands-snr", "--poincare-freq-snr",
+        type=int, default=None,
         help="Split Poincare frequency subbands by equal SNR weight into N bands.",
     )
     parser.add_argument(
-        "--poincare-freq-bands-min-channels",
+        "--poincare-freq-bands-min-channels", "--poincare-min-chan",
         type=int,
         default=4,
         help="Minimum channels per Poincare frequency subband (default: 4)",
     )
     parser.add_argument(
-        "--poincare-freq-bands-manual",
+        "--poincare-freq-bands-manual", "--poincare-freq-manual",
         action="store_true",
         help="Manually select Poincare frequency subbands (interactive).",
     )
@@ -326,7 +326,7 @@ def main() -> None:
         help="Number of frequency bins after --time-avg (default: no binning)",
     )
     parser.add_argument(
-        "--exclude-edge-bins",
+        "--exclude-edge-bins", "--edge-bins",
         type=int,
         default=0,
         help=(
@@ -369,8 +369,11 @@ def main() -> None:
         default=1e15,
         help="Plasma-screen scale l_screen in cm for delta(n_e, B_parallel)",
     )
+    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
 
     args = parser.parse_args()
+
+    set_pub_col(args.pub_col)
 
     stokes_axis = 0
     time_axis = 1

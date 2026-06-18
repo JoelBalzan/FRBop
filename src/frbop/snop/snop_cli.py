@@ -10,6 +10,8 @@ from datetime import datetime
 
 import numpy as np
 
+from frbop.utils.plotting import set_pub_col
+
 
 def _patch_scipy_bilby_compat(logger=None):
     """Patch known bilby/scipy symbol mismatches for older bilby releases."""
@@ -363,7 +365,7 @@ def main():
         help="Path to parameters.txt file (default: parameters.txt)"
     )
     parser.add_argument(
-        "--fires-config-dir",
+        "--fires-config-dir", "--fires-config",
         type=str,
         default=None,
         help="Config directory for FIRES (default: ~/Documents/GitHub/FIRES/paper/<frbname>/)"
@@ -450,7 +452,9 @@ def main():
         default=None,
         help="desired dynspec time resolution in ms; converted to nearest valid tN"
     )
+    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
     args = parser.parse_args()
+    set_pub_col(args.pub_col)
 
     # Load parameters
     parameters = load_config(args.parameters)

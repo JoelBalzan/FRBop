@@ -2,7 +2,7 @@
 Shared layout constants and plot-style helpers.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -14,9 +14,18 @@ from frbop.utils.plotting import (
 )
 
 
-def pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0) -> Tuple[float, float]:
-    """Return a publication-friendly figure size for a two-column layout."""
-    return _pub_figsize(single_column=False, height_ratio=height_ratio, min_height=min_height)
+_current_pub_col: Optional[int] = None
+
+
+def set_pub_col(n: Optional[int]) -> None:
+    global _current_pub_col
+    _current_pub_col = n
+
+
+def pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0, ncol: Optional[int] = None) -> Tuple[float, float]:
+    """Return a publication-friendly figure size for the given column count."""
+    effective_ncol = ncol if ncol is not None else _current_pub_col
+    return _pub_figsize(single_column=False, height_ratio=height_ratio, min_height=min_height, ncol=effective_ncol)
 
 
 def plot_style() -> Dict[str, float]:

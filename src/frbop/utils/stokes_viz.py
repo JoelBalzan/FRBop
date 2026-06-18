@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from frbop.utils.plotting import (pub_grid_figsize, savefig_rasterized,
-                                  set_pub_style)
+                                  set_pub_col, set_pub_style)
 
 
 def plot_stokes_cube_summary(
@@ -217,7 +217,9 @@ def main() -> None:
     parser.add_argument("--time-unit", default="ms", help="Time unit label")
     parser.add_argument("-o", "--output", default=None, help="Output figure path")
     parser.add_argument("--show", action="store_true", help="Display the plot interactively")
+    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
     args = parser.parse_args()
+    set_pub_col(args.pub_col)
 
     plot_stokes_cube_summary(
         args.cube,

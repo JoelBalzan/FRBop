@@ -8,7 +8,7 @@ from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_col, set_pub_style
 
 
 def main():
@@ -36,12 +36,14 @@ def main():
     parser.add_argument("--smooth", type=int, default=5, help="Smoothing window for time series (bins)")
     parser.add_argument("--manual-peaks", action="store_true", help="Manually select one or more on-pulse regions by clicking start/end bounds")
     parser.add_argument("--peak-indices", nargs="*", type=int, default=None, help="Manually specify peak indices as pairs: start1 end1 start2 end2 ...")
-    parser.add_argument("--threshold-sigma", type=float, default=3.0, help="Threshold in robust sigmas for pulse gating")
+    parser.add_argument("--threshold-sigma", "--threshold", type=float, default=3.0, help="Threshold in robust sigmas for pulse gating")
     parser.add_argument("--pad", type=int, default=50, help="Padding added to detected pulse window (bins)")
-    parser.add_argument("--fallback-window", type=int, default=200, help="Fallback half-window size if detection fails")
+    parser.add_argument("--fallback-window", "--fallback", type=int, default=200, help="Fallback half-window size if detection fails")
     parser.add_argument("--output", default=None, help="Optional output filename for plot (PNG)")
+    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
 
     args = parser.parse_args()
+    set_pub_col(args.pub_col)
 
     # Load data
     ds = np.load(args.ds)

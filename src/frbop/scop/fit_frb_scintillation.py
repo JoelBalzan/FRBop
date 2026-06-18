@@ -31,7 +31,7 @@ from frbop.utils.peaks import (measure_fwhm_region, parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
-                                  set_pub_style)
+                                  set_pub_col, set_pub_style)
 
 # ---------------------------------------------------------------------------
 # Main
@@ -53,14 +53,14 @@ def main():
                         help="Automatically divide the spectrum into N equal contiguous frequency bands.")
     parser.add_argument("--freq-bands-snr", "--freq-snr",    type=int,   default=None,
                         help="Divide the spectrum into N contiguous bands with equal total S/N.")
-    parser.add_argument("--manual-freq-bands", "--manual-freq",  action="store_true")
-    parser.add_argument("--freq-band-indices", "--freq-indices",  nargs='*', type=int, default=None)
+    parser.add_argument("--manual-freq-bands", "--manual-freq", "--manual-freqs",  action="store_true")
+    parser.add_argument("--freq-band-indices", "--freq-indices", nargs='*', type=int, default=None)
     parser.add_argument("--freq-band-mhz",    nargs='*', type=float, default=None,
                         help="Specify frequency bands by MHz pairs (e.g. 1300 1350 1350 1400). "
                              "Pairs are (low_mhz, high_mhz) for each band.")
-    parser.add_argument("--offpulse-fraction", type=float, default=0.1,
+    parser.add_argument("--offpulse-fraction", "--offpulse", type=float, default=0.1,
                         help="Fraction of the start of the observation to use as off-pulse baseline.")
-    parser.add_argument("--threshold-sigma",   type=float, default=1.0, 
+    parser.add_argument("--threshold-sigma", "--threshold", type=float, default=1.0, 
                         help="Minimum per-channel SNR (model/off-pulse RMS) to include "
                          "a channel in the corrected spectrum (default: 1.0).")
     parser.add_argument("--fmin",   type=float, default=None,
@@ -89,20 +89,22 @@ def main():
     parser.add_argument("--center-freq-mhz",   type=float, default=None)
     parser.add_argument("--mg",                type=float, default=None)
     parser.add_argument("--lg-kpc",            type=float, default=None)
-    parser.add_argument("--estimate-lg-ne2025",action="store_true")
+    parser.add_argument("--estimate-lg-ne2025", "--lg-ne2025", action="store_true")
     parser.add_argument("--gl-deg",            type=float, default=None)
     parser.add_argument("--gb-deg",            type=float, default=None)
     parser.add_argument("--ra-hms",            type=str,   default=None)
     parser.add_argument("--dec-dms",           type=str,   default=None)
     parser.add_argument("--lg-max-dist-kpc",   type=float, default=50.0)
-    parser.add_argument("--scatt-ref-freq-mhz", type=float, default=None,
+    parser.add_argument("--scatt-ref-freq-mhz", "--scatt-freq", type=float, default=None,
                         help="Frequency [MHz] at which to predict τ_scatt, Δν_d, and t_scint "
                              "from the NE2025 Galactic screen (requires --estimate-lg-ne2025). "
                              "Defaults to the observing centre frequency if not supplied.")
     parser.add_argument("--iss-velocity-km-s",  type=float, default=100.0,
                         help="Assumed ISS transverse velocity in km/s for scintillation "
                              "timescale prediction (default: 100 km/s).")
+    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
     args = parser.parse_args()
+    set_pub_col(args.pub_col)
 
     # ------------------------------------------------------------------
     # Load data

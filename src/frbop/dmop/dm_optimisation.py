@@ -7,7 +7,7 @@ from typing import Tuple
 import numpy as np
 
 from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.plotting import set_pub_style
+from frbop.utils.plotting import set_pub_col, set_pub_style
 
 from .optimiser import DMOptimiser
 
@@ -124,13 +124,13 @@ def parse_args() -> argparse.Namespace:
 		help="Minimum consecutive PA samples required to keep a run (default: 3)",
 	)
 	parser.add_argument(
-		"--pa-weight-strength",
+		"--pa-weight-strength", "--pa-weight",
 		type=float,
 		default=1.0,
 		help="Strength of PA fit weighting (power on normalised weights; 1.0 = current behaviour, >1 stronger)",
 	)
 	parser.add_argument(
-		"--pa-fit-post-peak-only",
+		"--pa-fit-post-peak-only", "--pa-post-peak",
 		action="store_true",
 		help="Restrict PA fitting/masking to samples at or after the Stokes-I peak (default uses pre-peak too)",
 	)
@@ -140,12 +140,12 @@ def parse_args() -> argparse.Namespace:
 		help="Enable PA workflow flag (PA methods already run automatically when Q/U are provided; kept for CLI compatibility)",
 	)
 	parser.add_argument(
-		"--nonshrine-kc-smooth",
+		"--nonshrine-kc-smooth", "--nonshrine-smooth",
 		action="store_true",
 		help="Apply SHRINE-style kc low-pass smoothing to PA/LI methods",
 	)
 	parser.add_argument(
-		"--nonshrine-shrine-like-errors",
+		"--nonshrine-shrine-like-errors", "--nonshrine-errors",
 		action="store_true",
 		help="Use SHRINE-style relative-uncertainty error bars for non-SHRINE PA/LI methods without requiring kc smoothing",
 	)
@@ -162,7 +162,7 @@ def parse_args() -> argparse.Namespace:
 		help="Fixed kc for SHRINE structure and S/N methods (default: auto from I(t,DM))",
 	)
 	parser.add_argument(
-		"--nonshrine-kc-minimise-uncertainty",
+		"--nonshrine-kc-minimise-uncertainty", "--nonshrine-min-uncert",
 		action="store_true",
 		help="Find non-SHRINE kc by running SHRINE minimise_uncertainty.py (writes/reads kc.txt in run dir)",
 	)
@@ -192,7 +192,7 @@ def parse_args() -> argparse.Namespace:
 		help="Methods to exclude from run/plots/analysis",
 	)
 	parser.add_argument(
-		"--disable-method-errors",
+		"--disable-method-errors", "--no-method-err",
 		nargs="+",
 		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
@@ -245,6 +245,7 @@ def parse_args() -> argparse.Namespace:
 			"(n_stokes, freq, time)."
 		),
 	)
+	parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
 	return parser.parse_args()
 
 
@@ -259,6 +260,7 @@ def main():
 	print("="*70)
 
 	args = parse_args()
+	set_pub_col(args.pub_col)
 
 	all_error_plot_targets = {
 		"comparison-summary",
