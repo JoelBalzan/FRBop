@@ -245,7 +245,7 @@ def parse_args() -> argparse.Namespace:
 			"(n_stokes, freq, time)."
 		),
 	)
-	parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
+	parser.add_argument('--pub-col', type=float, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
 	return parser.parse_args()
 
 
@@ -260,7 +260,6 @@ def main():
 	print("="*70)
 
 	args = parse_args()
-	set_pub_col(args.pub_col)
 
 	all_error_plot_targets = {
 		"comparison-summary",
@@ -509,6 +508,7 @@ def main():
 	fig_ext = args.ext.strip().lower().lstrip('.') or 'png'
 
 	set_pub_style(use_latex=False)
+	set_pub_col(args.pub_col)
 
 	# Analyze each segment (peak or full dataset)
 	all_results = []

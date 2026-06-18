@@ -25,6 +25,7 @@ def plot_stokes_cube_summary(
     output_file: Optional[str] = None,
     show: bool = False,
     use_pub_style: bool = True,
+    pub_col: int = 1,
 ) -> plt.Figure:
     """Plot I/Q/U/V dynamic spectra with per-Stokes profiles and spectra.
 
@@ -55,6 +56,7 @@ def plot_stokes_cube_summary(
     """
     if use_pub_style:
         set_pub_style(use_latex=False)
+        set_pub_col(pub_col)
 
     def _load_array(path: str) -> np.ndarray:
         if path.endswith(".npy"):
@@ -129,7 +131,7 @@ def plot_stokes_cube_summary(
         stokes_list.append(("V", stokes_v))
 
     n_rows = len(stokes_list)
-    fig = plt.figure(figsize=pub_grid_figsize(n_rows, single_column=False, row_height=2.6))
+    fig = plt.figure(figsize=pub_grid_figsize(n_rows, row_height=2.6))
     gs = fig.add_gridspec(n_rows, 2, width_ratios=[3.2, 1.2], wspace=0.28, hspace=0.35)
 
     def _plot_dyn(ax, data: np.ndarray, title: str) -> None:
@@ -219,7 +221,6 @@ def main() -> None:
     parser.add_argument("--show", action="store_true", help="Display the plot interactively")
     parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
     args = parser.parse_args()
-    set_pub_col(args.pub_col)
 
     plot_stokes_cube_summary(
         args.cube,
@@ -233,6 +234,7 @@ def main() -> None:
         output_file=args.output,
         show=args.show,
         use_pub_style=True,
+        pub_col=args.pub_col,
     )
 
 

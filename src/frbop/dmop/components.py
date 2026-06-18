@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from frbop.dmop.common import add_asym
-from frbop.utils.plotting import (colour_manager, pub_figsize,
-                                  savefig_rasterized)
+from frbop.utils.plotting import colour_manager, savefig_rasterized
 
 
 class ComponentsMixin:

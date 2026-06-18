@@ -212,7 +212,7 @@ class ShrineMixin:
 		np.save(run_dir / f"{run_prefix}_I_at_max.npy", dedispersed_i)
 
 		# Metric-vs-DM plot
-		plt.figure(figsize=pub_figsize(single_column=True, height_ratio=0.6, min_height=3.2))
+		plt.figure(figsize=pub_figsize(height_ratio=0.6))
 		plt.plot(dm_values, metric_values, '-', color='tab:blue', linewidth=1.8)
 		if uncertainty is not None:
 			low_dm = uncertainty.get('uncertainty_low_dm')
@@ -242,7 +242,7 @@ class ShrineMixin:
 
 		# I profile at best DM
 		time_series = np.nansum(dedispersed_i, axis=0)
-		plt.figure(figsize=pub_figsize(single_column=True, height_ratio=0.6, min_height=3.2))
+		plt.figure(figsize=pub_figsize(height_ratio=0.6))
 		plt.plot(time_series, color='k', linewidth=1.3)
 		plt.xlabel('Time index')
 		plt.ylabel('Stokes I (arb.)')

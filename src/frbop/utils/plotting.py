@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import contextlib
+from itertools import cycle
 from typing import Optional
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from cycler import cycler
-from itertools import cycle
 
-
-SINGLE_COLUMN_WIDTH_IN = 4.8
-TWO_COLUMN_WIDTH_IN = 7.1
-THREE_COLUMN_WIDTH_IN = 9.4
-
-_COL_WIDTHS = {1: SINGLE_COLUMN_WIDTH_IN, 2: TWO_COLUMN_WIDTH_IN, 3: THREE_COLUMN_WIDTH_IN}
-_COL_STEP = TWO_COLUMN_WIDTH_IN - SINGLE_COLUMN_WIDTH_IN  # 2.3
+# Full A4 textwidth (PASA template), used as base for ncol-based sizing.
+# pub-col N means "1 of N figures per row", so width = FULL_PAGE_WIDTH_IN / N.
+FULL_PAGE_WIDTH_IN = 6.3
 
 _current_pub_col: Optional[int] = None
+
+
+def get_pub_col() -> Optional[int]:
+    """Return the current publication column count."""
+    return _current_pub_col
 
 
 def set_pub_col(n: Optional[int]) -> None:
@@ -56,43 +57,29 @@ IBM_PALETTE = [
 colour_manager = ColorManager(IBM_PALETTE)
 
 
-def pub_width(*, single_column: bool = True, triple_column: bool = False, ncol: Optional[int] = None) -> float:
-    if ncol is not None:
-        if ncol in _COL_WIDTHS:
-            return _COL_WIDTHS[ncol]
-        return _COL_WIDTHS[1] + _COL_STEP * (ncol - 1)
-    if triple_column:
-        return THREE_COLUMN_WIDTH_IN
-    return SINGLE_COLUMN_WIDTH_IN if single_column else TWO_COLUMN_WIDTH_IN
+def pub_width(ncol: Optional[int] = None) -> float:
+    n = ncol if ncol is not None else (_current_pub_col or 1)
+    return FULL_PAGE_WIDTH_IN / max(n, 1)
+
 
 
 def pub_figsize(
-    *,
-    single_column: bool = True,
-    triple_column: bool = False,
     ncol: Optional[int] = None,
-    height_ratio: float = 0.62,
-    min_height: float = 3.0,
+    height_ratio: float = 1.61,
 ):
     effective_ncol = ncol if ncol is not None else _current_pub_col
-    width = pub_width(single_column=single_column, triple_column=triple_column, ncol=effective_ncol)
-    height = max(min_height, width * height_ratio)
-    return width, height
+    width = pub_width(ncol=effective_ncol)
+    return width, width * height_ratio
 
 
 def pub_grid_figsize(
     n_rows: int,
-    *,
-    single_column: bool = False,
-    triple_column: bool = False,
     ncol: Optional[int] = None,
     row_height: float = 2.5,
     width_scale: float = 1.0,
-    min_height: float = 4.0,
 ):
-    width = pub_width(single_column=single_column, triple_column=triple_column, ncol=ncol) * width_scale
-    height = max(min_height, n_rows * row_height)
-    return width, height
+    width = pub_width(ncol=ncol) * width_scale
+    return width, n_rows * row_height
 
 
 def set_pub_style(use_latex=False):

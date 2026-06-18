@@ -39,7 +39,6 @@ class PlottingMixin:
 
 		figsize = pub_grid_figsize(
 		    n_rows=n_methods + 1,
-		    single_column=False,
 		    row_height=2.7,
 		    width_scale=1.8,
 		)
@@ -571,7 +570,7 @@ class PlottingMixin:
 		save_path : str, optional
 			Path to save figure
 		"""
-		base_width, base_height = pub_figsize(single_column=True, height_ratio=0.75, min_height=3.4)
+		base_width, base_height = pub_figsize(height_ratio=0.75)
 		row_height = 2.6
 		fig_height = max(base_height, row_height * len(metrics))
 		fig, axes = plt.subplots(len(metrics), 1, figsize=(base_width, fig_height))

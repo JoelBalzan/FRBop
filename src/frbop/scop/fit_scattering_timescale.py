@@ -40,10 +40,9 @@ def main():
     parser.add_argument("--pad", type=int, default=50, help="Padding added to detected pulse window (bins)")
     parser.add_argument("--fallback-window", "--fallback", type=int, default=200, help="Fallback half-window size if detection fails")
     parser.add_argument("--output", default=None, help="Optional output filename for plot (PNG)")
-    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
+    parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
 
     args = parser.parse_args()
-    set_pub_col(args.pub_col)
 
     # Load data
     ds = np.load(args.ds)
@@ -220,9 +219,9 @@ def main():
             # Optional plot with FWHM markers (publication style)
             if args.output:
                 set_pub_style(use_latex=False)
+                set_pub_col(args.pub_col)
 
-                # Use single-column width by default so figure fits in a 2-col LaTeX layout
-                fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.7, min_height=3.0))
+                fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.7))
                 ax.plot(t_burst, pulse_profile, 'k-', label='Data')
                 fit_y = scattered_gaussian(t_burst, *popt_t)
                 ax.plot(t_burst, fit_y, 'r--', label=rf'Fit: $\tau$ = {t_scatt_fit_ms:.3f} ms')

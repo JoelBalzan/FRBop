@@ -22,9 +22,9 @@ from scipy.optimize import curve_fit
 from frbop.utils.peaks import (select_frequency_bands_manual,
 							   split_frequency_bands_equal,
 							   split_frequency_bands_equal_snr)
-from frbop.utils.plotting import IBM_PALETTE, pub_figsize, savefig_rasterized
+from frbop.utils.plotting import FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize, savefig_rasterized
 
-from .constants import SINGLE_COLUMN_WIDTH_IN, TWO_COLUMN_WIDTH_IN, plot_style
+from .constants import plot_style
 from .fitter import RMFitter
 from .physics import (depolarising_medium_delta_ne_b_parallel,
 					  sigma_rm_detection_threshold,
@@ -540,7 +540,7 @@ def plot_poincare_sphere(
 
 	style = plot_style()
 
-	fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+	fig = plt.figure(figsize=pub_figsize(height_ratio=0.92))
 	ax  = fig.add_subplot(111, projection='3d')
 
 	u_s = np.linspace(0, 2 * np.pi, 100)
@@ -780,7 +780,7 @@ def plot_poincare_sphere_frequency(
 
 	style = plot_style()
 
-	fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+	fig = plt.figure(figsize=pub_figsize(height_ratio=0.92))
 	ax = fig.add_subplot(111, projection='3d')
 
 	u_s = np.linspace(0, 2 * np.pi, 100)
@@ -1120,10 +1120,9 @@ def plot_poincare_projections_frequency(
 		n_proj = len(projections)
 		ncols = 3 if n_proj > 4 else 2
 		nrows = int(np.ceil(n_proj / ncols))
-		min_height = 8.0 if n_proj > 4 else 7.0
 		fig, axes = plt.subplots(
 			nrows, ncols,
-			figsize=pub_figsize(single_column=False, height_ratio=1.0, min_height=min_height),
+			figsize=pub_figsize(height_ratio=1.0),
 		)
 		axes = np.atleast_1d(axes).ravel()
 		is_all = True
@@ -1133,7 +1132,7 @@ def plot_poincare_projections_frequency(
 				"Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho, equirect, robin"
 			)
 		projections = [projection_map[proj_key]]
-		fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(single_column=False, height_ratio=0.75, min_height=4.8))
+		fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=0.75))
 		axes = [ax_single]
 		is_all = False
 
@@ -1552,7 +1551,7 @@ def plot_poincare_sphere_subbands(
 		return
 
 	style = plot_style()
-	fig = plt.figure(figsize=pub_figsize(single_column=False, height_ratio=0.92, min_height=6.2))
+	fig = plt.figure(figsize=pub_figsize(height_ratio=0.92))
 	ax = fig.add_subplot(111, projection='3d')
 
 	u_s = np.linspace(0, 2 * np.pi, 100)
@@ -1965,10 +1964,9 @@ def plot_poincare_projections(
 		n_proj = len(projections)
 		ncols = 3 if n_proj > 4 else 2
 		nrows = int(np.ceil(n_proj / ncols))
-		min_height = 8.0 if n_proj > 4 else 7.0
 		fig, axes = plt.subplots(
 			nrows, ncols,
-			figsize=pub_figsize(single_column=False, height_ratio=1.0, min_height=min_height),
+			figsize=pub_figsize(height_ratio=1.0),
 		)
 		axes = np.atleast_1d(axes).ravel()
 		is_all = True
@@ -1978,7 +1976,7 @@ def plot_poincare_projections(
 				"Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho, equirect, robin"
 			)
 		projections = [projection_map[proj_key]]
-		fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(single_column=False, height_ratio=0.75, min_height=4.8))
+		fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=0.75))
 		axes = [ax_single]
 		is_all = False
 
@@ -2171,13 +2169,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 		peak_regions = [(0, len(time_array) - 1)]
 		n_peaks = 1
 
-	rm_ts_height = max(6.8, 2.25 * 3)
 	fig = plt.figure(
-		figsize=pub_figsize(
-			single_column=(n_peaks == 1),
-			height_ratio=rm_ts_height / (SINGLE_COLUMN_WIDTH_IN if n_peaks == 1 else TWO_COLUMN_WIDTH_IN),
-			min_height=rm_ts_height,
-		)
+		figsize=pub_figsize()
 	)
 	gs = GridSpec(3, n_peaks, figure=fig, hspace=0, wspace=0.3)
 	axes = np.empty((3, n_peaks), dtype=object)
@@ -2328,7 +2321,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 			if _peak_bounds is not None:
 				_peak_sel = np.zeros(len(times_ms), dtype=bool)
 				for si, ei in _peak_bounds:
-					_peak_sel |= (times_ms >= full_time[si] * 1e3 - 1.0) & (times_ms <= full_time[ei] * 1e3 + 1.0)
+					_clip_ei = min(ei, len(full_time) - 1)
+				_peak_sel |= (times_ms >= full_time[si] * 1e3 - 1.0) & (times_ms <= full_time[_clip_ei] * 1e3 + 1.0)
 				mask_pa &= _peak_sel
 
 			if n_pa_bins > 0 and np.any(mask_pa):
@@ -2402,7 +2396,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
 		ax_pa.grid(True, alpha=0.3)
-		ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		#ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 		ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
 
 		# ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
@@ -2560,9 +2554,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 				final_handles.append(h)
 				final_labels.append(lab)
 				seen.add(lab)
-			if final_handles:
-				ax_top.legend(final_handles, final_labels, fontsize=style['legend'],
-							  loc='best', borderaxespad=0.9)
+			#if final_handles:
+				#ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 		ax_top.tick_params(axis='x', labelbottom=False)
 
 		# ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
@@ -2701,7 +2694,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
 		ax3.grid(True, alpha=0.3)
-		ax3.legend(loc='upper right', fontsize=style['legend'], borderaxespad=0.9)
+		#ax3.legend(loc='upper right', fontsize=style['legend'], borderaxespad=0.9)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
 	if _xlim_full_time is not None and len(_xlim_full_time) > 1:
@@ -2753,15 +2746,10 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 	"""
 	style = plot_style()
 	n_rows = 3 if show_frac_panel else 2
-	fig_height = 7.4 if show_frac_panel else 5.2
 	fig, axes = plt.subplots(
 		n_rows,
 		1,
-		figsize=pub_figsize(
-			single_column=False,
-			height_ratio=fig_height / TWO_COLUMN_WIDTH_IN,
-			min_height=fig_height,
-		),
+		figsize=pub_figsize(),
 		sharex=False,
 	)
 	pol_frac_err_arr = None if pol_frac_err is None else np.asarray(pol_frac_err, dtype=float)
@@ -3375,9 +3363,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 		1,
 		1,
 		figsize=pub_figsize(
-			single_column=True,
 			height_ratio=0.75,
-			min_height=3.2,
 		),
 	)
 
@@ -3571,7 +3557,7 @@ def plot_polarisation_fraction_acf_ccf(
 	fig, axes = plt.subplots(
 		3,
 		1,
-		figsize=pub_figsize(single_column=False, height_ratio=1.05, min_height=7.2),
+		figsize=pub_figsize(height_ratio=1.05),
 		sharex=False,
 	)
 

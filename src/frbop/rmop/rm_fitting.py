@@ -369,11 +369,9 @@ def main() -> None:
         default=1e15,
         help="Plasma-screen scale l_screen in cm for delta(n_e, B_parallel)",
     )
-    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
+    parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
 
     args = parser.parse_args()
-
-    set_pub_col(args.pub_col)
 
     stokes_axis = 0
     time_axis = 1
@@ -405,6 +403,7 @@ def main() -> None:
             )
 
     set_pub_style(use_latex=False)
+    set_pub_col(args.pub_col)
 
     print("=" * 60)
     print("RM FITTING FOR STOKES IQUV DATA")

@@ -7,31 +7,29 @@ from typing import Dict, Optional, Tuple
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-from frbop.utils.plotting import (
-    SINGLE_COLUMN_WIDTH_IN,
-    TWO_COLUMN_WIDTH_IN,
-    pub_figsize as _pub_figsize,
-)
-
-
-_current_pub_col: Optional[int] = None
+from frbop.utils.plotting import pub_figsize as _pub_figsize, set_pub_col as _set_pub_col_utils
 
 
 def set_pub_col(n: Optional[int]) -> None:
-    global _current_pub_col
-    _current_pub_col = n
+    """Set publication column count, delegating to the global utils setting."""
+    _set_pub_col_utils(n)
 
 
-def pub_figsize(height_ratio: float = 0.62, min_height: float = 3.0, ncol: Optional[int] = None) -> Tuple[float, float]:
+def pub_figsize(height_ratio: float = 0.62, ncol: Optional[int] = None) -> Tuple[float, float]:
     """Return a publication-friendly figure size for the given column count."""
-    effective_ncol = ncol if ncol is not None else _current_pub_col
-    return _pub_figsize(single_column=False, height_ratio=height_ratio, min_height=min_height, ncol=effective_ncol)
+    return _pub_figsize(ncol=ncol, height_ratio=height_ratio)
+
+
+def _pub_scale() -> float:
+    """Stub: always returns 1.0 (font/line scaling removed)."""
+    return 1.0
 
 
 def plot_style() -> Dict[str, float]:
     """Compatibility wrapper for plotting style used by RM plotting functions."""
     base_font_size = float(plt.rcParams.get("font.size", 10))
     font_scalings = mpl.font_manager.font_scalings
+    sc = _pub_scale()
 
     def _resolve_font_size(value: object, fallback: float) -> float:
         if isinstance(value, (int, float)):
@@ -49,4 +47,7 @@ def plot_style() -> Dict[str, float]:
         "legend": _resolve_font_size(plt.rcParams.get("legend.fontsize", 10), 10.0),
         "annotation": base_font_size,
         "line": float(plt.rcParams.get("lines.linewidth", 1.4)),
+        "marker": float(plt.rcParams.get("lines.markersize", 6)),
+        "cap": float(plt.rcParams.get("errorbar.capsize", 3)),
+        "scale": sc,
     }

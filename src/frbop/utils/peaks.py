@@ -28,7 +28,7 @@ def select_peaks_manual(
             f"time_axis length ({time_axis.size}) does not match profile length ({profile.size})"
         )
 
-    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
+    fig, ax = plt.subplots(figsize=pub_figsize( height_ratio=0.55))
     ax.plot(time_axis, profile, color='k', linewidth=1)
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -106,7 +106,7 @@ def select_peak_fwhm_manual(
             f"time_axis length ({time_axis.size}) does not match profile length ({profile.size})"
         )
 
-    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
+    fig, ax = plt.subplots(figsize=pub_figsize( height_ratio=0.55))
     ax.plot(time_axis, profile, color="k", linewidth=1)
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -275,7 +275,7 @@ def select_frequency_bands_manual(
 
     if dspec is not None:
         fig, (ax0, ax1) = plt.subplots(
-            1, 2, figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2),
+            1, 2, figsize=pub_figsize( height_ratio=0.55),
             sharey=True,
             gridspec_kw={'width_ratios': [3, 1]},
         )
@@ -327,7 +327,7 @@ def select_frequency_bands_manual(
         fig.canvas.mpl_connect('motion_notify_event', on_move)
         fig.canvas.mpl_connect('button_press_event', on_click)
     else:
-        fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.55, min_height=3.2))
+        fig, ax = plt.subplots(figsize=pub_figsize( height_ratio=0.55))
         ax.plot(freq_axis, spectrum, color='k', linewidth=1)
         ax.set_title(title)
         ax.set_xlabel(x_label)

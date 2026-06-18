@@ -102,9 +102,8 @@ def main():
     parser.add_argument("--iss-velocity-km-s",  type=float, default=100.0,
                         help="Assumed ISS transverse velocity in km/s for scintillation "
                              "timescale prediction (default: 100 km/s).")
-    parser.add_argument('--pub-col', type=int, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
+    parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
     args = parser.parse_args()
-    set_pub_col(args.pub_col)
 
     # ------------------------------------------------------------------
     # Load data
@@ -886,9 +885,10 @@ def main():
     lag_zoom = args.lag_zoom if args.lag_zoom is not None else args.fit_max_lag
 
     # Spectrum + normalised ACF
-    fig, ax = plt.subplots(1, 1, figsize=pub_figsize(single_column=True, height_ratio=1.0, min_height=4.5))
+    fig, ax = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=1.0))
 
     set_pub_style(use_latex=False)
+    set_pub_col(args.pub_col)
 
     xabs = np.abs(lags_plot_sym)
 

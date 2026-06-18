@@ -43,7 +43,7 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=No
 
     set_pub_style(use_latex=False)
 
-    fig, ax = plt.subplots(figsize=pub_figsize(single_column=True, height_ratio=0.65, min_height=3.4))
+    fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.65))
     ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')
     ax.set_xlabel("Distance from observer (kpc)")
     ax.set_ylabel(r"$C_n^2$ (m$^{-20/3}$)")
