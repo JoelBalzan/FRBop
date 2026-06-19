@@ -633,7 +633,7 @@ def plot_poincare_sphere(
 				continue
 			arc = fit['arc_xyz']
 			ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
-					linestyle='-', linewidth=2.2, alpha=0.95,
+					linestyle='-', linewidth=style['line'], alpha=0.95,
 					color='black', zorder=140)
 
 	if len(q_filt) >= 1:
@@ -869,7 +869,7 @@ def plot_poincare_sphere_frequency(
 				continue
 			arc = fit['arc_xyz']
 			ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
-					linestyle='-', linewidth=2.2, alpha=0.95,
+					linestyle='-', linewidth=style['line'], alpha=0.95,
 					color='black', zorder=140)
 
 	if len(q_filt) >= 1:
@@ -1298,7 +1298,7 @@ def plot_poincare_projections_frequency(
 					ty = np.asarray(ty, dtype=float)
 					ok = np.isfinite(tx) & np.isfinite(ty)
 					if np.nansum(ok) >= 2:
-						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=2.2,
+						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line'],
 								color='black', alpha=0.95, zorder=2)
 
 		ax.tick_params(axis='both', labelsize=style['tick'])
@@ -1651,7 +1651,7 @@ def plot_poincare_sphere_subbands(
 					continue
 				arc = fit['arc_xyz']
 				ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
-						linestyle='-', linewidth=2.2, alpha=0.95,
+						linestyle='-', linewidth=style['line'], alpha=0.95,
 						color='black', zorder=140)
 
 		label = (
@@ -2107,7 +2107,7 @@ def plot_poincare_projections(
 					ty = np.asarray(ty, dtype=float)
 					ok = np.isfinite(tx) & np.isfinite(ty)
 					if np.nansum(ok) >= 2:
-						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=2.2,
+						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line'],
 								color='black', alpha=0.95, zorder=2)
 
 		ax.tick_params(axis='both', labelsize=style['tick'])
@@ -2370,9 +2370,9 @@ def plot_rm_time_series(time_array: np.ndarray,
 				)
 				if np.any(bin_ok):
 					ax_pa.errorbar(bc[bin_ok], pa_b[bin_ok], yerr=pa_be[bin_ok], fmt='o', color='r', ecolor='gray',
-								   markersize=4, capsize=2, label='PA', zorder=2)
+								   markersize=3, capsize=2, label='PA', zorder=2)
 					ax_pa.errorbar(bc[bin_ok], ea_b[bin_ok], yerr=ea_be[bin_ok], fmt='o', color='b', ecolor='gray',
-								   markersize=4, capsize=2, label='EA', zorder=1)
+								   markersize=3, capsize=2, label='EA', zorder=1)
 
 			else:
 				def scatter_runs(x, y, axis, **kwargs):
@@ -2438,12 +2438,12 @@ def plot_rm_time_series(time_array: np.ndarray,
 			markeredgecolor='white', markeredgewidth=1,
 			label='RM')
 
-		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=1.5, label='I')
+		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=style['line'], label='I')
 		ax_top.set_ylabel(r'$S$ [arb.]', fontsize=style['label'])
 		ax_top.tick_params(axis='y', labelsize=style['tick'])
 		ax_top.tick_params(right=False, labelright=False)
-		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=1.5, label='L', alpha=1)
-		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=1.5, label='V', alpha=1)
+		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=style['line'], label='L', alpha=1)
+		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=style['line'], label='V', alpha=1)
 
 		if time_series_data is not None and freq_hz is not None and not rm_results.get('is_binned', False):
 			if time_series_data['I'].shape[0] == len(time_array):
@@ -2631,9 +2631,9 @@ def plot_rm_time_series(time_array: np.ndarray,
 						if seg.size == 0:
 							continue
 						#ax3.plot(full_time[seg] * 1e3, P_frac_full[seg], color='grey', linewidth=1, alpha=0.5)
-						ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='salmon', linewidth=1, alpha=0.5)
+						ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='salmon', linewidth=style['line'], alpha=0.5)
 						if 'V' in time_series_data:
-							ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='lightblue', linewidth=1, alpha=0.5)
+							ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='lightblue', linewidth=style['line'], alpha=0.5)
 
 				# Overlay binned pol fraction if available
 				if full_time is not None:
@@ -2649,12 +2649,12 @@ def plot_rm_time_series(time_array: np.ndarray,
 					pf_err = _bin_frac_err(bt, p_full_masked)
 					lf_err = _bin_frac_err(bt, l_full_masked)
 					vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
-					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=2, zorder=1)
+					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=style['line'], zorder=1)
 					ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label='L/I',
 								 color='r', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
 					if 'V_frac_bin' in rm_results and vf_bin.size:
-						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=2, zorder=1)
+						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=style['line'], zorder=1)
 						if vf_err is not None:
 							ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label='V/I',
 										 color='b', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
@@ -2675,10 +2675,10 @@ def plot_rm_time_series(time_array: np.ndarray,
 				return float(np.nanmin(flat)), float(np.nanmax(flat))
 
 			use_arrays: List[np.ndarray] = []
-			sig_idx = full_indices[signal_mask]
-			use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
-			if 'V' in time_series_data:
-				use_arrays.append(V_frac_full[sig_idx])
+			#sig_idx = full_indices[signal_mask]
+			#use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
+			#if 'V' in time_series_data:
+			#	use_arrays.append(V_frac_full[sig_idx])
 			if bin_mask is not None and np.any(bin_mask):
 				use_arrays.extend([pf_bin[bin_mask], lf_bin[bin_mask]])
 				if 'V_frac_bin' in rm_results and vf_bin.size:
@@ -2837,13 +2837,13 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 			label_line = f'RM = {rm_peak:.2f} ± {rm_err:.2f} rad/m² (fit: {rm_fit:.2f})'
 		else:
 			label_line = f'RM = {rm_peak:.2f} rad/m² (fit: {rm_fit:.2f})'
-		ax1.plot(lambda_sq_model, pol_angle_model, 'r-', linewidth=2, label=label_line)
+		ax1.plot(lambda_sq_model, pol_angle_model, 'r-', linewidth=style['line'], label=label_line)
 	else:
 		if rm_err > 0:
 			label_line = f'RM = {rm_peak:.2f} ± {rm_err:.2f} rad/m² (insufficient masked PA points for fit)'
 		else:
 			label_line = f'RM = {rm_peak:.2f} rad/m² (insufficient masked PA points for fit)'
-		ax1.plot([], [], 'r-', linewidth=2, label=label_line)
+		ax1.plot([], [], 'r-', linewidth=style['line'], label=label_line)
 
 	ax1.set_xlabel('λ² (m²)', fontsize=style['label'])
 	ax1.set_ylabel('Polarisation Angle (deg.)', fontsize=style['label'])
@@ -2855,7 +2855,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 	ax2 = axes[1]
 	ax2.plot(rm_synthesis_result['rm_values'],
 			 rm_synthesis_result['rm_amplitude'],
-			 'k-', linewidth=1.5)
+			 'k-', linewidth=style['line'])
 	rm_err = rm_synthesis_result.get('rm_clean_err', rm_synthesis_result.get('noise_estimate', 0) * 2)
 	if rm_err > 0:
 		ax2.axvspan(rm_peak - rm_err, rm_peak + rm_err, color='red', alpha=0.1,
@@ -2895,7 +2895,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 		l_low = np.where(l_mask_sorted, l_sorted - sigma_l_sorted, np.nan)
 		l_high = np.where(l_mask_sorted, l_sorted + sigma_l_sorted, np.nan)
 
-		ax3.plot(freq_sorted, l_plot, 'r-', linewidth=2, label='L/I')
+		ax3.plot(freq_sorted, l_plot, 'r-', linewidth=style['line'], label='L/I')
 		ax3.fill_between(freq_sorted, l_low, l_high, color='r', alpha=0.18, linewidth=0)
 
 		if fitter.stokes_v is not None:
@@ -2920,7 +2920,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 			v_low = np.where(v_mask_sorted, v_sorted - sigma_v_sorted, np.nan)
 			v_high = np.where(v_mask_sorted, v_sorted + sigma_v_sorted, np.nan)
 
-			ax3.plot(freq_sorted, v_plot, 'b-', linewidth=2, label='V/I')
+			ax3.plot(freq_sorted, v_plot, 'b-', linewidth=style['line'], label='V/I')
 			ax3.fill_between(freq_sorted, v_low, v_high, color='b', alpha=0.14, linewidth=0)
 
 		ax3.set_xlabel('Frequency [MHz]', fontsize=style['label'])
@@ -3387,12 +3387,12 @@ def plot_burns_law_fits(fitter: RMFitter,
 		y_burn = burn_model(x_model, *burn_popt)
 		#burn_label = r"$P_{\mathrm{Burn}}(\lambda)=\exp\left(-2\sigma_{\mathrm{RM}}^2\lambda^4\right)$"
 		burn_label = r"$P_{\mathrm{Burn}}(\lambda)$"
-		ax.plot(freq_model_mhz, y_burn, color='k', linewidth=2, linestyle='--', label=burn_label, zorder=20)
+		ax.plot(freq_model_mhz, y_burn, color='k', linewidth=style['line'], linestyle='--', label=burn_label, zorder=20)
 
 	if mod_popt is not None and best_linear_model == 'P_mod-Burn':
 		y_mod = modified_burn_model(x_model, *mod_popt)
 		mod_label = r"$P_{\mathrm{mod-Burn}}(\lambda)=P_i\exp\left(-2\sigma_{\mathrm{RM}}^{\prime\,2}\lambda^4\right)$"
-		ax.plot(freq_model_mhz, y_mod, color='k', linewidth=2, linestyle='--', label=mod_label, zorder=20)
+		ax.plot(freq_model_mhz, y_mod, color='k', linewidth=style['line'], linestyle='--', label=mod_label, zorder=20)
 
 	if const_popt is not None and best_linear_model == 'P_const':
 		y_const = constant_model(x_model, *const_popt)
@@ -3426,7 +3426,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			ax.plot(
 				freq_model_mhz, y_cl,
 				color='#fe6100',
-				linewidth=1.8,
+				linewidth=style['line'],
 				linestyle='--',
 				#label=r"$m_C(\lambda^2)=C_0 + C_1\lambda^2$", zorder=20
 				label=r"$m_C(\lambda^2)$", zorder=20
@@ -3437,7 +3437,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			ax.plot(
 				freq_model_mhz, y_cs,
 				color='#fe6100',
-				linewidth=1.8,
+				linewidth=style['line'],
 				linestyle='--',
 				label=r"$m_C(\lambda^2)=C_0 + A\sin\left(2\left(\phi_0 + \beta\lambda^2\right)\right)$", zorder=20
 			)
@@ -3447,7 +3447,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 			ax.plot(
 				freq_model_mhz, y_cc,
 				color='#fe6100',
-				linewidth=1.8,
+				linewidth=style['line'],
 				linestyle='--',
 				label=r"$m_C(\lambda^2)=C_0$", zorder=20
 			)
@@ -3562,10 +3562,10 @@ def plot_polarisation_fraction_acf_ccf(
 	)
 
 	axes[0].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
-	axes[0].plot(grid, q_grid, color='#6a3d9a', linewidth=1.2, label='Q/I')
-	axes[0].plot(grid, u_grid, color='#ff7f00', linewidth=1.2, label='U/I')
-	axes[0].plot(grid, q_trend, color='#6a3d9a', linewidth=1.0, linestyle='--', alpha=0.45, label='Q/I trend')
-	axes[0].plot(grid, u_trend, color='#ff7f00', linewidth=1.0, linestyle='--', alpha=0.45, label='U/I trend')
+	axes[0].plot(grid, q_grid, color='#6a3d9a', linewidth=style['line'], label='Q/I')
+	axes[0].plot(grid, u_grid, color='#ff7f00', linewidth=style['line'], label='U/I')
+	axes[0].plot(grid, q_trend, color='#6a3d9a', linewidth=style['line'], linestyle='--', alpha=0.45, label='Q/I trend')
+	axes[0].plot(grid, u_trend, color='#ff7f00', linewidth=style['line'], linestyle='--', alpha=0.45, label='U/I trend')
 	axes[0].set_ylabel('Q/I, U/I', fontsize=style['label'])
 	axes[0].legend(fontsize=style['legend'], loc='best')
 	axes[0].grid(True, alpha=0.3)
@@ -3573,32 +3573,32 @@ def plot_polarisation_fraction_acf_ccf(
 
 	axes[1].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
 	if v_grid is not None and v_resid is not None and v_trend is not None:
-		axes[1].plot(grid, l_grid, color='r', linewidth=1.2, label='L/I')
-		axes[1].plot(grid, v_grid, color='b', linewidth=1.2, label='V/I')
-		axes[1].plot(grid, l_trend, color='r', linewidth=1.0, linestyle='--', alpha=0.45, label='L/I trend')
-		axes[1].plot(grid, v_trend, color='b', linewidth=1.0, linestyle='--', alpha=0.45, label='V/I trend')
+		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label='L/I')
+		axes[1].plot(grid, v_grid, color='b', linewidth=style['line'], label='V/I')
+		axes[1].plot(grid, l_trend, color='r', linewidth=style['line'], linestyle='--', alpha=0.45, label='L/I trend')
+		axes[1].plot(grid, v_trend, color='b', linewidth=style['line'], linestyle='--', alpha=0.45, label='V/I trend')
 		axes[1].set_ylabel('L/I, V/I', fontsize=style['label'])
 		axes[1].legend(fontsize=style['legend'], loc='best')
 	else:
-		axes[1].plot(grid, l_grid, color='r', linewidth=1.2, label='L/I')
-		axes[1].plot(grid, l_trend, color='r', linewidth=1.0, linestyle='--', alpha=0.45, label='L/I trend')
+		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label='L/I')
+		axes[1].plot(grid, l_trend, color='r', linewidth=style['line'], linestyle='--', alpha=0.45, label='L/I trend')
 		axes[1].text(0.02, 0.88, 'No valid V/I data', ha='left', va='top', transform=axes[1].transAxes)
 		axes[1].set_ylabel('L/I', fontsize=style['label'])
 	axes[1].grid(True, alpha=0.3)
 	axes[1].tick_params(axis='both', labelsize=style['tick'])
 
 	axes[2].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
-	axes[2].plot(lags, acf_q, color='#6a3d9a', linewidth=1.3, label='ACF Q/I')
-	axes[2].plot(lags, acf_u, color='#ff7f00', linewidth=1.3, label='ACF U/I')
-	axes[2].plot(lags, acf_l, color='r', linewidth=1.5, label='ACF L/I')
+	axes[2].plot(lags, acf_q, color='#6a3d9a', linewidth=style['line'], label='ACF Q/I')
+	axes[2].plot(lags, acf_u, color='#ff7f00', linewidth=style['line'], label='ACF U/I')
+	axes[2].plot(lags, acf_l, color='r', linewidth=style['line'], label='ACF L/I')
 	axes[2].axhline(conf, color='0.4', linestyle=':', linewidth=1.0, label='95% band')
 	axes[2].axhline(-conf, color='0.4', linestyle=':', linewidth=1.0)
 	if acf_v is not None:
-		axes[2].plot(lags, acf_v, color='b', linewidth=1.5, label='ACF V/I')
+		axes[2].plot(lags, acf_v, color='b', linewidth=style['line'], label='ACF V/I')
 	if ccf_qu is not None:
-		axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=1.2, linestyle='--', label='CCF Q/I vs U/I')
+		axes[2].plot(lags, ccf_qu, color='#4d4d4d', linewidth=style['line'], linestyle='--', label='CCF Q/I vs U/I')
 	if ccf_lv is not None:
-		axes[2].plot(lags, ccf_lv, color='k', linewidth=1.2, linestyle='--', label='CCF L/I vs V/I')
+		axes[2].plot(lags, ccf_lv, color='k', linewidth=style['line'], linestyle='--', label='CCF L/I vs V/I')
 	axes[2].set_xlabel(r'Lag in Frequency [MHz]', fontsize=style['label'])
 	axes[2].set_ylabel('Correlation', fontsize=style['label'])
 	axes[2].grid(True, alpha=0.3)

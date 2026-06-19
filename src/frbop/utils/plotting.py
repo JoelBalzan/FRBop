@@ -106,7 +106,7 @@ def set_pub_style(use_latex=False):
 
         # Lines/ticks
         "axes.linewidth": 0.8,
-        "lines.linewidth": 1.5,
+        "lines.linewidth": 1.0,
         "xtick.major.width": 0.8,
         "ytick.major.width": 0.8,
         "xtick.direction": "in",

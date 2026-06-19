@@ -20,16 +20,10 @@ def pub_figsize(height_ratio: float = 0.62, ncol: Optional[int] = None) -> Tuple
     return _pub_figsize(ncol=ncol, height_ratio=height_ratio)
 
 
-def _pub_scale() -> float:
-    """Stub: always returns 1.0 (font/line scaling removed)."""
-    return 1.0
-
-
 def plot_style() -> Dict[str, float]:
     """Compatibility wrapper for plotting style used by RM plotting functions."""
     base_font_size = float(plt.rcParams.get("font.size", 10))
     font_scalings = mpl.font_manager.font_scalings
-    sc = _pub_scale()
 
     def _resolve_font_size(value: object, fallback: float) -> float:
         if isinstance(value, (int, float)):
@@ -49,5 +43,4 @@ def plot_style() -> Dict[str, float]:
         "line": float(plt.rcParams.get("lines.linewidth", 1.4)),
         "marker": float(plt.rcParams.get("lines.markersize", 6)),
         "cap": float(plt.rcParams.get("errorbar.capsize", 3)),
-        "scale": sc,
     }
