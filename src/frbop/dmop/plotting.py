@@ -42,6 +42,7 @@ class PlottingMixin:
 		    ncol=1,
 		    n_rows=n_methods + 1,
 		    row_height=target_h / (n_methods + 1),
+			width_scale=1.2,
 		)
 		fig, axes = plt.subplots(
 			n_methods + 1,
@@ -65,13 +66,13 @@ class PlottingMixin:
 			'min_uncertainty': 'Min. Uncertainty',
 			'pa_slope': 'PA',
 			'pa_slope_shrine': 'PA (SHRINE)',
-			'l_i_mean': 'L/I mean',
+			'l_i_mean': r'$\Pi_L$ mean',
 		}
-		fs_title = 16
-		fs_label = 14
-		fs_tick = 12
-		fs_legend = 11
-		fs_overlay = 12
+		fs_title = plt.rcParams.get('axes.titlesize', 11)
+		fs_label = plt.rcParams.get('axes.labelsize', 11)
+		fs_tick = plt.rcParams.get('xtick.labelsize', 10)
+		fs_legend = plt.rcParams.get('legend.fontsize', 9)
+		fs_overlay = plt.rcParams.get('axes.labelsize', 11)
 		fs_labelpad = 2
 		
 		# Plot original data

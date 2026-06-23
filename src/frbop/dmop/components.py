@@ -92,7 +92,8 @@ class ComponentsMixin:
 			1,
 			1,
 			figsize=pub_figsize(
-				height_ratio=0.75,
+				ncol=2,
+				height_ratio=0.6,
 			),
 		)
 
@@ -366,7 +367,8 @@ class ComponentsMixin:
 			1,
 			1,
 			figsize=pub_figsize(
-				height_ratio=0.75,
+				ncol=2,
+				height_ratio=0.6,
 			),
 		)
 
