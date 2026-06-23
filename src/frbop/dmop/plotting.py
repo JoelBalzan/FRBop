@@ -37,10 +37,11 @@ class PlottingMixin:
 		n_methods = len(results)
 		has_qu = self.stokes_q is not None and self.stokes_u is not None
 
+		_, target_h = pub_figsize(ncol=1)
 		figsize = pub_grid_figsize(
+		    ncol=1,
 		    n_rows=n_methods + 1,
-		    row_height=2.7,
-		    width_scale=1.8,
+		    row_height=target_h / (n_methods + 1),
 		)
 		fig, axes = plt.subplots(
 			n_methods + 1,
@@ -117,7 +118,7 @@ class PlottingMixin:
 			vmin=vmin0,
 			vmax=vmax0,
 		)
-		axes[0, 0].set_title(f"{label}: Original (SHRINE structure-maximised)\n" + rf"Input DM = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
+		axes[0, 0].set_title(f"Original (SHRINE structure-maximised)\n" + rf"Input DM = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
 		axes[0, 0].set_ylabel('Frequency [MHz]')
 		axes[0, 0].set_xlabel('Time [ms]')
 		axes[0, 0].title.set_fontsize(fs_title)

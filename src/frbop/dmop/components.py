@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from frbop.dmop.common import add_asym
-from frbop.utils.plotting import colour_manager, savefig_rasterized
+from frbop.utils.plotting import colour_manager, savefig_rasterized, pub_figsize
 
 
 class ComponentsMixin:
@@ -88,7 +88,13 @@ class ComponentsMixin:
 		uncertainty_rank_metric = np.nanmean(dm_minus + dm_plus, axis=1)
 		draw_order = list(np.argsort(-uncertainty_rank_metric))
 
-		fig, ax = plt.subplots(1, 1)
+		fig, ax = plt.subplots(
+			1,
+			1,
+			figsize=pub_figsize(
+				height_ratio=0.75,
+			),
+		)
 
 		for draw_rank, i in enumerate(draw_order):
 			method_name = ordered_methods[i]
@@ -115,7 +121,6 @@ class ComponentsMixin:
 					zorder=2 + draw_rank,
 				)
 
-		ax.set_title(f'{frb_label}: Component DM diagnostics ({label})')
 		ax.set_ylabel(r'Best DM [$\mathrm{pc\,cm}^{{-3}}$]')
 		ax.grid(True, alpha=0.3)
 		ax.legend()
@@ -357,7 +362,13 @@ class ComponentsMixin:
 		}
 
 		x = np.arange(len(pair_labels), dtype=float)
-		fig, ax = plt.subplots(1, 1)
+		fig, ax = plt.subplots(
+			1,
+			1,
+			figsize=pub_figsize(
+				height_ratio=0.75,
+			),
+		)
 
 		# Small x-offset per method so uncertainty bars are readable.
 		n_methods = max(1, len(method_names))
@@ -406,7 +417,6 @@ class ComponentsMixin:
 		ax.set_xticklabels([])
 		#ax.set_xlabel('Component pair')
 		ax.set_ylabel(r'$\Delta n_e [\mathrm{cm}^{-3}]$')
-		ax.set_title(f'{frb_label}: dn_e between components ({label})')
 		ax.grid(True, alpha=0.3)
 		#ax.legend(loc='best')
 

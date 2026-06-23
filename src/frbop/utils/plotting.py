@@ -12,7 +12,7 @@ from cycler import cycler
 
 # Full A4 textwidth (PASA template), used as base for ncol-based sizing.
 # pub-col N means "1 of N figures per row", so width = FULL_PAGE_WIDTH_IN / N.
-FULL_PAGE_WIDTH_IN = 6.3
+FULL_PAGE_WIDTH_IN = 8.5
 
 _current_pub_col: Optional[int] = None
 
@@ -65,7 +65,7 @@ def pub_width(ncol: Optional[int] = None) -> float:
 
 def pub_figsize(
     ncol: Optional[int] = None,
-    height_ratio: float = 1.61,
+    height_ratio: float = 1.41,
 ):
     effective_ncol = ncol if ncol is not None else _current_pub_col
     width = pub_width(ncol=effective_ncol)

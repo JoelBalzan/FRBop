@@ -367,7 +367,7 @@ class ComparisonMixin:
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
 			run_dir_li_mean = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_li_mean,
-				method_label='L/I Maximising (mean)',
+				method_label=r'$\Pi_L$ Maximising (mean)',
 				dm_values=dm_values,
 				metric_values=li_mean_values,
 				metric_name='L_over_I_mean',
@@ -382,7 +382,7 @@ class ComparisonMixin:
 				'dedispersed': dedispersed_li_mean,
 				'dedispersed_q': self.dedisperse(data_q, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode),
 				'dedispersed_u': self.dedisperse(data_u, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode),
-				'method': 'L/I Maximising (mean)',
+				'method': r'$\Pi_L$ Maximising (mean)',
 				'run_dir': str(run_dir_li_mean),
 				'dm_values': dm_values.copy(),
 				'metric_values': li_mean_values.copy(),
