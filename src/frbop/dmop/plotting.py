@@ -48,7 +48,7 @@ class PlottingMixin:
 			n_methods + 1,
 			5,
 			figsize=figsize,
-			gridspec_kw={'width_ratios': [0.85, 0.11, 0.85, 0.32, 0.85]},
+			gridspec_kw={'width_ratios': [0.85, 0.06, 0.85, 0.32, 0.8]},
 		)
 		if n_methods == 0:
 			axes = np.atleast_2d(axes)
@@ -391,7 +391,7 @@ class PlottingMixin:
 							shade_high,
 							color='tab:orange',
 							alpha=0.18,
-							label='DM uncertainty' if show_scan_legend else None,
+							label=r'$\delta$ DM' if show_scan_legend else None,
 						)
 				scan_ax.plot(
 					dm_vals,

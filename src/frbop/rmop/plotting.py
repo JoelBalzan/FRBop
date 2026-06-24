@@ -20,15 +20,16 @@ from matplotlib.gridspec import GridSpec
 from scipy.optimize import curve_fit
 
 from frbop.utils.peaks import (select_frequency_bands_manual,
-							   split_frequency_bands_equal,
-							   split_frequency_bands_equal_snr)
-from frbop.utils.plotting import FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize, savefig_rasterized
+                               split_frequency_bands_equal,
+                               split_frequency_bands_equal_snr)
+from frbop.utils.plotting import (FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize,
+                                  savefig_rasterized)
 
 from .constants import plot_style
 from .fitter import RMFitter
 from .physics import (depolarising_medium_delta_ne_b_parallel,
-					  sigma_rm_detection_threshold,
-					  sigma_rm_detection_threshold_snr)
+                      sigma_rm_detection_threshold,
+                      sigma_rm_detection_threshold_snr)
 
 # ---------------------------------------------------------------------------
 # Internal save wrapper
@@ -2170,9 +2171,11 @@ def plot_rm_time_series(time_array: np.ndarray,
 		n_peaks = 1
 
 	fig = plt.figure(
-		figsize=pub_figsize()
+		figsize=pub_figsize(),
+		constrained_layout=False,
 	)
 	gs = GridSpec(3, n_peaks, figure=fig, hspace=0, wspace=0.3)
+	fig.subplots_adjust(left=0.18, right=0.82)
 	axes = np.empty((3, n_peaks), dtype=object)
 	for col in range(n_peaks):
 		for row in range(3):
@@ -2555,7 +2558,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 				final_labels.append(lab)
 				seen.add(lab)
 			#if final_handles:
-				#ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
+			#	ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 		ax_top.tick_params(axis='x', labelbottom=False)
 
 		# ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
@@ -2650,13 +2653,13 @@ def plot_rm_time_series(time_array: np.ndarray,
 					lf_err = _bin_frac_err(bt, l_full_masked)
 					vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
 					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=style['line'], zorder=1)
-					ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label='L/I',
+					ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label=r'$\Pi_L$',
 								 color='r', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
 					if 'V_frac_bin' in rm_results and vf_bin.size:
 						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=style['line'], zorder=1)
 						if vf_err is not None:
-							ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label='V/I',
+							ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label=r'$\Pi_V$',
 										 color='b', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
 						ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
 
@@ -2702,10 +2705,10 @@ def plot_rm_time_series(time_array: np.ndarray,
 		for col in range(n_peaks):
 			axes[0, col].set_xlim(tlo, thi)
 
-	plt.tight_layout()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
 	print(f"Time series plot saved to {output_file}")
 	plt.close()
+
 
 
 def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
@@ -2751,7 +2754,9 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 		1,
 		figsize=pub_figsize(),
 		sharex=False,
+		constrained_layout=False,
 	)
+	fig.subplots_adjust(left=0.18)
 	pol_frac_err_arr = None if pol_frac_err is None else np.asarray(pol_frac_err, dtype=float)
 	valid_mask_arr = None if valid_mask is None else np.asarray(valid_mask, dtype=bool)
 	circ_frac_err_arr = None if circ_frac_err is None else np.asarray(circ_frac_err, dtype=float)
@@ -2895,7 +2900,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 		l_low = np.where(l_mask_sorted, l_sorted - sigma_l_sorted, np.nan)
 		l_high = np.where(l_mask_sorted, l_sorted + sigma_l_sorted, np.nan)
 
-		ax3.plot(freq_sorted, l_plot, 'r-', linewidth=style['line'], label='L/I')
+		ax3.plot(freq_sorted, l_plot, 'r-', linewidth=style['line'], label=r'$\Pi_L$')
 		ax3.fill_between(freq_sorted, l_low, l_high, color='r', alpha=0.18, linewidth=0)
 
 		if fitter.stokes_v is not None:
@@ -2920,7 +2925,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 			v_low = np.where(v_mask_sorted, v_sorted - sigma_v_sorted, np.nan)
 			v_high = np.where(v_mask_sorted, v_sorted + sigma_v_sorted, np.nan)
 
-			ax3.plot(freq_sorted, v_plot, 'b-', linewidth=style['line'], label='V/I')
+			ax3.plot(freq_sorted, v_plot, 'b-', linewidth=style['line'], label=r'$\Pi_V$')
 			ax3.fill_between(freq_sorted, v_low, v_high, color='b', alpha=0.14, linewidth=0)
 
 		ax3.set_xlabel('Frequency [MHz]', fontsize=style['label'])
@@ -2929,8 +2934,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 		ax3.grid(True, alpha=0.3)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
-	plt.tight_layout()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
 	print(f"Plot saved to {output_file}")
 	plt.close()
 
@@ -2952,8 +2956,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 	- P_const(λ)      = P_i
 	where P is the linear polarisation fraction (L/I).
 	"""
-	from scipy.constants import \
-		c as _c  # avoid shadowing the module-level name
+	from scipy.constants import c as _c  # avoid shadowing the module-level name
 
 	style = plot_style()
 
@@ -3573,17 +3576,17 @@ def plot_polarisation_fraction_acf_ccf(
 
 	axes[1].axhline(0.0, color='0.7', linewidth=1.0, linestyle=':')
 	if v_grid is not None and v_resid is not None and v_trend is not None:
-		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label='L/I')
-		axes[1].plot(grid, v_grid, color='b', linewidth=style['line'], label='V/I')
+		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label=r'$\Pi_L$')
+		axes[1].plot(grid, v_grid, color='b', linewidth=style['line'], label=r'$\Pi_V$')
 		axes[1].plot(grid, l_trend, color='r', linewidth=style['line'], linestyle='--', alpha=0.45, label='L/I trend')
 		axes[1].plot(grid, v_trend, color='b', linewidth=style['line'], linestyle='--', alpha=0.45, label='V/I trend')
 		axes[1].set_ylabel('L/I, V/I', fontsize=style['label'])
 		axes[1].legend(fontsize=style['legend'], loc='best')
 	else:
-		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label='L/I')
+		axes[1].plot(grid, l_grid, color='r', linewidth=style['line'], label=r'$\Pi_L$')
 		axes[1].plot(grid, l_trend, color='r', linewidth=style['line'], linestyle='--', alpha=0.45, label='L/I trend')
 		axes[1].text(0.02, 0.88, 'No valid V/I data', ha='left', va='top', transform=axes[1].transAxes)
-		axes[1].set_ylabel('L/I', fontsize=style['label'])
+		axes[1].set_ylabel(r'$\Pi_L$', fontsize=style['label'])
 	axes[1].grid(True, alpha=0.3)
 	axes[1].tick_params(axis='both', labelsize=style['tick'])
 
