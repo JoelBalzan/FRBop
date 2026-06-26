@@ -722,7 +722,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     # -------------------------------------------------------------------------
     # Masking
     # -------------------------------------------------------------------------
-    valid_bins = i_snr_array >= 5.0
+    valid_bins = i_snr_array >= 2.0
 
     rm_array[~valid_bins] = np.nan
     rm_err_array[~valid_bins] = np.nan

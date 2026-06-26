@@ -2146,7 +2146,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 						noise_fraction: float = 0.1,
 						offpulse_std: Optional[np.ndarray] = None,
 						full_time_series: Optional[np.ndarray] = None,
-						peak_mask_bounds: Optional[List[Tuple[int, int]]] = None
+						peak_mask_bounds: Optional[List[Tuple[int, int]]] = None,
+						show_full_time: bool = True
 						):
 	"""
 	Plot RM as a function of time.
@@ -2171,14 +2172,14 @@ def plot_rm_time_series(time_array: np.ndarray,
 		n_peaks = 1
 
 	fig = plt.figure(
-		figsize=pub_figsize(),
+		figsize=pub_figsize(height_ratio=1.88),
 		constrained_layout=False,
 	)
-	gs = GridSpec(3, n_peaks, figure=fig, hspace=0, wspace=0.3)
+	gs = GridSpec(4, n_peaks, figure=fig, hspace=0, wspace=0.3)
 	fig.subplots_adjust(left=0.18, right=0.82)
-	axes = np.empty((3, n_peaks), dtype=object)
+	axes = np.empty((4, n_peaks), dtype=object)
 	for col in range(n_peaks):
-		for row in range(3):
+		for row in range(4):
 			if row == 0:
 				axes[row, col] = fig.add_subplot(gs[row, col])
 			else:
@@ -2213,6 +2214,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 					time_axis_dim = 0
 			else:
 				time_axis_dim = 0
+			_time_axis_dim = time_axis_dim
 
 			if time_axis_dim == 0:
 				I_full = np.nanmean(time_series_data['I'], axis=1)
@@ -2387,8 +2389,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 						if len(seg) > 0:
 							axis.scatter(x[seg], y[seg], **kwargs)
 
-				scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=2, ecolor='gray')
-				scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=2, ecolor='gray')
+				scatter_runs(times_ms[mask_pa], pa_deg[mask_pa], ax_pa, color='r', s=8, label='PA', zorder=3)
+				scatter_runs(times_ms[mask_pa], ea_deg[mask_pa], ax_pa, color='b', s=8, label='EA', zorder=3)
 				if np.any(mask_pa):
 					ax_pa.errorbar(times_ms[mask_pa], pa_deg[mask_pa], yerr=pa_sigma_deg[mask_pa],
 								   fmt='none', ecolor='gray', alpha=0.6, capsize=2, zorder=2)
@@ -2440,6 +2442,12 @@ def plot_rm_time_series(time_array: np.ndarray,
 			'o', color=IBM_PALETTE[-1], markersize=5, 
 			markeredgecolor='white', markeredgewidth=1,
 			label='RM')
+
+		rm_valid = rm_peak[np.isfinite(rm_peak)]
+		if len(rm_valid) > 0:
+			rm_avg = np.nanmean(rm_valid)
+			ax_top_twin.axhline(y=rm_avg, color=IBM_PALETTE[-1], linestyle='--',
+								linewidth=0.8, alpha=0.6, zorder=0)
 
 		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=style['line'], label='I')
 		ax_top.set_ylabel(r'$S$ [arb.]', fontsize=style['label'])
@@ -2561,8 +2569,90 @@ def plot_rm_time_series(time_array: np.ndarray,
 			#	ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 		ax_top.tick_params(axis='x', labelbottom=False)
 
-		# ── Row 2: Polarisation fractions (BOTTOM panel) ────────────────────
-		ax3 = axes[2, peak_idx]
+		# ── Row 2: Δ(V/I) across band, per pa_bin, where V has good S/N ────
+		ax_vi = axes[2, peak_idx]
+		ax_vi.axhline(y=0, color='gray', linestyle=':', linewidth=0.5, alpha=0.5)
+
+		if (time_series_data is not None and full_time is not None
+				and freq_hz is not None and 'V' in time_series_data):
+			if offpulse_std is not None and offpulse_std.shape[0] > 3:
+				n_freq_plot = offpulse_std.shape[1] if offpulse_std.ndim > 1 else 1
+				sigma_v = float(np.nanmedian(offpulse_std[3])) / np.sqrt(n_freq_plot)
+			else:
+				n_frac_v = max(1, int(len(V_full) * noise_fraction))
+				sigma_v = np.nanstd(V_full[:n_frac_v])
+				if sigma_v <= 0:
+					mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
+					sigma_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
+
+			t_masked = full_time[full_mask]
+			if _time_axis_dim == 0:
+				I_data = np.asarray(time_series_data['I'])[full_mask]
+				V_data = np.asarray(time_series_data['V'])[full_mask]
+			else:
+				I_data = np.asarray(time_series_data['I'])[:, full_mask].T
+				V_data = np.asarray(time_series_data['V'])[:, full_mask].T
+
+			n_eff = n_pa_bins if n_pa_bins > 0 else len(t_masked)
+			if n_eff > 0 and len(t_masked) > 0:
+				auto_bin = n_pa_bins == 0
+				bin_edges = np.linspace(t_masked[0], t_masked[-1], n_eff + 1) if not auto_bin else np.arange(len(t_masked) + 1)
+				bc, dv_b, dv_e, v_sig = [], [], [], []
+				for b in range(n_eff):
+					if auto_bin:
+						sel = np.zeros(len(t_masked), dtype=bool)
+						sel[b] = True
+					else:
+						sel = (t_masked >= bin_edges[b]) & (t_masked < bin_edges[b + 1])
+						if b == n_eff - 1:
+							sel = (t_masked >= bin_edges[b]) & (t_masked <= bin_edges[b + 1])
+					if np.sum(sel) < 1:
+						continue
+
+					I_avg = np.nanmean(I_data[sel], axis=0)
+					V_avg = np.nanmean(V_data[sel], axis=0)
+					n_in_bin = np.sum(sel)
+
+					v_snr = np.abs(np.nanmean(V_avg)) / (sigma_v / np.sqrt(n_in_bin) + 1e-10)
+
+					vi_chan = V_avg / (I_avg + 1e-10)
+					good = np.isfinite(vi_chan) & (I_avg > 0)
+					if np.sum(good) >= 3:
+						coeffs, cov = np.polyfit(freq_hz[good], vi_chan[good], 1, cov=True)
+						bandwidth = abs(freq_hz[-1] - freq_hz[0])
+						if auto_bin:
+							bc.append(t_masked[b] * 1e3)
+						else:
+							bc.append(0.5 * (bin_edges[b] + bin_edges[b + 1]) * 1e3)
+						dv_b.append(coeffs[0] * bandwidth)
+						dv_e.append(np.sqrt(cov[0, 0]) * bandwidth)
+						v_sig.append(v_snr >= 3.0)
+
+				if len(bc) > 0:
+					bc = np.array(bc)
+					dv_b = np.array(dv_b)
+					dv_e = np.array(dv_e)
+					v_sig = np.array(v_sig)
+					DV_ERR_MAX = 2
+					finite = (np.isfinite(dv_b) & np.isfinite(dv_e) & (dv_e > 0)
+							  & (dv_e < DV_ERR_MAX))
+					if np.any(finite & ~v_sig):
+						ax_vi.errorbar(bc[finite & ~v_sig], dv_b[finite & ~v_sig], yerr=dv_e[finite & ~v_sig],
+									   fmt='o', color='lightblue', ecolor='gray',
+									   markersize=3, capsize=2, alpha=0.3, zorder=5)
+					if np.any(finite & v_sig):
+						ax_vi.errorbar(bc[finite & v_sig], dv_b[finite & v_sig], yerr=dv_e[finite & v_sig],
+									   fmt='o', color='b', ecolor='gray',
+									   markersize=4, capsize=2, zorder=10)
+
+		ax_vi.set_ylabel(r'$\Delta(V/I)$', fontsize=style['label'])
+		if n_peaks > 1:
+			ax_vi.set_title(f'Peak {peak_idx+1}: Δ(V/I) across band', fontsize=style['title'], fontweight='bold')
+		ax_vi.grid(True, alpha=0.3)
+		ax_vi.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
+
+		# ── Row 3: Polarisation fractions (BOTTOM panel) ────────────────────
+		ax3 = axes[3, peak_idx]
 
 		if time_series_data is not None and full_time is not None:
 			err_frac = noise_est / (I_full + 1e-10)
@@ -2700,8 +2790,15 @@ def plot_rm_time_series(time_array: np.ndarray,
 		#ax3.legend(loc='upper right', fontsize=style['legend'], borderaxespad=0.9)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
-	if _xlim_full_time is not None and len(_xlim_full_time) > 1:
+	if show_full_time and _xlim_full_time is not None and len(_xlim_full_time) > 1:
 		tlo, thi = _xlim_full_time[0] * 1e3, _xlim_full_time[-1] * 1e3
+		for col in range(n_peaks):
+			axes[0, col].set_xlim(tlo, thi)
+	elif not show_full_time and _peak_bounds is not None and _xlim_full_time is not None:
+		si = max(0, _peak_bounds[0][0])
+		ei = min(_peak_bounds[0][1], len(_xlim_full_time) - 1)
+		tlo = _xlim_full_time[si] * 1e3
+		thi = _xlim_full_time[ei] * 1e3
 		for col in range(n_peaks):
 			axes[0, col].set_xlim(tlo, thi)
 
@@ -3376,14 +3473,14 @@ def plot_burns_law_fits(fitter: RMFitter,
 			fmt='o', markersize=4,
 			color='r', marker='s',
 			ecolor='gray', elinewidth=1, capsize=2,
-			alpha=1, label=r'$L/I$'
+			alpha=1, label=r'$\Pi_L$'
 		)
 	else:
 		ax.scatter(
 			freq_mhz, y,
 			s=28, c='r',
 			marker='s', alpha=1,
-			label=r'$L/I$'
+			label=r'$\Pi_L$'
 		)
 
 	if burn_popt is not None and best_linear_model == 'P_Burn':
@@ -3414,14 +3511,14 @@ def plot_burns_law_fits(fitter: RMFitter,
 				fmt='s', markersize=4,
 				color='b', ecolor='gray',
 				elinewidth=0.8, capsize=2,
-				alpha=1, label=r'$V/I$'
+				alpha=1, label=r'$\Pi_V$'
 			)
 		else:
 			ax.scatter(
 				freq_c, y_c,
 				s=28, c='b',
 				marker='s', alpha=1,
-				label=r'$V/I$'
+				label=r'$\Pi_V$'
 			)
 
 		if circ_lin_popt is not None and best_circular_model == 'mC_linear':

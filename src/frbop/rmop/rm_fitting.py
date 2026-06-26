@@ -162,6 +162,12 @@ def main() -> None:
         action="store_true",
         help="Hide the third (L/I and V/I) panel in plot_rm_results",
     )
+    parser.add_argument(
+        "--full-time",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show the full time range in the time series plot (default: True). Use --no-full-time to zoom to the fitted region.",
+    )
 
     # Poincare plots
     parser.add_argument(
@@ -316,7 +322,7 @@ def main() -> None:
     parser.add_argument(
         "--pa-bins",
         type=int,
-        default=50,
+        default=0,
         help="Number of PA/EA/pol fraction bins in lower panel of time-series plot (default: 50)",
     )
     parser.add_argument(
@@ -599,6 +605,8 @@ def main() -> None:
         else:
             print("\nSelected component fractions: no on-pulse regions available")
 
+        stokes_i_2d = stokes_i.copy() if stokes_i.ndim == 2 else None
+
         if args.time_avg:
             print("  Averaging over time axis...")
             n_time_avg_used = n_time_noise
@@ -673,6 +681,7 @@ def main() -> None:
                 stokes_q_binned = np.zeros(n_freq_bins_actual)
                 stokes_u_binned = np.zeros(n_freq_bins_actual)
                 stokes_v_binned = np.zeros(n_freq_bins_actual) if stokes_v is not None else None
+                stokes_i_2d_binned = np.zeros((n_freq_bins_actual, stokes_i_2d.shape[1])) if stokes_i_2d is not None else None
                 sigma_i_binned = np.zeros(n_freq_bins_actual)
                 sigma_q_binned = np.zeros(n_freq_bins_actual)
                 sigma_u_binned = np.zeros(n_freq_bins_actual)
@@ -690,6 +699,8 @@ def main() -> None:
                     stokes_u_binned[i_bin] = np.mean(stokes_u[bin_start:bin_end])
                     if stokes_v is not None:
                         stokes_v_binned[i_bin] = np.mean(stokes_v[bin_start:bin_end])
+                    if stokes_i_2d is not None:
+                        stokes_i_2d_binned[i_bin] = np.mean(stokes_i_2d[bin_start:bin_end], axis=0)
                     n_chan_bin = max(1, bin_end - bin_start)
                     sigma_i_binned[i_bin] = (
                         np.sqrt(np.sum(sigma_i_chan[bin_start:bin_end] ** 2)) / n_chan_bin
@@ -711,6 +722,8 @@ def main() -> None:
                 stokes_u = stokes_u_binned
                 if stokes_v is not None:
                     stokes_v = stokes_v_binned
+                if stokes_i_2d is not None:
+                    stokes_i_2d = stokes_i_2d_binned
                 sigma_i_chan = sigma_i_binned
                 sigma_q_chan = sigma_q_binned
                 sigma_u_chan = sigma_u_binned
@@ -797,6 +810,8 @@ def main() -> None:
             burn_circ_valid_mask = np.asarray(burn_circ_valid_mask, dtype=bool)[trim_slice]
         if off_std is not None:
             off_std = off_std[:, trim_slice]
+        if stokes_i_2d is not None:
+            stokes_i_2d = stokes_i_2d[trim_slice]
 
         print(
             f"  Excluded {args.exclude_edge_bins} edge bins per side: "
@@ -805,7 +820,7 @@ def main() -> None:
 
     if args.freq_band_mhz is not None or args.freq_band_indices is not None or args.manual_freq_bands:
         spec_for_band = np.nanmean(stokes_i, axis=time_axis) if stokes_i.ndim == 2 else stokes_i
-        freq_band = _resolve_freq_band_idx(args, freq_hz, spec_for_band, dspec=stokes_i if stokes_i.ndim == 2 else None)
+        freq_band = _resolve_freq_band_idx(args, freq_hz, spec_for_band, dspec=stokes_i_2d if (stokes_i.ndim == 1 and stokes_i_2d is not None) else (stokes_i if stokes_i.ndim == 2 else None))
         if freq_band is not None:
             freq_hz = freq_hz[freq_band]
             stokes_i = stokes_i[freq_band]
@@ -1472,7 +1487,8 @@ def main() -> None:
                 noise_fraction=args.offpulse,
                 offpulse_std=off_std,
                 full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None,
-                peak_mask_bounds=onpulse_regions
+                peak_mask_bounds=onpulse_regions,
+                show_full_time=args.full_time
             )
 
             if args.poincare:
