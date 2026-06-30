@@ -36,7 +36,8 @@ class PolarisationMixin:
 
 	def _pa_slope_metric_shrine(self, data_q: np.ndarray, data_u: np.ndarray,
 								  time_ms: Optional[np.ndarray] = None,
-								  data_i: Optional[np.ndarray] = None) -> float:
+								  data_i: Optional[np.ndarray] = None,
+								  return_error: bool = False):
 		"""
 		PA slope metric where PA is SHRINE-smoothed before fitting.
 		"""
@@ -48,23 +49,27 @@ class PolarisationMixin:
 		pa_shrine_smooth, _, time_axis = self._get_pa_shrine_smoothed_and_fit(data_q, data_u, data_i, time_ms)
 		valid = np.isfinite(pa_shrine_smooth)
 		if np.sum(valid) < (self.pa_fit_degree + 1):
-			return 0.0
+			return (0.0, 0.0) if return_error else 0.0
 
 		weights = self._pa_fit_weights(L_debias, sigma_L, data_i, valid)
 		w = weights[valid]
 		if np.sum(w > 0) < (self.pa_fit_degree + 1):
-			return 0.0
+			return (0.0, 0.0) if return_error else 0.0
 
 		x = time_axis[valid]
 		y = pa_shrine_smooth[valid]
 		try:
-			coeffs = np.polyfit(x, y, self.pa_fit_degree, w=w)
+			coeffs, cov = np.polyfit(x, y, self.pa_fit_degree, w=w, cov='unscaled')
 		except Exception:
-			return 0.0
+			return (0.0, 0.0) if return_error else 0.0
 
 		slope_magnitude = float(np.abs(coeffs[0]))
 		if not np.isfinite(slope_magnitude):
-			return 0.0
+			return (0.0, 0.0) if return_error else 0.0
+
+		if return_error:
+			slope_error = float(np.sqrt(cov[0, 0])) if np.isfinite(cov[0, 0]) and cov[0, 0] > 0 else 0.0
+			return slope_magnitude, slope_error
 		return slope_magnitude
 
 	def _pa_fit_weights(self, L_debias: np.ndarray, sigma_L: float,

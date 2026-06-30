@@ -2763,29 +2763,21 @@ def plot_rm_time_series(time_array: np.ndarray,
 					dVdt_interp = 0.5 * (dVdt_model[:-1] + dVdt_model[1:])
 					mask_dvdt = both_good & np.isfinite(dVdt_interp) & np.isfinite(dVdt_err)
 					if np.any(mask_dvdt):
-						ax_vi_twin = ax_vi.twinx()
-						ax_vi_twin.spines['left'].set_visible(False)
-						ax_vi_twin.spines['top'].set_visible(False)
-						ax_vi_twin.spines['bottom'].set_visible(False)
-						ax_vi_twin.yaxis.set_label_position('right')
-						ax_vi_twin.yaxis.tick_right()
-						ax_vi_twin.set_ylabel(r'$dV/dt$ [arb.]', fontsize=style['label'])
-						ax_vi_twin.set_yticks([])
-
 						t_plot = t_dvdt[mask_dvdt]
 						dvdt_plot = dVdt_interp[mask_dvdt]
+						dvdt_plot = (dvdt_plot - np.nanmean(dvdt_plot)) / (np.nanstd(dvdt_plot) + 1e-20)
 						dvdt_err_plot = dVdt_err[mask_dvdt]
-						idx = np.arange(len(t_plot))
-						splits = np.where(np.diff(idx) != 1)[0] + 1
-						segments = np.split(idx, splits) if len(splits) > 0 else [idx]
+						idxe = np.arange(len(t_plot))
+						splits = np.where(np.diff(idxe) != 1)[0] + 1
+						segments = np.split(idxe, splits) if len(splits) > 0 else [idxe]
 						for seg in segments:
 							if len(seg) > 1:
-								ax_vi_twin.plot(t_plot[seg], dvdt_plot[seg], color='blueviolet',
+								ax_vi.plot(t_plot[seg], dvdt_plot[seg], color='blueviolet',
 												linewidth=1, alpha=0.5, zorder=1, label=r'$dV/dt$')
-								ax_vi_twin.fill_between(t_plot[seg],
-														dvdt_plot[seg] - dvdt_err_plot[seg],
-														dvdt_plot[seg] + dvdt_err_plot[seg],
-														color='blueviolet', alpha=0.15, zorder=0)
+								#ax_vi.fill_between(t_plot[seg],
+								#						dvdt_plot[seg] - dvdt_err_plot[seg],
+								#						dvdt_plot[seg] + dvdt_err_plot[seg],
+								#						color='blueviolet', alpha=0.15, zorder=0)
 				except (RuntimeError, ValueError):
 					pass
 
@@ -2852,20 +2844,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		ax_vi.grid(True, alpha=0.3)
 		ax_vi.set_xlabel('Time [ms]', fontsize=style['label'])
 		ax_vi.tick_params(axis='both', labelsize=style['tick'])
-		if ax_vi.get_legend() is not None:
-			ax_vi.get_legend().remove()
-		if 'ax_vi_twin' in locals() and ax_vi_twin is not None:
-			if ax_vi_twin.get_legend() is not None:
-				ax_vi_twin.get_legend().remove()
-		handles1, labels1 = ax_vi.get_legend_handles_labels()
-		handles2, labels2 = [], []
-		if 'ax_vi_twin' in locals() and ax_vi_twin is not None:
-			handles2, labels2 = ax_vi_twin.get_legend_handles_labels()
-		if peak_idx == 0:
-			all_handles = list(handles1) + list(handles2)
-			all_labels = list(labels1) + list(labels2)
-			if all_handles:
-				ax_vi.legend(all_handles, all_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
+		ax_vi.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 
 	if show_full_time and _xlim_full_time is not None and len(_xlim_full_time) > 1:
 		tlo, thi = _xlim_full_time[0] * 1e3, _xlim_full_time[-1] * 1e3

@@ -77,8 +77,11 @@ class ComparisonMixin:
 		i_data = np.zeros((len(dm_values), output_size), dtype=float)
 
 		pa_values = np.zeros(len(dm_values), dtype=float) if run_pa else None
+		pa_errors = np.zeros(len(dm_values), dtype=float) if run_pa else None
 		pa_shrine_values = np.zeros(len(dm_values), dtype=float) if run_pa_shrine else None
+		pa_shrine_errors = np.zeros(len(dm_values), dtype=float) if run_pa_shrine else None
 		li_mean_values = np.zeros(len(dm_values), dtype=float) if run_li_mean else None
+		li_mean_errors = np.zeros(len(dm_values), dtype=float) if run_li_mean else None
 
 		self._reset_nonshrine_kc_state()
 		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
@@ -99,11 +102,13 @@ class ComparisonMixin:
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
 				if pa_values is not None:
-					pa_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
+					pa_values[i], pa_errors[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i, return_error=True)
 				if pa_shrine_values is not None:
-					pa_shrine_values[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i)
+					pa_shrine_values[i], pa_shrine_errors[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i, return_error=True)
 				if li_mean_values is not None:
-					li_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean')
+					li_mean_values[i], li_mean_errors[i] = self.linear_to_stokes_i_metric(
+					sm_q, sm_u, sm_i, mode='mean', use_fwhm_window=True, return_error=True,
+				)
 		print(f"\r    Progress: {len(dm_values)}/{len(dm_values)}", flush=True)
 
 		if run_structure:
@@ -280,9 +285,14 @@ class ComparisonMixin:
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
 			metric_pa = float(pa_values[max_idx_pa])
-			pa_uncertainty = self._uncertainty_from_polarisation_L_dm(
-				dm_values, pa_values, kc=self._nonshrine_resolved_kc,
-			)
+			if pa_errors is not None and not self.use_nonshrine_shrine_like_uncertainty:
+				pa_uncertainty = self._uncertainty_from_metric_errors(
+					dm_values, pa_values, pa_errors, max_idx_pa,
+				)
+			else:
+				pa_uncertainty = self._uncertainty_from_polarisation_L_dm(
+					dm_values, pa_values, kc=self._nonshrine_resolved_kc,
+				)
 			run_prefix_pa = f"{label}_{segment_tag}_pa_slope"
 			run_dir_pa = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pa,
@@ -332,9 +342,14 @@ class ComparisonMixin:
 			)
 			best_pa_shrine_deg = self._pa_series_deg(best_sm_q_pas, best_sm_u_pas, best_sm_i_pas)
 			metric_pas = float(pa_shrine_values[max_idx_pas])
-			pa_shrine_uncertainty = self._uncertainty_from_polarisation_L_dm(
-				dm_values, pa_shrine_values, kc=self._nonshrine_resolved_kc,
-			)
+			if pa_shrine_errors is not None and not self.use_nonshrine_shrine_like_uncertainty:
+				pa_shrine_uncertainty = self._uncertainty_from_metric_errors(
+					dm_values, pa_shrine_values, pa_shrine_errors, max_idx_pas,
+				)
+			else:
+				pa_shrine_uncertainty = self._uncertainty_from_polarisation_L_dm(
+					dm_values, pa_shrine_values, kc=self._nonshrine_resolved_kc,
+				)
 			run_prefix_pas = f"{label}_{segment_tag}_pa_slope_shrine"
 			run_dir_pas = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pas,
@@ -373,15 +388,14 @@ class ComparisonMixin:
 			optimal_dm_li_mean = float(dm_values[max_idx_li_mean])
 			dedispersed_li_mean = self.dedisperse(data, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode)
 			metric_li_mean = float(li_mean_values[max_idx_li_mean])
-			li_mean_uncertainty = self._uncertainty_from_polarisation_L_dm(
-				dm_values, li_mean_values, kc=self._nonshrine_resolved_kc,
-			)
-			li_mean_uncertainty = self._clamp_uncertainty_to_dm_bounds(
-				optimal_dm_li_mean,
-				li_mean_uncertainty,
-				dm_values,
-				fill_missing_with_bounds=False,
-			)
+			if not self.use_nonshrine_shrine_like_uncertainty and li_mean_errors is not None:
+				li_mean_uncertainty = self._uncertainty_from_metric_errors(
+					dm_values, li_mean_values, li_mean_errors, max_idx_li_mean,
+				)
+			else:
+				li_mean_uncertainty = self._uncertainty_from_polarisation_L_dm(
+					dm_values, li_mean_values, kc=self._nonshrine_resolved_kc,
+				)
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
 			run_dir_li_mean = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_li_mean,

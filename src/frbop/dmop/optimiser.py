@@ -92,7 +92,7 @@ class DMOptimiser(
         self.nonshrine_kc_smooth = bool(nonshrine_kc_smooth)
         self.nonshrine_shrine_like_errors = bool(nonshrine_shrine_like_errors)
         self.use_nonshrine_shrine_like_uncertainty = bool(
-            self.nonshrine_kc_smooth or self.nonshrine_shrine_like_errors
+            self.nonshrine_shrine_like_errors
         )
         self.nonshrine_kc_minimise_uncertainty = bool(nonshrine_kc_minimise_uncertainty)
         self.nonshrine_kc = None if nonshrine_kc is None else int(nonshrine_kc)

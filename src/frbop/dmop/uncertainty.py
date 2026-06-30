@@ -411,6 +411,60 @@ class UncertaintyMixin:
 			)
 		return self._uncertainty_from_metric_shrine(dm_values, metric_values, kc=kc)
 
+	def _uncertainty_from_metric_errors(self,
+							   dm_values: np.ndarray,
+							   metric_values: np.ndarray,
+							   metric_errors: np.ndarray,
+							   best_idx: int) -> Dict[str, Optional[float]]:
+		"""
+		Estimate DM uncertainty from propagated metric errors.
+
+		For each DM, the metric is compared with the peak value: if
+		|metric_max - metric_i| <= sqrt(err_max^2 + err_i^2)
+		the DM is considered consistent with the best-fit DM.
+		The uncertainty bounds are the outermost DM values where this
+		condition holds.
+		"""
+		dm = np.asarray(dm_values, dtype=float)
+		metric = np.asarray(metric_values, dtype=float)
+		err = np.asarray(metric_errors, dtype=float)
+		best_dm = float(dm[int(best_idx)])
+		best_metric = float(metric[int(best_idx)])
+		best_err = float(err[int(best_idx)])
+
+		valid = np.isfinite(metric) & np.isfinite(err) & (err >= 0)
+		if np.sum(valid) < 2:
+			return self._uncertainty_dict(best_dm, None, None, "metric error")
+
+		combined = np.sqrt(best_err**2 + err**2)
+		consistent = valid & (np.abs(metric - best_metric) <= combined)
+
+		if not np.any(consistent):
+			return self._uncertainty_dict(best_dm, None, None, "metric error")
+
+		consistent_idx = np.where(consistent)[0]
+		low_dm = float(dm[int(consistent_idx[0])])
+		high_dm = float(dm[int(consistent_idx[-1])])
+		return self._uncertainty_dict(
+			best_dm,
+			low_dm,
+			high_dm,
+			"metric error",
+		)
+
+	def _uncertainty_from_pa_slope_errors(self,
+							   dm_values: np.ndarray,
+							   slope_values: np.ndarray,
+							   slope_errors: np.ndarray,
+							   best_idx: int) -> Dict[str, Optional[float]]:
+		"""Deprecated: use _uncertainty_from_metric_errors instead."""
+		result = self._uncertainty_from_metric_errors(
+			dm_values, slope_values, slope_errors, best_idx,
+		)
+		if result.get('uncertainty_method') == 'metric error':
+			result['uncertainty_method'] = 'PA slope error'
+		return result
+
 	def _uncertainty_from_shrine_relative(self,
 								 dm_values: np.ndarray,
 								 metric_values: np.ndarray,
