@@ -33,10 +33,12 @@ class ComparisonMixin:
 			data = self.stokes_i[:, peak_region[0]:peak_region[1]]
 			data_q = None if self.stokes_q is None else self.stokes_q[:, peak_region[0]:peak_region[1]]
 			data_u = None if self.stokes_u is None else self.stokes_u[:, peak_region[0]:peak_region[1]]
+			data_v = None if self.stokes_v is None else self.stokes_v[:, peak_region[0]:peak_region[1]]
 		else:
 			data = self.stokes_i
 			data_q = self.stokes_q
 			data_u = self.stokes_u
+			data_v = self.stokes_v
 
 		print(f"Comparing methods on DM range [{dm_range[0]:.2f}, {dm_range[1]:.2f}] pc cm^-3")
 
@@ -154,6 +156,12 @@ class ComparisonMixin:
 				n_time_out = results['structure']['dedispersed'].shape[1]
 				results['structure']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
 				results['structure']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
+			if data_v is not None:
+				if 'dedispersed' in results['structure']:
+					n_time_out = results['structure']['dedispersed'].shape[1]
+				else:
+					n_time_out = None
+				results['structure']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
 
 		if run_snr:
 			print("  - Testing S/N Maximising (SHRINE)...")
@@ -190,6 +198,9 @@ class ComparisonMixin:
 				n_time_out = results['snr']['dedispersed'].shape[1]
 				results['snr']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
 				results['snr']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
+			if data_v is not None:
+				n_time_out = results['snr']['dedispersed'].shape[1]
+				results['snr']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
 
 		if run_min_uncertainty:
 			print("  - Testing Minimise Uncertainty (SHRINE)...")
@@ -248,6 +259,9 @@ class ComparisonMixin:
 				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
 				results['min_uncertainty']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
 				results['min_uncertainty']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
+			if data_v is not None:
+				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
+				results['min_uncertainty']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
 
 		if not run_qu_methods:
 			return results
@@ -261,6 +275,7 @@ class ComparisonMixin:
 			best_dedisp_i_pa = self.dedisperse(data, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pa = self.dedisperse(data_q, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pa = self.dedisperse(data_u, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
+			best_dedisp_v_pa = self.dedisperse(data_v, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode) if data_v is not None else None
 			best_sm_i_pa, best_sm_q_pa, best_sm_u_pa = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pa, best_dedisp_q_pa, best_dedisp_u_pa)
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
@@ -286,6 +301,7 @@ class ComparisonMixin:
 				'dedispersed': best_dedisp_i_pa,
 				'dedispersed_q': best_dedisp_q_pa,
 				'dedispersed_u': best_dedisp_u_pa,
+				'dedispersed_v': best_dedisp_v_pa,
 				'method': 'PA Slope Maximising',
 				'pa_plot_kind': 'raw',
 				'pa_plot_time': best_time_axis.copy(),
@@ -305,6 +321,7 @@ class ComparisonMixin:
 			best_dedisp_i_pas = self.dedisperse(data, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pas = self.dedisperse(data_q, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_u_pas = self.dedisperse(data_u, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
+			best_dedisp_v_pas = self.dedisperse(data_v, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode) if data_v is not None else None
 			best_sm_i_pas, best_sm_q_pas, best_sm_u_pas = self.maybe_kc_smooth_nonshrine(best_dedisp_i_pas, best_dedisp_q_pas, best_dedisp_u_pas)
 			best_pa_shrine_smooth, best_shrine_fit_line, best_shrine_time_axis = self._get_pa_shrine_smoothed_and_fit(
 				best_sm_q_pas,
@@ -336,6 +353,7 @@ class ComparisonMixin:
 				'dedispersed': best_dedisp_i_pas,
 				'dedispersed_q': best_dedisp_q_pas,
 				'dedispersed_u': best_dedisp_u_pas,
+				'dedispersed_v': best_dedisp_v_pas,
 				'method': 'PA Slope Maximising (SHRINE PA)',
 				'kc': None if self._nonshrine_resolved_kc is None else int(self._nonshrine_resolved_kc),
 				'pa_plot_kind': 'shrine',
@@ -376,12 +394,14 @@ class ComparisonMixin:
 				optimal_metric=metric_li_mean,
 				uncertainty=li_mean_uncertainty,
 			)
+			dedisp_v_li = self.dedisperse(data_v, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode) if data_v is not None else None
 			results['l_i_mean'] = {
 				'dm': optimal_dm_li_mean,
 				'metric': metric_li_mean,
 				'dedispersed': dedispersed_li_mean,
 				'dedispersed_q': self.dedisperse(data_q, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode),
 				'dedispersed_u': self.dedisperse(data_u, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode),
+				'dedispersed_v': dedisp_v_li,
 				'method': r'$\Pi_L$ Maximising (mean)',
 				'run_dir': str(run_dir_li_mean),
 				'dm_values': dm_values.copy(),

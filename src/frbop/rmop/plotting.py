@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 from scipy.optimize import curve_fit
+from scipy.special import erfc
 
 from frbop.utils.peaks import (select_frequency_bands_manual,
                                split_frequency_bands_equal,
@@ -2172,10 +2173,10 @@ def plot_rm_time_series(time_array: np.ndarray,
 		n_peaks = 1
 
 	fig = plt.figure(
-		figsize=pub_figsize(height_ratio=1.88),
+		figsize=pub_figsize(height_ratio=1.5),
 		constrained_layout=False,
 	)
-	gs = GridSpec(4, n_peaks, figure=fig, hspace=0, wspace=0.3)
+	gs = GridSpec(4, n_peaks, figure=fig, height_ratios=[1, 1, 0.8, 0.8], hspace=0, wspace=0.3)
 	fig.subplots_adjust(left=0.18, right=0.82)
 	axes = np.empty((4, n_peaks), dtype=object)
 	for col in range(n_peaks):
@@ -2401,7 +2402,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
 		ax_pa.grid(True, alpha=0.3)
-		#ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 		ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
 
 		# ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
@@ -2565,94 +2566,12 @@ def plot_rm_time_series(time_array: np.ndarray,
 				final_handles.append(h)
 				final_labels.append(lab)
 				seen.add(lab)
-			#if final_handles:
-			#	ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
+			if final_handles:
+				ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 		ax_top.tick_params(axis='x', labelbottom=False)
 
-		# ── Row 2: Δ(V/I) across band, per pa_bin, where V has good S/N ────
-		ax_vi = axes[2, peak_idx]
-		ax_vi.axhline(y=0, color='gray', linestyle=':', linewidth=0.5, alpha=0.5)
-
-		if (time_series_data is not None and full_time is not None
-				and freq_hz is not None and 'V' in time_series_data):
-			if offpulse_std is not None and offpulse_std.shape[0] > 3:
-				n_freq_plot = offpulse_std.shape[1] if offpulse_std.ndim > 1 else 1
-				sigma_v = float(np.nanmedian(offpulse_std[3])) / np.sqrt(n_freq_plot)
-			else:
-				n_frac_v = max(1, int(len(V_full) * noise_fraction))
-				sigma_v = np.nanstd(V_full[:n_frac_v])
-				if sigma_v <= 0:
-					mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
-					sigma_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
-
-			t_masked = full_time[full_mask]
-			if _time_axis_dim == 0:
-				I_data = np.asarray(time_series_data['I'])[full_mask]
-				V_data = np.asarray(time_series_data['V'])[full_mask]
-			else:
-				I_data = np.asarray(time_series_data['I'])[:, full_mask].T
-				V_data = np.asarray(time_series_data['V'])[:, full_mask].T
-
-			n_eff = n_pa_bins if n_pa_bins > 0 else len(t_masked)
-			if n_eff > 0 and len(t_masked) > 0:
-				auto_bin = n_pa_bins == 0
-				bin_edges = np.linspace(t_masked[0], t_masked[-1], n_eff + 1) if not auto_bin else np.arange(len(t_masked) + 1)
-				bc, dv_b, dv_e, v_sig = [], [], [], []
-				for b in range(n_eff):
-					if auto_bin:
-						sel = np.zeros(len(t_masked), dtype=bool)
-						sel[b] = True
-					else:
-						sel = (t_masked >= bin_edges[b]) & (t_masked < bin_edges[b + 1])
-						if b == n_eff - 1:
-							sel = (t_masked >= bin_edges[b]) & (t_masked <= bin_edges[b + 1])
-					if np.sum(sel) < 1:
-						continue
-
-					I_avg = np.nanmean(I_data[sel], axis=0)
-					V_avg = np.nanmean(V_data[sel], axis=0)
-					n_in_bin = np.sum(sel)
-
-					v_snr = np.abs(np.nanmean(V_avg)) / (sigma_v / np.sqrt(n_in_bin) + 1e-10)
-
-					vi_chan = V_avg / (I_avg + 1e-10)
-					good = np.isfinite(vi_chan) & (I_avg > 0)
-					if np.sum(good) >= 3:
-						coeffs, cov = np.polyfit(freq_hz[good], vi_chan[good], 1, cov=True)
-						bandwidth = abs(freq_hz[-1] - freq_hz[0])
-						if auto_bin:
-							bc.append(t_masked[b] * 1e3)
-						else:
-							bc.append(0.5 * (bin_edges[b] + bin_edges[b + 1]) * 1e3)
-						dv_b.append(coeffs[0] * bandwidth)
-						dv_e.append(np.sqrt(cov[0, 0]) * bandwidth)
-						v_sig.append(v_snr >= 3.0)
-
-				if len(bc) > 0:
-					bc = np.array(bc)
-					dv_b = np.array(dv_b)
-					dv_e = np.array(dv_e)
-					v_sig = np.array(v_sig)
-					DV_ERR_MAX = 2
-					finite = (np.isfinite(dv_b) & np.isfinite(dv_e) & (dv_e > 0)
-							  & (dv_e < DV_ERR_MAX))
-					if np.any(finite & ~v_sig):
-						ax_vi.errorbar(bc[finite & ~v_sig], dv_b[finite & ~v_sig], yerr=dv_e[finite & ~v_sig],
-									   fmt='o', color='lightblue', ecolor='gray',
-									   markersize=3, capsize=2, alpha=0.3, zorder=5)
-					if np.any(finite & v_sig):
-						ax_vi.errorbar(bc[finite & v_sig], dv_b[finite & v_sig], yerr=dv_e[finite & v_sig],
-									   fmt='o', color='b', ecolor='gray',
-									   markersize=4, capsize=2, zorder=10)
-
-		ax_vi.set_ylabel(r'$\Delta(V/I)$', fontsize=style['label'])
-		if n_peaks > 1:
-			ax_vi.set_title(f'Peak {peak_idx+1}: Δ(V/I) across band', fontsize=style['title'], fontweight='bold')
-		ax_vi.grid(True, alpha=0.3)
-		ax_vi.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
-
-		# ── Row 3: Polarisation fractions (BOTTOM panel) ────────────────────
-		ax3 = axes[3, peak_idx]
+		# ── Row 2: Polarisation fractions ────────────────────────────────────
+		ax3 = axes[2, peak_idx]
 
 		if time_series_data is not None and full_time is not None:
 			err_frac = noise_est / (I_full + 1e-10)
@@ -2715,7 +2634,6 @@ def plot_rm_time_series(time_array: np.ndarray,
 							errs[idx] = fallback[0] if fallback.size else np.nan
 					return errs
 
-				# Always show full-resolution pol fraction as lines
 				combined_idx = full_indices[combined]
 				if combined_idx.size > 0:
 					seg_splits = np.where(np.diff(combined_idx) != 1)[0] + 1
@@ -2723,12 +2641,10 @@ def plot_rm_time_series(time_array: np.ndarray,
 					for seg in segs:
 						if seg.size == 0:
 							continue
-						#ax3.plot(full_time[seg] * 1e3, P_frac_full[seg], color='grey', linewidth=1, alpha=0.5)
 						ax3.plot(full_time[seg] * 1e3, L_frac_full[seg], color='salmon', linewidth=style['line'], alpha=0.5)
 						if 'V' in time_series_data:
 							ax3.plot(full_time[seg] * 1e3, V_frac_full[seg], color='lightblue', linewidth=style['line'], alpha=0.5)
 
-				# Overlay binned pol fraction if available
 				if full_time is not None:
 					idx = np.argmin(np.abs(full_time[:, None] - (bt / 1e3)[None, :]), axis=0)
 					lookup = np.full(len(full_time), -1)
@@ -2744,14 +2660,14 @@ def plot_rm_time_series(time_array: np.ndarray,
 					vf_err = _bin_frac_err(bt, v_full_masked) if v_full_masked is not None else None
 					ax3.plot(bt[bin_mask], lf_bin[bin_mask], 'r--', linewidth=style['line'], zorder=1)
 					ax3.errorbar(bt[bin_mask], lf_bin[bin_mask], yerr=lf_err[bin_mask], fmt='o', label=r'$\Pi_L$',
-								 color='r', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
-					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 25, 'r', label=None, zorder=20)
+								 color='r', ecolor='gray', markersize=2, capsize=2, linestyle='none', zorder=10)
+					ax3.scatter(bt[bin_mask], lf_bin[bin_mask], 10, 'r', label=None, zorder=20)
 					if 'V_frac_bin' in rm_results and vf_bin.size:
 						ax3.plot(bt[bin_mask], vf_bin[bin_mask], 'b--', linewidth=style['line'], zorder=1)
 						if vf_err is not None:
 							ax3.errorbar(bt[bin_mask], vf_bin[bin_mask], yerr=vf_err[bin_mask], fmt='o', label=r'$\Pi_V$',
-										 color='b', ecolor='gray', markersize=3, capsize=2, linestyle='none', zorder=10)
-						ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 25, 'b', label=None, zorder=20)
+										 color='b', ecolor='gray', markersize=2, capsize=2, linestyle='none', zorder=10)
+						ax3.scatter(bt[bin_mask], vf_bin[bin_mask], 10, 'b', label=None, zorder=20)
 
 			def _finite_minmax(arrs: List[np.ndarray]) -> Optional[Tuple[float, float]]:
 				vals = []
@@ -2768,10 +2684,6 @@ def plot_rm_time_series(time_array: np.ndarray,
 				return float(np.nanmin(flat)), float(np.nanmax(flat))
 
 			use_arrays: List[np.ndarray] = []
-			#sig_idx = full_indices[signal_mask]
-			#use_arrays.extend([P_frac_full[sig_idx], L_frac_full[sig_idx]])
-			#if 'V' in time_series_data:
-			#	use_arrays.append(V_frac_full[sig_idx])
 			if bin_mask is not None and np.any(bin_mask):
 				use_arrays.extend([pf_bin[bin_mask], lf_bin[bin_mask]])
 				if 'V_frac_bin' in rm_results and vf_bin.size:
@@ -2782,13 +2694,178 @@ def plot_rm_time_series(time_array: np.ndarray,
 				min_frac, max_frac = minmax
 				ax3.set_ylim(min_frac - 0.1, max_frac + 0.1)
 
-		ax3.set_xlabel('Time [ms]', fontsize=style['label'])
-		ax3.set_ylabel('Polarisation Fraction', fontsize=style['label'])
+		ax3.set_ylabel('Pol. Frac.', fontsize=style['label'])
 		if n_peaks > 1:
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
 		ax3.grid(True, alpha=0.3)
-		#ax3.legend(loc='upper right', fontsize=style['legend'], borderaxespad=0.9)
-		ax3.tick_params(axis='both', labelsize=style['tick'])
+		ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		ax3.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
+
+		# ── Row 3: Δ(V/I) across band, per pa_bin, where V has good S/N ────
+		ax_vi = axes[3, peak_idx]
+		ax_vi.axhline(y=0, color='gray', linestyle=':', linewidth=0.5, alpha=0.5)
+
+		if (time_series_data is not None and full_time is not None
+				and freq_hz is not None and 'V' in time_series_data):
+			if offpulse_std is not None and offpulse_std.shape[0] > 3:
+				n_freq_plot = offpulse_std.shape[1] if offpulse_std.ndim > 1 else 1
+				sigma_v = float(np.nanmedian(offpulse_std[3])) / np.sqrt(n_freq_plot)
+			else:
+				n_frac_v = max(1, int(len(V_full) * noise_fraction))
+				sigma_v = np.nanstd(V_full[:n_frac_v])
+				if sigma_v <= 0:
+					mad_v = np.nanmedian(np.abs(V_full - np.nanmedian(V_full)))
+					sigma_v = mad_v / 0.6745 if mad_v > 0 else 1e-10
+
+			# dV/dt background (right axis)
+			t_full_ms = full_time[full_mask] * 1e3
+			V_masked = np.asarray(V_full[full_mask], dtype=float)
+			I_masked = np.asarray(I_full[full_mask], dtype=float)
+			i_snr_full = I_masked / (noise_est + 1e-10)
+			v_snr_full = np.abs(V_masked) / (sigma_v + 1e-10)
+			good_pt = (i_snr_full >= 2.0) & (v_snr_full >= 2.0)
+			# dV/dt from scattered Gaussian fit
+			t_full_ms = full_time[full_mask] * 1e3
+			V_masked = np.asarray(V_full[full_mask], dtype=float)
+			I_masked = np.asarray(I_full[full_mask], dtype=float)
+			i_snr_full = I_masked / (noise_est + 1e-10)
+			v_snr_full = np.abs(V_masked) / (sigma_v + 1e-10)
+			good_pt = (i_snr_full >= 2.0) & (v_snr_full >= 2.0)
+			t_fit_good = t_full_ms[good_pt]
+			V_fit_good = V_masked[good_pt]
+			if len(t_fit_good) > 4:
+				def scattered_gauss(t, A, mu, sigma, tau):
+					sigma = max(sigma, 1e-10)
+					tau = max(tau, 1e-10)
+					arg = sigma / (np.sqrt(2) * tau) - (t - mu) / (np.sqrt(2) * sigma)
+					return A * np.exp(sigma**2 / (2 * tau**2) - (t - mu) / tau) * erfc(arg) / (2 * tau)
+
+				t_peak = t_fit_good[np.argmax(np.abs(V_fit_good))]
+				sig_est = max((t_fit_good[-1] - t_fit_good[0]) / 4, 1e-10)
+				p0 = [np.max(np.abs(V_fit_good)), t_peak, sig_est, sig_est / 2]
+				bounds = ([-np.inf, -np.inf, 1e-10, 1e-10], [np.inf, np.inf, np.inf, np.inf])
+
+				try:
+					popt, pcov = curve_fit(scattered_gauss, t_fit_good, V_fit_good, p0=p0,
+										   bounds=bounds, maxfev=10000)
+					V_model = scattered_gauss(t_full_ms, *popt)
+					dVdt_model = np.gradient(V_model, t_full_ms, edge_order=2) * 1000.0
+
+					# noise-based error (instrumental, not model mismatch)
+					dt_sec = np.diff(full_time[full_mask])
+					dVdt_err = np.sqrt(2) * sigma_v / (dt_sec + 1e-20)
+
+					ax_top.plot(t_full_ms, V_model, color='blueviolet', linewidth=1, alpha=0.5,
+								label=r'$V_{\mathrm{scatt}}$')
+
+					both_good = good_pt[:-1] & good_pt[1:]
+					t_dvdt = t_full_ms[:-1] + 0.5 * np.diff(t_full_ms)
+					dVdt_interp = 0.5 * (dVdt_model[:-1] + dVdt_model[1:])
+					mask_dvdt = both_good & np.isfinite(dVdt_interp) & np.isfinite(dVdt_err)
+					if np.any(mask_dvdt):
+						ax_vi_twin = ax_vi.twinx()
+						ax_vi_twin.spines['left'].set_visible(False)
+						ax_vi_twin.spines['top'].set_visible(False)
+						ax_vi_twin.spines['bottom'].set_visible(False)
+						ax_vi_twin.yaxis.set_label_position('right')
+						ax_vi_twin.yaxis.tick_right()
+						ax_vi_twin.set_ylabel(r'$dV/dt$ [arb.]', fontsize=style['label'])
+						ax_vi_twin.set_yticks([])
+
+						t_plot = t_dvdt[mask_dvdt]
+						dvdt_plot = dVdt_interp[mask_dvdt]
+						dvdt_err_plot = dVdt_err[mask_dvdt]
+						idx = np.arange(len(t_plot))
+						splits = np.where(np.diff(idx) != 1)[0] + 1
+						segments = np.split(idx, splits) if len(splits) > 0 else [idx]
+						for seg in segments:
+							if len(seg) > 1:
+								ax_vi_twin.plot(t_plot[seg], dvdt_plot[seg], color='blueviolet',
+												linewidth=1, alpha=0.5, zorder=1, label=r'$dV/dt$')
+								ax_vi_twin.fill_between(t_plot[seg],
+														dvdt_plot[seg] - dvdt_err_plot[seg],
+														dvdt_plot[seg] + dvdt_err_plot[seg],
+														color='blueviolet', alpha=0.15, zorder=0)
+				except (RuntimeError, ValueError):
+					pass
+
+			t_masked = full_time[full_mask]
+			if _time_axis_dim == 0:
+				I_data = np.asarray(time_series_data['I'])[full_mask]
+				V_data = np.asarray(time_series_data['V'])[full_mask]
+			else:
+				I_data = np.asarray(time_series_data['I'])[:, full_mask].T
+				V_data = np.asarray(time_series_data['V'])[:, full_mask].T
+
+			n_eff = n_pa_bins if n_pa_bins > 0 else len(t_masked)
+			if n_eff > 0 and len(t_masked) > 0:
+				auto_bin = n_pa_bins == 0
+				bin_edges = np.linspace(t_masked[0], t_masked[-1], n_eff + 1) if not auto_bin else np.arange(len(t_masked) + 1)
+				bc, dv_b, dv_e, v_sig = [], [], [], []
+				for b in range(n_eff):
+					if auto_bin:
+						sel = np.zeros(len(t_masked), dtype=bool)
+						sel[b] = True
+					else:
+						sel = (t_masked >= bin_edges[b]) & (t_masked < bin_edges[b + 1])
+						if b == n_eff - 1:
+							sel = (t_masked >= bin_edges[b]) & (t_masked <= bin_edges[b + 1])
+					if np.sum(sel) < 1:
+						continue
+
+					I_avg = np.nanmean(I_data[sel], axis=0)
+					V_avg = np.nanmean(V_data[sel], axis=0)
+					n_in_bin = np.sum(sel)
+
+					i_snr_bin = np.nanmean(I_avg) / (noise_est / np.sqrt(n_in_bin) + 1e-10)
+					v_snr = np.abs(np.nanmean(V_avg)) / (sigma_v / np.sqrt(n_in_bin) + 1e-10)
+
+					vi_chan = V_avg / (I_avg + 1e-10)
+					good = np.isfinite(vi_chan) & (I_avg > 0)
+					if np.sum(good) >= 3 and i_snr_bin >= 2.0 and v_snr >= 2.0:
+						coeffs, cov = np.polyfit(freq_hz[good], vi_chan[good], 1, cov=True)
+						bandwidth = abs(freq_hz[-1] - freq_hz[0])
+						dv_e_val = np.sqrt(cov[0, 0]) * bandwidth
+						if dv_e_val < 5:
+							if auto_bin:
+								bc.append(t_masked[b] * 1e3)
+							else:
+								bc.append(0.5 * (bin_edges[b] + bin_edges[b + 1]) * 1e3)
+							dv_b.append(coeffs[0] * bandwidth)
+							dv_e.append(dv_e_val)
+							v_sig.append(v_snr >= 3.0)
+
+				if len(bc) > 0:
+					bc = np.array(bc)
+					dv_b = np.array(dv_b)
+					dv_e = np.array(dv_e)
+					v_sig = np.array(v_sig)
+					finite = np.isfinite(dv_b) & np.isfinite(dv_e) & (dv_e > 0)
+					if np.any(finite & v_sig):
+						ax_vi.errorbar(bc[finite & v_sig], dv_b[finite & v_sig], yerr=dv_e[finite & v_sig],
+									   fmt='o', color='b', ecolor='gray',
+									   markersize=3, capsize=2, zorder=10, label=r'$\Delta\Pi_V$')
+
+		ax_vi.set_ylabel(r'$\Delta\Pi_V$', fontsize=style['label'])
+		if n_peaks > 1:
+			ax_vi.set_title(f'Peak {peak_idx+1}: Δ(V/I) across band', fontsize=style['title'], fontweight='bold')
+		ax_vi.grid(True, alpha=0.3)
+		ax_vi.set_xlabel('Time [ms]', fontsize=style['label'])
+		ax_vi.tick_params(axis='both', labelsize=style['tick'])
+		if ax_vi.get_legend() is not None:
+			ax_vi.get_legend().remove()
+		if 'ax_vi_twin' in locals() and ax_vi_twin is not None:
+			if ax_vi_twin.get_legend() is not None:
+				ax_vi_twin.get_legend().remove()
+		handles1, labels1 = ax_vi.get_legend_handles_labels()
+		handles2, labels2 = [], []
+		if 'ax_vi_twin' in locals() and ax_vi_twin is not None:
+			handles2, labels2 = ax_vi_twin.get_legend_handles_labels()
+		if peak_idx == 0:
+			all_handles = list(handles1) + list(handles2)
+			all_labels = list(labels1) + list(labels2)
+			if all_handles:
+				ax_vi.legend(all_handles, all_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 
 	if show_full_time and _xlim_full_time is not None and len(_xlim_full_time) > 1:
 		tlo, thi = _xlim_full_time[0] * 1e3, _xlim_full_time[-1] * 1e3

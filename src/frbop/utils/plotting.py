@@ -102,7 +102,7 @@ def set_pub_style(use_latex=False):
         "axes.titlesize": 11,
         "xtick.labelsize": 10,
         "ytick.labelsize": 10,
-        "legend.fontsize": 9,
+        "legend.fontsize": 8,
 
         # Lines/ticks
         "axes.linewidth": 0.8,
@@ -124,7 +124,7 @@ def set_pub_style(use_latex=False):
 
         # Legend
         "legend.frameon": True,
-        "legend.handlelength": 1.4,
+        "legend.handlelength": 1.,
 
         # Colours
         "axes.prop_cycle": cycler(color=IBM_PALETTE),

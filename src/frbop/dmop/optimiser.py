@@ -34,6 +34,7 @@ class DMOptimiser(
 
     def __init__(self, stokes_i: np.ndarray, freq_mhz: np.ndarray, time_ms: np.ndarray,
                  stokes_q: Optional[np.ndarray] = None, stokes_u: Optional[np.ndarray] = None,
+                 stokes_v: Optional[np.ndarray] = None,
                  reference_freq: Optional[float] = None,
                  input_dm: float = 0.0,
                  dedisp_mode: str = 'expand',
@@ -70,6 +71,7 @@ class DMOptimiser(
         self.stokes_i = stokes_i
         self.stokes_q = stokes_q
         self.stokes_u = stokes_u
+        self.stokes_v = stokes_v
         self.freq_mhz = freq_mhz
         self.time_ms = time_ms
         self.n_freq, self.n_time = stokes_i.shape

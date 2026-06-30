@@ -37,6 +37,11 @@ def parse_args() -> argparse.Namespace:
 		help="Optional path to Stokes U numpy file (freq x time)",
 	)
 	parser.add_argument(
+		"--stokes-v",
+		default=None,
+		help="Optional path to Stokes V numpy file (freq x time)",
+	)
+	parser.add_argument(
 		"--freq",
 		default="freq.npy",
 		help="Path to frequency array numpy file [MHz]",
@@ -291,6 +296,8 @@ def main():
 		print(f"  - Stokes Q: {args.stokes_q}")
 	if args.stokes_u:
 		print(f"  - Stokes U: {args.stokes_u}")
+	if args.stokes_v:
+		print(f"  - Stokes V: {args.stokes_v}")
 	print(f"  - Frequency: {args.freq}")
 	print(f"  - Time: {args.time}")
 	if args.dm_step is not None:
@@ -335,18 +342,20 @@ def main():
 			stokes_i = cube[0]
 			stokes_q = cube[1]
 			stokes_u = cube[2]
-			# ignore V if present
+			stokes_v = cube[3] if cube.shape[0] == 4 else None
 		# (freq, time, 4) or (freq, time, 3)
 		elif cube.shape[2] in (3, 4):
 			stokes_i = cube[..., 0]
 			stokes_q = cube[..., 1]
 			stokes_u = cube[..., 2]
+			stokes_v = cube[..., 3] if cube.shape[2] == 4 else None
 		else:
 			raise ValueError(f"Unrecognized stokes-cube layout: {cube.shape}. Expected first or last axis length 3 or 4.")
 	else:
 		stokes_i = np.load(args.stokes_i)
 		stokes_q = np.load(args.stokes_q) if args.stokes_q else None
 		stokes_u = np.load(args.stokes_u) if args.stokes_u else None
+		stokes_v = np.load(args.stokes_v) if args.stokes_v else None
 	freq_mhz = np.load(args.freq)
 	time_ms = np.load(args.time)
 
@@ -360,6 +369,8 @@ def main():
 			stokes_q = stokes_q[order]
 		if stokes_u is not None:
 			stokes_u = stokes_u[order]
+		if stokes_v is not None:
+			stokes_v = stokes_v[order]
 
 	if (stokes_q is None) != (stokes_u is None):
 		print("\nWarning: both --stokes-q and --stokes-u are required to run Q/U-based metrics. Skipping them.")
@@ -432,6 +443,7 @@ def main():
 		time_ms,
 		stokes_q=stokes_q,
 		stokes_u=stokes_u,
+		stokes_v=stokes_v,
 		reference_freq=args.ref_freq,
 		input_dm=args.input_dm,
 		dedisp_mode=args.dedisp_mode,
@@ -567,8 +579,28 @@ def main():
 				print("  - Skipping structure-max cube save (structure method not run).")
 			else:
 				dedisp_i = structure_result.get('dedispersed')
+				# Save freq and time arrays for this component
+				freq_out = output_dir / f"{args.label}_{segment_tag}_structure_max_freq.npy"
+				np.save(freq_out, np.asarray(freq_mhz, dtype=float))
+				print(f"  - Saved structure-max freq: {freq_out}")
+				if dedisp_i is not None:
+					n_time_out = dedisp_i.shape[1]
+					dt = float(np.median(np.diff(time_ms)))
+					delay_samples = optimiser._get_delay_samples(structure_result['dm'])
+					dedisp_mode = args.dedisp_mode
+					if dedisp_mode == 'crop':
+						start_idx = int(np.max(delay_samples))
+						end_idx = int(peak_region[1] - peak_region[0] + np.min(delay_samples))
+						time_out = time_ms[peak_region[0] + start_idx : peak_region[0] + start_idx + n_time_out]
+					else:
+						min_shift = int(np.min(delay_samples))
+						time_out = time_ms[peak_region[0]] + (np.arange(n_time_out) + min_shift) * dt
+					time_path = output_dir / f"{args.label}_{segment_tag}_structure_max_time.npy"
+					np.save(time_path, np.asarray(time_out, dtype=float))
+					print(f"  - Saved structure-max time: {time_path}")
 				dedisp_q = structure_result.get('dedispersed_q')
 				dedisp_u = structure_result.get('dedispersed_u')
+				dedisp_v = structure_result.get('dedispersed_v')
 				if dedisp_i is not None:
 					out_path_i = output_dir / f"{args.label}_{segment_tag}_structure_max_I.npy"
 					flipped_i = np.flip(np.asarray(dedisp_i, dtype=float), axis=0)
@@ -584,6 +616,11 @@ def main():
 					flipped_u = np.flip(np.asarray(dedisp_u, dtype=float), axis=0)
 					np.save(out_path_u, flipped_u)
 					print(f"  - Saved structure-max Stokes U: {out_path_u}")
+				if dedisp_v is not None:
+					out_path_v = output_dir / f"{args.label}_{segment_tag}_structure_max_V.npy"
+					flipped_v = np.flip(np.asarray(dedisp_v, dtype=float), axis=0)
+					np.save(out_path_v, flipped_v)
+					print(f"  - Saved structure-max Stokes V: {out_path_v}")
 				cube_parts = []
 				if dedisp_i is not None:
 					cube_parts.append(np.flip(np.asarray(dedisp_i, dtype=float), axis=0))
@@ -591,6 +628,8 @@ def main():
 					cube_parts.append(np.flip(np.asarray(dedisp_q, dtype=float), axis=0))
 				if dedisp_u is not None:
 					cube_parts.append(np.flip(np.asarray(dedisp_u, dtype=float), axis=0))
+				if dedisp_v is not None:
+					cube_parts.append(np.flip(np.asarray(dedisp_v, dtype=float), axis=0))
 				if len(cube_parts) == 0:
 					print("  - Skipping structure-max cube save (no dedispersed Stokes data available).")
 				else:
