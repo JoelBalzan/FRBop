@@ -145,10 +145,12 @@ def _main():
         # Uncertainty-time plots
         plot_uncertainty(uncertainty, DM_data, args)
         plot_relative_uncertainty(relative_uncertainty, DM_data, args)
+        plot_compare_uncertainty(uncertainty, relative_uncertainty, DM_data, args)
 
         # Structure parameter plots
         plot_SP(norm_CI_filtered, DM_data, args)
         plot_adjusted_SP(adjusted_SPs, DM_data, args)
+        plot_norm_CI_f_adjusted_SP(norm_CI_filtered, adjusted_SPs, DM_data, args)
 
 
     #Write a nice tidy file
@@ -377,6 +379,16 @@ def plot_relative_uncertainty(relative_uncertainty: np.ndarray, DM_data: np.ndar
     plt.savefig(f"{args.label}_{args.dt}us_relative_uncertainty.png")
     plt.clf()
 
+def plot_compare_uncertainty(uncertainty: np.ndarray, relative_uncertainty: np.ndarray, DM_data: np.ndarray, args):
+    plt.plot(DM_data,np.sqrt(2)*100*uncertainty,'-',label=r'$\sqrt{2}$ Uncertainty')
+    plt.plot(DM_data,100*relative_uncertainty,'-',label='Relative Uncertainty')
+    plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
+    plt.ylabel('Uncertainty (%)')
+    plt.grid(color='k', linestyle='--', linewidth=0.5)
+    plt.legend()
+    plt.savefig(f"{args.label}_{args.dt}us_compare_uncertainty.png")
+    plt.clf()
+
 
 def plot_adjusted_SP(adjusted_SPs: np.ndarray, DM_data: np.ndarray, args):
     plt.plot(DM_data,adjusted_SPs,'-')
@@ -385,6 +397,17 @@ def plot_adjusted_SP(adjusted_SPs: np.ndarray, DM_data: np.ndarray, args):
     plt.grid(color='k', linestyle='--', linewidth=0.5)
     plt.tight_layout()
     plt.savefig(f"{args.label}_{args.dt}us_adjusted_SP.png")
+    plt.clf()
+
+def plot_norm_CI_f_adjusted_SP(norm_CI_filtered: np.ndarray, adjusted_SPs: np.ndarray, DM_data: np.ndarray, args):
+    plt.plot(DM_data,norm_CI_filtered,'-',label='Structure Parameter')
+    plt.plot(DM_data,adjusted_SPs,'-',label='Relative Uncertainty Adjusted Structure Parameter')
+    plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
+    plt.ylabel('Structure Parameter')
+    plt.grid(color='k', linestyle='--', linewidth=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{args.label}_{args.dt}us_norm_CI_f_adjusted_SP.png")
     plt.clf()
 
 if __name__ == "__main__":
