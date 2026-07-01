@@ -76,8 +76,9 @@ def uncertainty_calc(detrended_noise: np.ndarray, LPF_data: np.ndarray, filter_d
     CI_dbl_filtered=filter_diag@LPF_data #double smoothing
     norm_CI_dbl_filtered=linalg.norm(CI_dbl_filtered, axis=0) #compute norm
 
-    C_delta_I = dct(detrended_noise, norm='ortho') #DCT the DeltaI
-    C_delta_I_filtered = filter_diag@np.transpose(C_delta_I) #pass DCT data through the combined filter
+    delta_I_filtered = filter_diag @ np.transpose(detrended_noise) #pass detrended noise through the combined filter
+    C_delta_I_filtered = dct(delta_I_filtered, norm='ortho') #DCT the filtered DeltaI
+
     norm_C_delta_I_filtered = linalg.norm(C_delta_I_filtered, axis=0) #compute norm
     
     uncertainty = norm_C_delta_I_filtered/norm_CI_dbl_filtered
