@@ -238,7 +238,7 @@ class MetricsMixin:
 			)
 			mask = I_ts > threshold
 		elif mode == 'mean' and use_fwhm_window:
-			left, right = self._fwhm_window(I_ts, width_factor=2.0)
+			left, right = self._fwhm_window(I_ts, width_factor=1.0)
 			fwhm_mask = np.zeros_like(I_ts, dtype=bool)
 			fwhm_mask[left:right + 1] = True
 			sigma_I = float(self.full_i_noise_std)
