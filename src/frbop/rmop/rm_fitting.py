@@ -408,8 +408,8 @@ def main() -> None:
                 )
             )
 
-    set_pub_style(use_latex=False)
     set_pub_col(args.pub_col)
+    set_pub_style(use_latex=False)
 
     print("=" * 60)
     print("RM FITTING FOR STOKES IQUV DATA")

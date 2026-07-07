@@ -874,6 +874,9 @@ def main():
     # Plots
     # ------------------------------------------------------------------
 
+    set_pub_col(args.pub_col)
+    set_pub_style(use_latex=False)
+
     plot_spectrum_powerlaw_fit(
         freq,
         raw_spectrum,
@@ -886,9 +889,6 @@ def main():
 
     # Spectrum + normalised ACF
     fig, ax = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=1.0))
-
-    set_pub_style(use_latex=False)
-    set_pub_col(args.pub_col)
 
     xabs = np.abs(lags_plot_sym)
 
@@ -924,15 +924,6 @@ def main():
                     label=rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err:.2f}$ MHz",
                     color=comp_colors[i]
                 )
-            #ax.plot(
-            #    lags_plot_sym,
-            #    np.full_like(lags_plot_sym, C_fit),
-            #    ls=":",
-            #    lw=1.0,
-            #    alpha=0.8,
-            #    color="tab:gray",
-            #    label="Offset C",
-            #)
     ax.set_xlim(-lag_zoom, lag_zoom)
     ax.set_xlabel(rf"Frequency lag [MHz]")
     ax.set_ylabel("ACF power")

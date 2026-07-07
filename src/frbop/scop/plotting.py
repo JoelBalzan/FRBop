@@ -28,14 +28,14 @@ def plot_spectrum_powerlaw_fit(
     output=None,
 ):
     styles = _apply_publication_style()
-    fig, axs = plt.subplots(1, 2, figsize=pub_figsize( height_ratio=0.55))
+    fig, axs = plt.subplots(2, 1, figsize=pub_figsize(height_ratio=0.8))
     freq_mhz = np.asarray(freq_mhz, dtype=float)
     spectrum = np.asarray(spectrum, dtype=float)
     mean_model = np.asarray(mean_model, dtype=float)
 
     finite = np.isfinite(freq_mhz) & np.isfinite(spectrum)
     if np.any(finite):
-        axs[0].plot(freq_mhz[finite], spectrum[finite], color='0.25', lw=1.4, label='Spectrum')
+        axs[0].plot(freq_mhz[finite], spectrum[finite], color='0.25', lw=0.8, label='Spectrum')
 
     model_mask = np.isfinite(freq_mhz) & np.isfinite(mean_model)
     if np.any(model_mask):
@@ -44,14 +44,14 @@ def plot_spectrum_powerlaw_fit(
             freq_mhz[model_mask],
             mean_model[model_mask],
             color='tab:orange',
-            lw=1.4,
+            lw=1,
             ls='--',
             label=f"Power-law fit{idx_str}",
         )
 
-    axs[0].set_title('Spectrum power-law fit', fontsize=styles['title'])
+    #axs[0].set_title('Spectrum power-law fit', fontsize=styles['title'])
     axs[0].set_xlabel('Frequency [MHz]', fontsize=styles['label'])
-    axs[0].set_ylabel('Flux / intensity', fontsize=styles['label'])
+    axs[0].set_ylabel(r'S [arb.]', fontsize=styles['label'])
     axs[0].tick_params(labelsize=styles['tick'])
     axs[0].grid(alpha=0.25)
     axs[0].legend(fontsize=styles['legend'])
@@ -60,13 +60,13 @@ def plot_spectrum_powerlaw_fit(
     corr_mask = np.isfinite(mean_model) & (mean_model > 0) & np.isfinite(spectrum)
     if np.any(corr_mask):
         corrected[corr_mask] = (spectrum[corr_mask] - mean_model[corr_mask]) / mean_model[corr_mask]
-        axs[1].plot(freq_mhz[corr_mask], corrected[corr_mask], color='k', lw=1.4)
+        axs[1].plot(freq_mhz[corr_mask], corrected[corr_mask], color='k', lw=0.8)
     else:
         axs[1].text(0.5, 0.5, "No valid corrected spectrum", ha='center', va='center', transform=axs[1].transAxes)
 
-    axs[1].set_title('Corrected spectrum', fontsize=styles['title'])
+    #axs[1].set_title('Corrected spectrum', fontsize=styles['title'])
     axs[1].set_xlabel('Frequency [MHz]', fontsize=styles['label'])
-    axs[1].set_ylabel('Corrected flux', fontsize=styles['label'])
+    axs[1].set_ylabel('Corrected '+r'S [arb.]', fontsize=styles['label'])
     axs[1].tick_params(labelsize=styles['tick'])
     axs[1].grid(alpha=0.25)
     plt.tight_layout()

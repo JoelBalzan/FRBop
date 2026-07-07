@@ -46,7 +46,7 @@ class PeaksMixin:
 			if len(peaks) > 0:
 				plt.scatter(self.time_ms[peaks], smoothed[peaks], color='red', s=20, label='Peaks')
 			plt.xlabel('Time [ms]')
-			plt.ylabel('Flux (arb.)')
+			plt.ylabel(r'S [arb.]')
 			plt.title('Peak Finding Diagnostics')
 			plt.grid(True, alpha=0.3)
 			plt.legend()

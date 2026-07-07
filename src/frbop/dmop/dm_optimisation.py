@@ -519,8 +519,8 @@ def main():
 	label = "Peak" if args.separate_peaks else "Segment"
 	fig_ext = args.ext.strip().lower().lstrip('.') or 'png'
 
-	set_pub_style(use_latex=False)
 	set_pub_col(args.pub_col)
+	set_pub_style(use_latex=False)
 
 	# Analyze each segment (peak or full dataset)
 	all_results = []

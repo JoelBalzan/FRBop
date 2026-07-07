@@ -68,7 +68,7 @@ class ComponentsMixin:
 			'min_uncertainty': 'Min. uncertainty',
 			'pa_slope': 'PA slope',
 			'pa_slope_shrine': 'PA slope (SHRINE)',
-			'l_i_mean': 'L/I mean',
+			'l_i_mean': r'$\Pi_L$ mean',
 		}
 
 		component_idx = np.arange(1, n_components + 1)
@@ -124,18 +124,20 @@ class ComponentsMixin:
 
 		ax.set_ylabel(r'Best DM [$\mathrm{pc\,cm}^{{-3}}$]')
 		ax.grid(True, alpha=0.3)
-		ax.legend()
-		#handles, labels = ax.get_legend_handles_labels()
-		#if handles:
-		#	fig.legend(
-		#		handles,
-		#		labels,
-		#		loc='upper center',
-		#		bbox_to_anchor=(0.5, 1.02),
-		#		ncol=2,
-		#		fontsize=8,
-		#		frameon=False,
-		#	)
+		handles, labels = ax.get_legend_handles_labels()
+		if handles:
+			order_map = {orig_idx: draw_pos for draw_pos, orig_idx in enumerate(draw_order)}
+			handles_ordered = [handles[order_map[i]] for i in range(len(ordered_methods))]
+			labels_ordered = [labels[order_map[i]] for i in range(len(ordered_methods))]
+			fig.legend(
+				handles_ordered,
+				labels_ordered,
+				loc='upper center',
+				bbox_to_anchor=(0.58, 0.95),
+				ncol=4,
+				fontsize=8,
+				frameon=False,
+			)
 
 		# Draw horizontal line at input DM if available
 		if hasattr(self, 'input_dm') and np.isfinite(getattr(self, 'input_dm', np.nan)):
@@ -153,6 +155,7 @@ class ComponentsMixin:
 				pass
 
 		ax.set_xticks(component_idx)
+		ax.minorticks_off()
 		component_names = []
 		for cid in component_ids:
 			cid_int = int(cid)
@@ -359,7 +362,7 @@ class ComponentsMixin:
 			'min_uncertainty': 'Min. uncertainty',
 			'pa_slope': 'PA slope',
 			'pa_slope_shrine': 'PA slope (SHRINE)',
-			'l_i_mean': 'L/I mean',
+			'l_i_mean': r'$\Pi_L$ mean',
 		}
 
 		x = np.arange(len(pair_labels), dtype=float)
@@ -413,7 +416,7 @@ class ComponentsMixin:
 				)
 
 		ax.axhline(0.0, color='0.35', linestyle='--', alpha=0.8)
-		ax.set_xticks(x)
+		ax.set_xticks([])
 		x_pad = 0.2
 		ax.set_xlim(x[0] - x_pad, x[-1] + x_pad)
 		ax.set_xticklabels([])

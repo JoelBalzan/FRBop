@@ -218,8 +218,8 @@ def main():
 
             # Optional plot with FWHM markers (publication style)
             if args.output:
-                set_pub_style(use_latex=False)
                 set_pub_col(args.pub_col)
+                set_pub_style(use_latex=False)
 
                 fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.7))
                 ax.plot(t_burst, pulse_profile, 'k-', label='Data')

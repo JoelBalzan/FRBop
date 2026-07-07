@@ -361,7 +361,7 @@ class PlottingMixin:
 					show_time_legend = False
 
 			axes[idx, 1].set_title(f"Metric = {result['metric']:.3f}")
-			axes[idx, 1].set_ylabel(rf'S [arb.]')
+			axes[idx, 1].set_ylabel(r'S [arb.]')
 			axes[idx, 1].set_xlabel('Time [ms]')
 			axes[idx, 1].grid(True, alpha=0.3)
 			axes[idx, 1].title.set_fontsize(fs_title)
