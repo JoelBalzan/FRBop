@@ -3435,37 +3435,6 @@ def plot_burns_law_fits(fitter: RMFitter,
 				label=r'$\Pi_V$'
 			)
 
-		if circ_lin_popt is not None and best_circular_model == 'mC_linear':
-			y_cl = circ_linear_model(x_model, *circ_lin_popt)
-			ax.plot(
-				freq_model_mhz, y_cl,
-				color='#fe6100',
-				linewidth=style['line'],
-				linestyle='--',
-				#label=r"$m_C(\lambda^2)=C_0 + C_1\lambda^2$", zorder=20
-				label=r"$m_C(\lambda^2)$", zorder=20
-			)
-
-		if circ_sin_popt is not None and best_circular_model == 'mC_sinusoid':
-			y_cs = circ_sine_model(x_model, *circ_sin_popt)
-			ax.plot(
-				freq_model_mhz, y_cs,
-				color='#fe6100',
-				linewidth=style['line'],
-				linestyle='--',
-				label=r"$m_C(\lambda^2)=C_0 + A\sin\left(2\left(\phi_0 + \beta\lambda^2\right)\right)$", zorder=20
-			)
-
-		if circ_const_popt is not None and best_circular_model == 'mC_const':
-			y_cc = circ_const_model(x_model, *circ_const_popt)
-			ax.plot(
-				freq_model_mhz, y_cc,
-				color='#fe6100',
-				linewidth=style['line'],
-				linestyle='--',
-				label=r"$m_C(\lambda^2)=C_0$", zorder=20
-			)
-
 	ax.set_xlabel('Frequency [MHz]', fontsize=style['label'])
 	ax.set_ylabel('Polarisation Fraction', fontsize=style['label'])
 	ax.grid(True, alpha=0.3)
