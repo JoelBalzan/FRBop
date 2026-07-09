@@ -5,6 +5,7 @@ from typing import Sequence
 
 COMMANDS = {
     "dm": ("DM optimization", "frbop.dmop.dm_optimisation"),
+    "pa": ("PA / RVM fitting", "frbop.paop.paop_cli"),
     "rm": ("RM fitting", "frbop.rmop.rm_fitting"),
     "scint": ("Scintillation fit", "frbop.scop.fit_frb_scintillation"),
     "scatt": ("Scattering timescale fit", "frbop.scop.fit_scattering_timescale"),
@@ -43,6 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  frbop dm --stokes-i I.npy --freq freq.npy --time time.npy\n"
+            "  frbop pa -q Q.npy -u U.npy --time time.npy --period-ms 1.6\n"
             "  frbop rm -i I.npy -q Q.npy -u U.npy --freq freq.npy\n"
             "  frbop scint FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
             "  frbop scatt FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
