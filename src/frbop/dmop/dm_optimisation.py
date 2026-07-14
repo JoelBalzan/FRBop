@@ -251,6 +251,12 @@ def parse_args() -> argparse.Namespace:
 		),
 	)
 	parser.add_argument('--pub-col', type=float, default=1, help='Publication figure column count (1, 2, 3, ...). Default: 1')
+	parser.add_argument(
+		"--plot-range",
+		action="store_true",
+		help="Save a 1×3 waterfall plot showing the burst dedispersed to the lower-bound, optimum, "
+		"and upper-bound DM for the structure method",
+	)
 	return parser.parse_args()
 
 
@@ -570,6 +576,15 @@ def main():
 			show_overlay_uncertainty=show_comparison_overlay_uncertainty,
 			disabled_error_methods=disabled_method_keys,
 		)
+
+		if args.plot_range and 'structure' in results:
+			range_path = f'{args.label}_dm_range_{segment_tag}.{fig_ext}'
+			optimiser.plot_range(
+				results['structure'],
+				peak_region=peak_region,
+				label=args.label,
+				save_path=range_path,
+			)
 
 		if args.structure_max_cubes_dir:
 			output_dir = Path(args.structure_max_cubes_dir)

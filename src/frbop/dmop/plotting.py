@@ -627,3 +627,102 @@ class PlottingMixin:
 			plt.show()
 
 
+	def plot_range(
+		self,
+		structure_result: Dict,
+		peak_region: Optional[Tuple[int, int]] = None,
+		label: str = "frb",
+		save_path: Optional[str] = None,
+	):
+		"""
+		Plot the burst dedispersed to the lower-bound, optimum, and upper-bound DM
+		for the structure method in a 1×3 waterfall layout.
+
+		Parameters:
+		-----------
+		structure_result : dict
+			Result dict for the 'structure' method, containing 'dm',
+			'uncertainty_low_dm', and 'uncertainty_high_dm'.
+		peak_region : tuple, optional
+			(start, end) indices into the time axis. If None, uses full data.
+		label : str
+			FRB label, used for title.
+		save_path : str, optional
+			Path to save the figure.
+		"""
+		dm_low = structure_result.get('uncertainty_low_dm')
+		dm_opt = structure_result.get('dm')
+		dm_high = structure_result.get('uncertainty_high_dm')
+		if dm_low is None or dm_high is None or dm_opt is None:
+			print("Range plot skipped — uncertainty bounds not available for structure method.")
+			return
+
+		data = self.stokes_i
+		if peak_region is not None:
+			data = data[:, peak_region[0]:peak_region[1]]
+			time_range = self.time_ms[peak_region[0]:peak_region[1]]
+		else:
+			time_range = self.time_ms
+
+		dms = [dm_low, dm_opt, dm_high]
+		titles = ['Lower bound', 'Optimum', 'Upper bound']
+		dedispersed_list = []
+		time_axes = []
+
+		for dm in dms:
+			dedisp = self.dedisperse(data, dm, mode=self.dedisp_mode)
+			n_time = dedisp.shape[1]
+			dt = float(np.nanmedian(np.diff(time_range))) if len(time_range) > 1 else 1.0
+			delay_samples = self._get_delay_samples(dm)
+			if self.dedisp_mode == 'crop':
+				start_shift = int(np.max(delay_samples))
+			else:
+				start_shift = int(np.min(delay_samples))
+			time_axis = time_range[0] + start_shift * dt + np.arange(n_time) * dt
+			dedispersed_list.append(dedisp)
+			time_axes.append(time_axis)
+
+		vmin, vmax = self._robust_vmin_vmax(np.concatenate(
+			[d.ravel() for d in dedispersed_list]
+		))
+
+		fig, axes = plt.subplots(
+			1, 3,
+			figsize=pub_figsize(ncol=1, height_ratio=0.5),
+		)
+
+		for i, (dedisp, taxis, title, dm) in enumerate(zip(
+			dedispersed_list, time_axes, titles, dms
+		)):
+			ax = axes[i]
+			ax.imshow(
+				dedisp,
+				aspect='auto',
+				extent=[taxis[0], taxis[-1], self.freq_mhz[0], self.freq_mhz[-1]],
+				cmap='plasma',
+				origin='lower',
+				vmin=vmin,
+				vmax=vmax,
+			)
+			ax.set_title(title)
+			dm_text = self._format_dm(dm, 3)
+			ax.text(
+				0.98, 0.98,
+				rf"DM={dm_text} $\mathrm{{pc\,cm^{{-3}}}}$",
+				transform=ax.transAxes,
+				ha='right', va='top',
+				color='white',
+				fontsize=8,
+				bbox=dict(facecolor='black', edgecolor='none', alpha=0.35, pad=2.0),
+			)
+			ax.set_xlabel('Time [ms]')
+			if i == 0:
+				ax.set_ylabel('Frequency [MHz]')
+
+		#fig.suptitle(f'{label} — Structure method')
+		plt.tight_layout()
+		if save_path:
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			print(f"Range plot saved to: {save_path}")
+		else:
+			plt.show()
