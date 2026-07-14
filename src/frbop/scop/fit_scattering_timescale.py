@@ -7,8 +7,12 @@ from scipy.optimize import curve_fit
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
-from frbop.utils.peaks import parse_peak_index_pairs
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_col, set_pub_style
+from frbop.utils.peaks import (
+    parse_peak_index_pairs,
+    split_frequency_bands_equal,
+    split_frequency_bands_equal_snr,
+)
+from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_col, set_pub_style, IBM_PALETTE
 
 
 def main():
@@ -31,7 +35,19 @@ def main():
     parser.add_argument(
         "--fit-index", "--fit-idx",
         action="store_true",
-        help="Fit the scattering index by independently fitting tau at each frequency and fitting a power law.",
+        help="Fit the scattering index by fitting tau at each frequency (or frequency band) and fitting a power law.",
+    )
+    parser.add_argument(
+        "--freq-bands",
+        type=int,
+        default=None,
+        help="Divide the spectrum into N equal contiguous frequency bands for scattering index fitting (requires --fit-index).",
+    )
+    parser.add_argument(
+        "--freq-bands-snr", "--freq-snr",
+        type=int,
+        default=None,
+        help="Divide the spectrum into N contiguous bands with equal total S/N for scattering index fitting (requires --fit-index).",
     )
     parser.add_argument("--smooth", type=int, default=5, help="Smoothing window for time series (bins)")
     parser.add_argument("--manual-peaks", action="store_true", help="Manually select one or more on-pulse regions by clicking start/end bounds")
@@ -66,7 +82,7 @@ def main():
     print(f"Reference frequency = {ref_freq:.6f} MHz")
     print(f"Band-center frequency = {band_center_freq:.6f} MHz")
     if fit_index_mode:
-        print("Scattering index mode: will fit index from per-frequency tau measurements")
+        print("Scattering index mode: will fit index from tau measurements")
     else:
         print(f"Scattering index: {scattering_index:.1f} (fixed)")
 
@@ -95,7 +111,7 @@ def main():
             ts,
             title='Click start/end bounds for each peak (close window when done)',
             x_label='Time [ms]',
-            y_label='Flux',
+            y_label=r'S [arb.]',
             exclusive_end=True,
         )
         clipped_regions = []
@@ -130,18 +146,53 @@ def main():
 
     burst_ds = burst_ds - bandpass[:, None]
 
-    # Optionally fit scattering index from per-frequency tau measurements
+    # Per-channel off-pulse RMS for SNR weighting
+    off_pulse_rms = np.nanstd(off_pulse, axis=1) if off_pulse.size > 0 else None
+
+    # Optionally fit scattering index from per-frequency (or per-band) tau measurements
     fitted_index = None
     fitted_index_err = None
     tau_at_ref = None
     if fit_index_mode:
-        fitted_index, tau_at_ref, fitted_index_err, n_freq_fitted = fit_scattering_index_from_frequencies(
-            burst_ds, freq, time, onpulse_mask, ref_freq=ref_freq
-        )
+        # Build frequency-band regions if requested
+        band_regions = None
+        if args.freq_bands_snr is not None:
+            band_snr_weights = None
+            if off_pulse_rms is not None:
+                raw_spectrum = np.nanmean(burst_ds, axis=1)
+                band_snr_weights = np.zeros_like(freq, dtype=float)
+                valid = np.isfinite(raw_spectrum) & np.isfinite(off_pulse_rms) & (off_pulse_rms > 0)
+                band_snr_weights[valid] = np.maximum(raw_spectrum[valid] / off_pulse_rms[valid], 0.0)
+            elif off_pulse_rms is None:
+                print("Equal-SNR banding requested but off-pulse RMS is unavailable; falling back to equal-width bands.")
+            band_regions = split_frequency_bands_equal_snr(freq, band_snr_weights, args.freq_bands_snr)
+            print(f"\nScattering index: {len(band_regions)} equal-SNR frequency bands")
+            for i, (start, stop) in enumerate(band_regions, start=1):
+                print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
+        elif args.freq_bands is not None:
+            band_regions = split_frequency_bands_equal(freq, args.freq_bands)
+            print(f"\nScattering index: {len(band_regions)} equal frequency bands")
+            for i, (start, stop) in enumerate(band_regions, start=1):
+                print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
+
+        fit_details = None
+        if band_regions is not None:
+            fitted_index, tau_at_ref, fitted_index_err, n_freq_fitted, fit_details = \
+                fit_scattering_index_from_frequencies(
+                    burst_ds, freq, time, onpulse_mask, ref_freq=ref_freq,
+                    band_regions=band_regions, return_details=True,
+                )
+        else:
+            fitted_index, tau_at_ref, fitted_index_err, n_freq_fitted = \
+                fit_scattering_index_from_frequencies(
+                    burst_ds, freq, time, onpulse_mask, ref_freq=ref_freq,
+                    band_regions=None,
+                )
         if fitted_index is not None:
             scattering_index = float(fitted_index)
             scattering_scale = (band_center_freq / ref_freq) ** scattering_index
-            print(f"\nFitted scattering index from {n_freq_fitted} frequency channels:")
+            label = "frequency bands" if band_regions is not None else "frequency channels"
+            print(f"\nFitted scattering index from {n_freq_fitted} {label}:")
             if fitted_index_err is not None and np.isfinite(fitted_index_err):
                 print(f"  alpha = {scattering_index:.3f} ± {fitted_index_err:.3f}")
             else:
@@ -150,6 +201,61 @@ def main():
                 print(f"  tau({ref_freq:.3f} MHz) = {tau_at_ref:.6f} ms")
             else:
                 print(f"  tau({ref_freq:.3f} MHz) = {tau_at_ref:.3e} ms (underflowed; try different freq range)")
+
+        # Subband diagnostic plot
+        if band_regions is not None and fit_details is not None and len(fit_details['freq']) > 0:
+            set_pub_col(args.pub_col)
+            set_pub_style(use_latex=False)
+            n_bands = len(fit_details['freq'])
+            t_burst_plot = time[onpulse_mask]
+            fig_width, _ = pub_figsize()
+            fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
+            gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
+
+            # Left column: subband profiles with fits
+            for i in range(n_bands):
+                ax = fig.add_subplot(gs[i, 0])
+                profile = fit_details['profile'][i]
+                popt = fit_details['popt'][i]
+                tau_val = fit_details['tau'][i]
+                freq_val = fit_details['freq'][i]
+                fit_curve = scattered_gaussian(t_burst_plot, *popt)
+
+                ax.plot(t_burst_plot, profile, 'k-', linewidth=1.0)
+                ax.plot(t_burst_plot, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=f'$\\tau={tau_val:.3f}$ ms')
+                ax.set_ylabel(r'S [arb.]')
+                ax.set_yticklabels([])
+                ax.set_ylim(bottom=np.nanmin(profile) * 1.1, top=np.nanmax(profile) * 1.3)
+                ax.text(0.02, 0.95, f'{freq_val:.1f} MHz', transform=ax.transAxes,
+                        va='top', fontsize=8)
+                if i == n_bands - 1:
+                    ax.set_xlabel('Time [ms]')
+                ax.legend(loc='upper right')
+                ax.grid(True, alpha=0.3)
+
+            # Right column: tau vs frequency with power-law fit
+            ax_tau = fig.add_subplot(gs[:, 1])
+            band_freqs = np.array(fit_details['freq'])
+            band_taus = np.array(fit_details['tau'])
+            ax_tau.plot(band_freqs, band_taus, 'ko', markersize=4, label='Measured τ')
+
+            # Power-law fit line
+            freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
+            tau_grid = tau_at_ref * (freq_grid / ref_freq) ** scattering_index
+            ax_tau.plot(freq_grid, tau_grid, 'b-', linewidth=1.5,
+                        label=f'α={scattering_index:.2f}±{fitted_index_err:.2f}')
+            ax_tau.set_xlabel('Frequency [MHz]')
+            ax_tau.set_ylabel('τ [ms]')
+            ax_tau.legend()
+            ax_tau.grid(True, alpha=0.3)
+
+            # Save or show
+            if args.output:
+                base, ext = args.output.rsplit('.', 1) if '.' in args.output else (args.output, 'png')
+                bands_output = f"{base}_subbands.{ext}"
+                savefig_rasterized(bands_output, dpi=300, fig=fig)
+                print(f"Subband diagnostic plot saved to {bands_output}")
+            plt.close(fig)
 
     # Frequency-integrated pulse profile and scattered-Gaussian fit for t_scatt
     pulse_profile = np.nanmean(burst_ds, axis=0)
@@ -246,7 +352,7 @@ def main():
                 #ax.text(mu, y_text2, f'Scatter FWHM = {fwhm_scatter:.3f} ms', ha='center', va='top', color='C2', fontsize=styles['annotation'])
 
                 ax.set_xlabel('Time [ms]')
-                ax.set_ylabel('Flux')
+                ax.set_ylabel(r'S [arb.]')
                 ax.legend(loc='best')
                 ax.grid(True, alpha=0.3)
                 plt.tight_layout()
