@@ -87,19 +87,19 @@ def _main():
     upp_bound_idx = -1
     low_bound_idx = -1
 
-    i = max_SN_index
+    i = max_SN_index + 1
     while i < len(max_SNR_list):
+        if max_SN - max_SNR_list[i] >= 1:
+            break
         i += 1
-        if max_SN - max_SNR_list[i] >= 1:
-            break
-    upp_bound_idx = i
+    upp_bound_idx = min(i, len(max_SNR_list) - 1)
 
-    i = max_SN_index
+    i = max_SN_index - 1
     while i >= 0:
-        i -= 1
         if max_SN - max_SNR_list[i] >= 1:
             break
-    low_bound_idx = i
+        i -= 1
+    low_bound_idx = max(i, 0)
 
 
     # S/N of DENOISED signal

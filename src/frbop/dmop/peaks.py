@@ -89,6 +89,8 @@ class PeaksMixin:
 			x_label='Time [ms]',
 			y_label='Flux',
 			exclusive_end=True,
+			dspec=self.stokes_i,
+			freq_axis=self.freq_mhz,
 		)
 	
 

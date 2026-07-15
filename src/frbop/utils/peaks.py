@@ -1,4 +1,4 @@
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,8 +14,20 @@ def select_peaks_manual(
     x_label: str = "Time [ms]",
     y_label: str = r"S [arb.]",
     exclusive_end: bool = True,
+    dspec: Optional[np.ndarray] = None,
+    freq_axis: Optional[np.ndarray] = None,
 ) -> List[Tuple[int, int]]:
-    """Interactively select peak regions from a 1D profile."""
+    """Interactively select peak regions from a 1D profile.
+
+    Parameters
+    ----------
+    time_axis : 1D array of time values [ms], ascending
+    profile   : 1D profile (e.g. collapsed time series)
+    dspec     : optional 2D dynamic spectrum (n_freq, n_time).
+                When provided, shows the dspec in a panel below the profile
+                with a shared time axis.
+    freq_axis : 1D frequency array [MHz], required if dspec is provided.
+    """
     time_axis = np.asarray(time_axis, float)
     profile = np.asarray(profile, float)
 
@@ -28,35 +40,97 @@ def select_peaks_manual(
             f"time_axis length ({time_axis.size}) does not match profile length ({profile.size})"
         )
 
-    fig, ax = plt.subplots(figsize=pub_figsize( height_ratio=0.55))
-    ax.plot(time_axis, profile, color='k', linewidth=1)
-    ax.set_title(title)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.grid(True, alpha=0.3)
-    cursor_line = ax.axvline(time_axis[0] if time_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+    if dspec is not None:
+        dspec = np.asarray(dspec, float)
+        if dspec.ndim != 2:
+            raise ValueError(f"dspec must be 2D, got shape={dspec.shape}")
+        if dspec.shape[1] != time_axis.size:
+            raise ValueError(
+                f"dspec time dimension ({dspec.shape[1]}) does not match time_axis ({time_axis.size})"
+            )
+        if freq_axis is None:
+            raise ValueError("freq_axis is required when dspec is provided")
+        freq_axis = np.asarray(freq_axis, float)
+        if freq_axis.ndim != 1:
+            raise ValueError(f"freq_axis must be 1D, got shape={freq_axis.shape}")
+        if freq_axis.size != dspec.shape[0]:
+            raise ValueError(
+                f"freq_axis length ({freq_axis.size}) does not match dspec n_freq ({dspec.shape[0]})"
+            )
 
     clicks: List[float] = []
 
-    def on_move(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        cursor_line.set_xdata([event.xdata, event.xdata])
-        fig.canvas.draw_idle()
+    if dspec is not None:
+        fig, (ax, ax_spec) = plt.subplots(
+            2, 1, figsize=pub_figsize(height_ratio=0.9),
+            sharex=True,
+            gridspec_kw={'height_ratios': [1, 2], 'hspace': 0},
+        )
+        ax.plot(time_axis, profile, color='k', linewidth=1)
+        ax.set_title(title)
+        ax.set_ylabel(y_label)
+        ax.grid(True, alpha=0.3)
 
-    def on_click(event):
-        if event.inaxes != ax or event.xdata is None:
-            return
-        x = float(event.xdata)
-        clicks.append(x)
-        ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
-        if len(clicks) % 2 == 0:
-            start_t, end_t = sorted((clicks[-2], clicks[-1]))
-            ax.axvspan(start_t, end_t, color='tab:orange', alpha=0.2)
-        fig.canvas.draw_idle()
+        extent = [time_axis[0], time_axis[-1], freq_axis[0], freq_axis[-1]]
+        ax_spec.imshow(dspec, aspect='auto', extent=extent, origin='lower', cmap='plasma')
+        ax_spec.set_xlabel(x_label)
+        ax_spec.set_ylabel('Frequency [MHz]')
+        ax_spec.grid(True, alpha=0.3)
 
-    fig.canvas.mpl_connect('motion_notify_event', on_move)
-    fig.canvas.mpl_connect('button_press_event', on_click)
+        cursor_line = ax.axvline(time_axis[0] if time_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+        cursor_line_spec = ax_spec.axvline(time_axis[0] if time_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+
+        def on_move(event):
+            if event.inaxes is None or event.xdata is None:
+                return
+            x = float(event.xdata)
+            cursor_line.set_xdata([x, x])
+            cursor_line_spec.set_xdata([x, x])
+            fig.canvas.draw_idle()
+
+        def on_click(event):
+            if event.inaxes is None or event.xdata is None:
+                return
+            x = float(event.xdata)
+            clicks.append(x)
+            for a in (ax, ax_spec):
+                a.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
+            if len(clicks) % 2 == 0:
+                start_t, end_t = sorted((clicks[-2], clicks[-1]))
+                for a in (ax, ax_spec):
+                    a.axvspan(start_t, end_t, color='tab:orange', alpha=0.2)
+            fig.canvas.draw_idle()
+
+        fig.canvas.mpl_connect('motion_notify_event', on_move)
+        fig.canvas.mpl_connect('button_press_event', on_click)
+    else:
+        fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.55))
+        ax.plot(time_axis, profile, color='k', linewidth=1)
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.grid(True, alpha=0.3)
+        cursor_line = ax.axvline(time_axis[0] if time_axis.size else 0.0, color='tab:blue', alpha=0.4, linewidth=1)
+
+        def on_move(event):
+            if event.inaxes != ax or event.xdata is None:
+                return
+            cursor_line.set_xdata([event.xdata, event.xdata])
+            fig.canvas.draw_idle()
+
+        def on_click(event):
+            if event.inaxes != ax or event.xdata is None:
+                return
+            x = float(event.xdata)
+            clicks.append(x)
+            ax.axvline(x, color='tab:red', alpha=0.7, linewidth=1)
+            if len(clicks) % 2 == 0:
+                start_t, end_t = sorted((clicks[-2], clicks[-1]))
+                ax.axvspan(start_t, end_t, color='tab:orange', alpha=0.2)
+            fig.canvas.draw_idle()
+
+        fig.canvas.mpl_connect('motion_notify_event', on_move)
+        fig.canvas.mpl_connect('button_press_event', on_click)
 
     plt.show()
 
