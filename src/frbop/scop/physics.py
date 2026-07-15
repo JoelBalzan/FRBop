@@ -2,7 +2,7 @@
 
 from astropy import units as u
 from astropy.coordinates import Distance, SkyCoord
-from astropy.cosmology import WMAP5
+from astropy.cosmology import WMAP5, Planck18
 
 
 def scale_scintillation_bandwidth(delta_nu_d_mhz, nu_from_mhz, nu_to_mhz, alpha=4.0):
@@ -13,7 +13,7 @@ def scale_scintillation_bandwidth(delta_nu_d_mhz, nu_from_mhz, nu_to_mhz, alpha=
 
 
 def estimate_ds_kpc_from_redshift(z):
-    return Distance(z=z, cosmology=WMAP5).to(u.kpc).value
+    return Planck18.angular_diameter_distance(z).to(u.kpc).value
 
 
 def radec_to_galactic_deg(ra_hms, dec_dms):

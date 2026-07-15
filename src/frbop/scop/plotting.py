@@ -39,7 +39,7 @@ def plot_spectrum_powerlaw_fit(
 
     model_mask = np.isfinite(freq_mhz) & np.isfinite(mean_model)
     if np.any(model_mask):
-        idx_str = "" if spectral_index is None else f" (index={float(spectral_index):.2f})"
+        idx_str = "" if spectral_index is None else f" ($\\alpha_s$={float(spectral_index):.2f})"
         axs[0].plot(
             freq_mhz[model_mask],
             mean_model[model_mask],
@@ -91,7 +91,7 @@ def plot_lorentzian_diagnostics(
     output=None,
 ):
     styles = _apply_publication_style()
-    fig, axs = plt.subplots(2, 3, figsize=pub_figsize( height_ratio=1.05))
+    fig, axs = plt.subplots(2, 3, figsize=pub_figsize(1, height_ratio=1.05))
     xabs = np.abs(lags_plot_sym)
 
     panel_cfg = [
@@ -205,11 +205,13 @@ def plot_scintillation_band_power_law(
     # Top row: power-law plot + residual ratio
     # Bottom rows: per-band spectra + ACF Lorentzian fits
     n_bands = len(band_results)
-    base_width, base_height = pub_figsize( height_ratio=1.15)
-    fig_height = max(base_height, 6.0)
-    fig = plt.figure(figsize=(base_width, fig_height))
-    gs_top = fig.add_gridspec(1, 2, top=0.95, bottom=0.62, hspace=0.35, wspace=0.3)
-    gs_bot = fig.add_gridspec(2, n_bands, top=0.57, bottom=0.07, hspace=0.45, wspace=0.35)
+    base_width, _ = pub_figsize(1, 0.5)
+    fig_height = max(6.0, 2.5 + 1.8 * n_bands)
+    fig = plt.figure(figsize=(base_width, fig_height), constrained_layout=False)
+    # Top gridspec: power-law + residual ratio
+    gs_top = fig.add_gridspec(1, 2, top=0.93, bottom=0.62, wspace=0.3)
+    # Bottom gridspec: per-band spectra + ACF fits
+    gs_bot = fig.add_gridspec(2, n_bands, top=0.56, bottom=0.07, hspace=0.4, wspace=0.35)
 
     ax0 = fig.add_subplot(gs_top[0, 0])
     ax1 = fig.add_subplot(gs_top[0, 1])

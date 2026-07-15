@@ -46,6 +46,7 @@ def fit_scattering_index_from_frequencies(
     nfreq, ntime_burst = ds.shape
     t_burst = time[onpulse_mask]
     tau_values = []
+    tau_err_values = []
     freq_values = []
 
     dt_ms = float(np.abs(time[1] - time[0])) if time.size > 1 else 1e-3
@@ -59,7 +60,7 @@ def fit_scattering_index_from_frequencies(
 
     fit_details = None
     if return_details:
-        fit_details = {'freq': [], 'tau': [], 'profile': [], 'popt': []}
+        fit_details = {'freq': [], 'tau': [], 'tau_err': [], 'profile': [], 'popt': []}
 
     for profile, freq_val in iterations:
         if profile.size < 5:
@@ -82,7 +83,7 @@ def fit_scattering_index_from_frequencies(
         upper = [np.inf, float(t_burst[-1]), burst_duration * 0.5, burst_duration * 0.5, np.inf]
 
         try:
-            popt, _ = curve_fit(
+            popt, pcov = curve_fit(
                 scattered_gaussian,
                 t_burst,
                 profile,
@@ -91,12 +92,15 @@ def fit_scattering_index_from_frequencies(
                 maxfev=5000,
             )
             tau_fit = float(popt[3])
+            tau_err = float(np.sqrt(np.diag(pcov))[3]) if np.isfinite(pcov).all() else np.nan
             if tau_fit > 0:
                 tau_values.append(tau_fit)
+                tau_err_values.append(tau_err)
                 freq_values.append(freq_val)
                 if return_details and fit_details is not None:
                     fit_details['freq'].append(freq_val)
                     fit_details['tau'].append(tau_fit)
+                    fit_details['tau_err'].append(tau_err)
                     fit_details['profile'].append(profile.copy())
                     fit_details['popt'].append(popt.copy())
         except Exception:
@@ -121,8 +125,13 @@ def fit_scattering_index_from_frequencies(
     log_freq = np.log(freq_values)
     log_tau = np.log(tau_values)
 
-    # Estimate uncertainties in log space
-    log_err = np.ones_like(log_freq) * 0.2
+    # Estimate uncertainties in log space (sigma_log_tau ~ sigma_tau / tau)
+    tau_err_values = np.array(tau_err_values)
+    log_err = np.where(
+        np.isfinite(tau_err_values) & (tau_err_values > 0) & (tau_values > 0),
+        tau_err_values / tau_values,
+        0.2,
+    )
 
     try:
         # from https://github.com/fjankowsk/scatfit/tree/master

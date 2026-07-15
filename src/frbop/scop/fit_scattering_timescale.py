@@ -212,17 +212,26 @@ def main():
             fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
             gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
 
-            # Left column: subband profiles with fits
+            # Left column: subband profiles with fits (shared x-axis)
+            ax_left = None
             for i in range(n_bands):
-                ax = fig.add_subplot(gs[i, 0])
+                if ax_left is None:
+                    ax = fig.add_subplot(gs[i, 0])
+                    ax_left = ax
+                else:
+                    ax = fig.add_subplot(gs[i, 0], sharex=ax_left)
                 profile = fit_details['profile'][i]
                 popt = fit_details['popt'][i]
                 tau_val = fit_details['tau'][i]
+                tau_err = fit_details['tau_err'][i]
                 freq_val = fit_details['freq'][i]
                 fit_curve = scattered_gaussian(t_burst_plot, *popt)
 
+                tau_label = (f'$\\tau={tau_val:.3f}\\pm{tau_err:.3f}$ ms'
+                             if np.isfinite(tau_err) and tau_err > 0
+                             else f'$\\tau={tau_val:.3f}$ ms')
                 ax.plot(t_burst_plot, profile, 'k-', linewidth=1.0)
-                ax.plot(t_burst_plot, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=f'$\\tau={tau_val:.3f}$ ms')
+                ax.plot(t_burst_plot, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
                 ax.set_ylabel(r'S [arb.]')
                 ax.set_yticklabels([])
                 ax.set_ylim(bottom=np.nanmin(profile) * 1.1, top=np.nanmax(profile) * 1.3)
@@ -230,6 +239,8 @@ def main():
                         va='top', fontsize=8)
                 if i == n_bands - 1:
                     ax.set_xlabel('Time [ms]')
+                else:
+                    ax.tick_params(labelbottom=False)
                 ax.legend(loc='upper right')
                 ax.grid(True, alpha=0.3)
 
@@ -237,7 +248,7 @@ def main():
             ax_tau = fig.add_subplot(gs[:, 1])
             band_freqs = np.array(fit_details['freq'])
             band_taus = np.array(fit_details['tau'])
-            ax_tau.plot(band_freqs, band_taus, 'ko', markersize=4, label='Measured τ')
+            ax_tau.plot(band_freqs, band_taus, 'ko', markersize=4, label='Measured $\\tau$')
 
             # Power-law fit line
             freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
