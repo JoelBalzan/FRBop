@@ -22,7 +22,10 @@ from frbop.scop.ne2025 import (estimate_lg_kpc_from_ne2025, get_cn2_profile,
 from frbop.scop.physics import (estimate_ds_kpc_from_redshift,
                                 radec_to_galactic_deg,
                                 scale_scintillation_bandwidth)
-from frbop.scop.plotting import (plot_lorentzian_diagnostics,
+from frbop.scop.plotting import (compute_modulation_index,
+                                 plot_acf_fit,
+                                 plot_lorentzian_diagnostics,
+                                 plot_modulation_index,
                                  plot_scintillation_band_power_law,
                                  plot_spectrum_powerlaw_fit)
 from frbop.scop.power import correct_spectrum_powerlaw
@@ -72,6 +75,12 @@ def main():
     parser.add_argument("--fit-max-lag",       type=float, default=8.0)
     parser.add_argument("--lag-zoom",          type=float, default=None,
                         help="Zoom factor for ACF lag axis in diagnostic plots.")
+    parser.add_argument("--mod-plot", action="store_true",
+                        help="Generate time-resolved modulation index plot.")
+    parser.add_argument("--mod-sigma", type=float, default=3.0,
+                        help="I significance threshold (sigma) for modulation index (default: 3.0).")
+    parser.add_argument("--mod-nbins", type=int, default=None,
+                        help="Number of time bins for binned modulation index (default: per-sample).")
     parser.add_argument("--dnu-mhz",           type=float, nargs='+', default=None,
                         help="Provide one or more Δν_d values in MHz (skips Lorentzian fitting). "
                              "E.g. --dnu-mhz 0.68 3.2 for two components.")
@@ -104,6 +113,8 @@ def main():
                              "timescale prediction (default: 100 km/s).")
     parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
     args = parser.parse_args()
+    set_pub_col(args.pub_col)
+    set_pub_style(use_latex=False)
 
     # ------------------------------------------------------------------
     # Load data
@@ -185,6 +196,17 @@ def main():
     # ------------------------------------------------------------------
     pulse_profile = np.nanmean(burst_ds, axis=0)
     t_burst       = time[onpulse_mask]
+
+    # Store modulation-index data for later plotting (after Lorentzian fit)
+    mi = None
+    if args.mod_plot:
+        mi = compute_modulation_index(burst_ds, off_pulse, freq,
+                                      i_sigma=args.mod_sigma, nbins=args.mod_nbins)
+        if args.mod_nbins is not None and burst_ds.shape[1] > 1:
+            dt = float(np.abs(t_burst[1] - t_burst[0]))
+            bin_dur = dt * burst_ds.shape[1] / args.mod_nbins
+            print(f"  Modulation-index bin duration: {bin_dur:.2f} ms")
+
     t_scatt_fit_ms     = args.tau_ms
     t_scatt_fit_err_ms = None
 
@@ -605,6 +627,14 @@ def main():
             delta_nu_d           = d_base
             component_noise_errs = []
 
+    # Generate the modulation-index plot
+    if mi is not None:
+        t_mod = t_burst[mi["t_centers"].astype(int)] if mi["t_centers"] is not None else t_burst
+        plot_modulation_index(
+            t_mod, t_burst, mi["mod_index"], mi["mod_err"], pulse_profile,
+            mi["weighted_mean"], mi["weighted_mean_err"],
+            i_cut=mi["i_cut"], output=args.output, ncol=args.pub_col,
+        )
 
     # ------------------------------------------------------------------
     # ===== SECTION 1: SCINTILLATION & MODULATION INDEX =====
@@ -874,9 +904,6 @@ def main():
     # Plots
     # ------------------------------------------------------------------
 
-    set_pub_col(args.pub_col)
-    set_pub_style(use_latex=False)
-
     plot_spectrum_powerlaw_fit(
         freq,
         raw_spectrum,
@@ -887,55 +914,12 @@ def main():
 
     lag_zoom = args.lag_zoom if args.lag_zoom is not None else args.fit_max_lag
 
-    # Spectrum + normalised ACF
-    fig, ax = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=1.0))
-
-    xabs = np.abs(lags_plot_sym)
-
-    comp_colors = IBM_PALETTE[::-1]
-
-    ax.plot(lags_plot_sym, acf_plot_sym, label="ACF", color="k", lw=2)
-    labels = ["Lorentzian", "Double Lorentzian", "Triple Lorentzian"]
-    if delta_nu_d is not None and fit_models and best_fit and "popt" in best_fit:
-        model_fn = [lorentzian, lorentzian_2c, lorentzian_3c][best_n_comp - 1]
-        ax.plot(
-            lags_plot_sym,
-            model_fn(xabs, *best_fit["popt"]),
-            "-",
-            label=f"{labels[best_n_comp - 1]}\n" + rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err:.2f}$ MHz" if best_n_comp == 1 else f"{labels[best_n_comp - 1]} fit",
-            lw=1.5,
-            color=comp_colors[0],            
-        )
-
-        # Overlay the individual Lorentzian components for multi-component fits.
-        # Components are shown without the offset C (which is drawn separately).
-        if best_n_comp > 1:
-            components, A_fit, C_fit = _decode_lorentzian_components(best_n_comp, best_fit["popt"])
-            for i, (w, d) in enumerate(components, start=1):
-                errs    = component_noise_errs[i-1] if (i-1) < len(component_noise_errs) else {}
-                dnu_err = errs.get("dnu_err", np.nan)
-                comp = A_fit * w / (1.0 + (xabs / d) ** 2)
-                ax.plot(
-                    lags_plot_sym,
-                    comp,
-                    ls="--",
-                    lw=1.5,
-                    alpha=0.9,
-                    label=rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err:.2f}$ MHz",
-                    color=comp_colors[i]
-                )
-    ax.set_xlim(-lag_zoom, lag_zoom)
-    ax.set_xlabel(rf"Frequency lag [MHz]")
-    ax.set_ylabel("ACF power")
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8, loc="upper right")
-    plt.tight_layout()
-    if args.output:
-        savefig_rasterized(args.output, dpi=300, fig=fig)
-        print(f"\nSaved spectrum+ACF plot to {args.output}")
-    else:
-        plt.show()
-    plt.close(fig)
+    plot_acf_fit(
+        lags_plot_sym, acf_plot_sym,
+        best_fit, best_n_comp, component_noise_errs,
+        lag_zoom, delta_nu_d, dnu_err,
+        output=args.output,
+    )
 
 
     # Lorentzian component diagnostics

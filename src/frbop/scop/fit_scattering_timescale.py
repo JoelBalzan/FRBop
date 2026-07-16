@@ -2,16 +2,20 @@ import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit
 
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
+from frbop.scop.plotting import (
+    plot_pa_summary,
+    plot_subband_diagnostic,
+    plot_subband_pa,
+)
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
-from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
+from frbop.utils.plotting import (pub_figsize, savefig_rasterized,
                                   set_pub_col, set_pub_style)
 
 
@@ -236,7 +240,7 @@ def main():
             else:
                 print(f"  tau({ref_freq:.3f} MHz) = {tau_at_ref:.3e} ms (underflowed; try different freq range)")
 
-        # Plotting setup (shared by subband diagnostic and PA plots)
+        # Shared plotting setup
         set_pub_col(args.pub_col)
         set_pub_style(use_latex=False)
         fig_width, _ = pub_figsize()
@@ -244,170 +248,23 @@ def main():
 
         # Subband diagnostic plot
         if band_regions is not None and fit_details is not None and len(fit_details['freq']) > 0:
-            n_bands = len(fit_details['freq'])
-            fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
-            gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
+            plot_subband_diagnostic(
+                fit_details, t_burst_plot, fig_width, args.output,
+                scattering_index, fitted_index_err, tau_at_ref, ref_freq,
+            )
 
-            # Left column: subband profiles with fits (shared x-axis)
-            ax_left = None
-            for i in range(n_bands):
-                if ax_left is None:
-                    ax = fig.add_subplot(gs[i, 0])
-                    ax_left = ax
-                else:
-                    ax = fig.add_subplot(gs[i, 0], sharex=ax_left)
-                profile = fit_details['profile'][i]
-                popt = fit_details['popt'][i]
-                tau_val = fit_details['tau'][i]
-                tau_err = fit_details['tau_err'][i]
-                freq_val = fit_details['freq'][i]
-                fit_curve = scattered_gaussian(t_burst_plot, *popt)
-
-                tau_label = (f'$\\tau={tau_val:.3f}\\pm{tau_err:.3f}$ ms'
-                             if np.isfinite(tau_err) and tau_err > 0
-                             else f'$\\tau={tau_val:.3f}$ ms')
-                ax.plot(t_burst_plot, profile, 'k-', linewidth=1.0)
-                ax.plot(t_burst_plot, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
-                ax.set_ylabel(r'S [arb.]')
-                ax.set_yticklabels([])
-                ax.set_ylim(bottom=np.nanmin(profile) * 1.1, top=np.nanmax(profile) * 1.3)
-                ax.text(0.02, 0.95, f'{freq_val:.1f} MHz', transform=ax.transAxes,
-                        va='top', fontsize=8)
-                if i == n_bands - 1:
-                    ax.set_xlabel('Time [ms]')
-                else:
-                    ax.tick_params(labelbottom=False)
-                ax.legend(loc='upper right')
-                ax.grid(True, alpha=0.3)
-
-            # Right column: tau vs frequency with power-law fit
-            ax_tau = fig.add_subplot(gs[:, 1])
-            band_freqs = np.array(fit_details['freq'])
-            band_taus = np.array(fit_details['tau'])
-            ax_tau.plot(band_freqs, band_taus, 'ko', markersize=4, label='Measured $\\tau$')
-
-            # Power-law fit line
-            freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
-            tau_grid = tau_at_ref * (freq_grid / ref_freq) ** scattering_index
-            ax_tau.plot(freq_grid, tau_grid, 'b-', linewidth=1.5,
-                        label=f'α={scattering_index:.2f}±{fitted_index_err:.2f}')
-            ax_tau.set_xlabel('Frequency [MHz]')
-            ax_tau.set_ylabel('τ [ms]')
-            ax_tau.legend()
-            ax_tau.grid(True, alpha=0.3)
-
-            # Save or show
-            if args.output:
-                base, ext = args.output.rsplit('.', 1) if '.' in args.output else (args.output, 'png')
-                bands_output = f"{base}_subbands.{ext}"
-                savefig_rasterized(bands_output, dpi=300, fig=fig)
-                print(f"Subband diagnostic plot saved to {bands_output}")
-            plt.close(fig)
-
-        # Single-column subband PA overplot when Stokes data is available
+        # Subband PA plots (when Stokes data is available)
+        pa_band_info = None
         if band_regions is not None and fit_details is not None and has_stokes and burst_ds_q is not None and burst_ds_u is not None:
-            # Sort band regions by frequency (ascending) for consistent panel ordering
             sorted_bands = sorted(
                 [(float(np.nanmean(freq[lo:hi])), lo, hi) for lo, hi in band_regions if hi > lo],
                 key=lambda x: -x[0],
             )
-            n_bands = len(sorted_bands)
-            fig_pa = plt.figure(figsize=(fig_width, max(4, n_bands * 1.5)), constrained_layout=False)
-            gs_pa = plt.GridSpec(n_bands, 1, hspace=0)
-            ax_pa_share = None
-            twin_axes = []
-            pa_smoothed = []
-            pa_band_info = []
-            for i, (freq_val, lo, hi) in enumerate(sorted_bands):
-                profile_i = np.nanmean(burst_ds[lo:hi, :], axis=0)
-                q_prof = np.nanmean(burst_ds_q[lo:hi, :], axis=0)
-                u_prof = np.nanmean(burst_ds_u[lo:hi, :], axis=0)
-                pa = 0.5 * np.degrees(np.arctan2(u_prof, q_prof))
-                # Smooth PA with a Gaussian kernel (sigma in time bins)
-                pa_smooth = gaussian_filter1d(pa, sigma=2.0, mode='nearest')
-                # Mask PA where I is below a minimal threshold (off-pulse noise floor)
-                off_n = max(1, ntime // 10)
-                I_off = ds[lo:hi, :off_n]
-                I_mean_off = np.nanmean(I_off)
-                sigma_I = np.nanstd(I_off)
-                pa_masked = pa_smooth.copy()
-                pa_masked[profile_i < I_mean_off + 0.5 * sigma_I] = np.nan
-                pa_smoothed.append(pa_masked)
-                pa_band_info.append((freq_val, pa_masked))
-
-                ax_pa = fig_pa.add_subplot(gs_pa[i, 0], sharex=ax_pa_share)
-                if ax_pa_share is None:
-                    ax_pa_share = ax_pa
-                ax_pa.plot(t_burst_plot, profile_i, 'k-', linewidth=1.0)
-
-                # Overplot scattered-Gaussian fit if available
-                for j, fv in enumerate(fit_details['freq']):
-                    if abs(fv - freq_val) < 0.01:
-                        popt_j = fit_details['popt'][j]
-                        tau_j = fit_details['tau'][j]
-                        tau_label = (f'$\\tau={tau_j:.3f}\\pm{fit_details["tau_err"][j]:.3f}$ ms'
-                                     if np.isfinite(fit_details["tau_err"][j]) and fit_details["tau_err"][j] > 0
-                                     else f'$\\tau={tau_j:.3f}$ ms')
-                        fit_curve = scattered_gaussian(t_burst_plot, *popt_j)
-                        ax_pa.plot(t_burst_plot, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
-                        break
-
-                ax_twin = ax_pa.twinx()
-                ax_twin.scatter(t_burst_plot, pa_masked, color=IBM_PALETTE[0], s=2)
-                ax_twin.set_ylabel('PA [deg.]')
-                twin_axes.append(ax_twin)
-
-                ax_pa.set_ylabel(r'S [arb.]')
-                ax_pa.tick_params(labelleft=False)
-                i0 = np.nanmin(profile_i)
-                i1 = np.nanmax(profile_i)
-                dy = i1 - i0
-                if dy > 0:
-                    ax_pa.set_ylim(i0 - 0.1 * dy, i1 * 1.3)
-                ax_pa.text(0.02, 0.95, f'{freq_val:.1f} MHz', transform=ax_pa.transAxes,
-                           va='top', fontsize=8)
-                ax_pa.legend(loc='upper right')
-                if i == n_bands - 1:
-                    ax_pa.set_xlabel('Time [ms]')
-                else:
-                    ax_pa.tick_params(labelbottom=False)
-
-            # Unify PA y-limits across all subbands
-            if pa_smoothed:
-                all_pa = np.concatenate(pa_smoothed)
-                pa_min, pa_max = np.nanmin(all_pa), np.nanmax(all_pa)
-                pa_range = pa_max - pa_min
-                if pa_range > 0:
-                    pa_pad = 0.1 * pa_range
-                    for ax_t in twin_axes:
-                        ax_t.set_ylim(pa_min - pa_pad, pa_max + pa_pad)
-
-            if args.output:
-                base, ext = args.output.rsplit('.', 1) if '.' in args.output else (args.output, 'png')
-                pa_output = f"{base}_subbands_pa.{ext}"
-                savefig_rasterized(pa_output, dpi=300, fig=fig_pa)
-                print(f"Subband PA plot saved to {pa_output}")
-            plt.close(fig_pa)
-
-            # Single-panel PA summary: all subbands overplotted in one axes
-            if pa_band_info:
-                pa_band_info.sort(key=lambda x: -x[0])
-                fig_sum = plt.figure(figsize=(fig_width, fig_width * 0.6))
-                ax_sum = fig_sum.add_subplot(111)
-                cmap = plt.get_cmap('plasma', len(pa_band_info))
-                for k, (fv, pa_vals) in enumerate(pa_band_info):
-                    ax_sum.plot(t_burst_plot, pa_vals, color=cmap(k), linewidth=1.0,
-                                label=f'{fv:.0f} MHz')
-                ax_sum.set_xlabel('Time [ms]')
-                ax_sum.set_ylabel('PA [deg.]')
-                ax_sum.legend(loc='best', ncol=2, fontsize=8)
-                ax_sum.grid(True, alpha=0.3)
-                if args.output:
-                    base, ext = args.output.rsplit('.', 1) if '.' in args.output else (args.output, 'png')
-                    sum_output = f"{base}_pa_summary.{ext}"
-                    savefig_rasterized(sum_output, dpi=300, fig=fig_sum)
-                    print(f"PA summary plot saved to {sum_output}")
-                plt.close(fig_sum)
+            pa_band_info = plot_subband_pa(
+                sorted_bands, burst_ds, burst_ds_q, burst_ds_u,
+                t_burst_plot, fit_details, freq, fig_width, ds, ntime, args.output,
+            )
+            plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
 
     # Frequency-integrated pulse profile and scattered-Gaussian fit for t_scatt
     pulse_profile = np.nanmean(burst_ds, axis=0)

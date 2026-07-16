@@ -2,10 +2,10 @@
 
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
+from frbop.scop.plotting import plot_cn2_profile
+from frbop.utils.plotting import set_pub_style
 
 
 def get_cn2_profile(l_deg, b_deg, da_kpc, ndir=-1):
@@ -43,20 +43,9 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=No
 
     set_pub_style(use_latex=False)
 
-    fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.65))
-    ax.plot(s, cn2, color='tab:blue', lw=1.2, label=r'$C_n^2$')
-    ax.set_xlabel("Distance from observer (kpc)")
-    ax.set_ylabel(r"$C_n^2$ (m$^{-20/3}$)")
-    ax.set_title(f"NE2025  (l={ldeg:.2f} deg, b={bdeg:.2f} deg)")
-    ax.set_xscale('log')
-    ax.grid(alpha=0.3)
-
     if np.nansum(cn2) == 0.0:
         print("Warning: Cn2 profile is all zeros - check coordinates and NE2025 model.")
-        ax.legend()
-        plt.tight_layout()
-        plt.show()
-        return float(s[0]), 0.0
+        return float(s[0]), 0.0, None
 
     lg_peak = float(s[np.argmax(cn2)])
     cn2_peak = float(np.max(cn2))
@@ -67,31 +56,9 @@ def estimate_lg_kpc_from_ne2025(ldeg, bdeg, da_kpc, max_dist_kpc=50.0, output=No
         denom = np.trapezoid(cn2, s)
         if denom > 0 and np.isfinite(numer):
             lg_eff_kpc = float(numer / denom)
-    ax.axvline(
-        lg_peak,
-        color='tab:green',
-        lw=1.0,
-        ls='--',
-        label=rf'$L_g$ peak = {lg_peak:.3f} kpc',
-    )
-    if lg_eff_kpc is not None:
-        ax.axvline(
-            lg_eff_kpc,
-            color='tab:orange',
-            lw=1.0,
-            ls='-.',
-            label=rf'$L_g$ (weighted) = {lg_eff_kpc:.3f} kpc',
-        )
-    ax.legend(loc='upper left', fontsize=8)
-    plt.tight_layout()
-    if output:
-        base, ext = os.path.splitext(output)
-        out = base + '_Cn2' + (ext if ext else '.pdf')
-        savefig_rasterized(out, dpi=300, fig=fig)
-        print(f"Saved Cn2 profile plot to {out}")
-    else:
-        plt.show()
-    plt.close(fig)
+
+    plot_cn2_profile(s, cn2, ldeg, bdeg, lg_peak, lg_eff_kpc, output=output)
+
     return lg_peak, cn2_peak, lg_eff_kpc
 
 

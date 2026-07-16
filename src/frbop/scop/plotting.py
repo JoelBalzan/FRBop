@@ -4,10 +4,14 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import curve_fit
 
 from frbop.scop.fit_utils import _decode_lorentzian_components
-from frbop.scop.models import lorentzian, lorentzian_2c, lorentzian_3c
-from frbop.utils.plotting import pub_figsize, savefig_rasterized, set_pub_style
+from frbop.scop.models import (lorentzian, lorentzian_2c, lorentzian_3c,
+                               scattered_gaussian)
+from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
+                                  set_pub_col, set_pub_style)
 
 
 def _apply_publication_style() -> dict:
@@ -366,6 +370,491 @@ def plot_scintillation_band_power_law(
         out = base + '_scint_bw_powerlaw' + (ext if ext else '.png')
         savefig_rasterized(out, dpi=300, fig=fig)
         print(f"Saved scintillation bandwidth power-law plot to {out}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_subband_diagnostic(
+    fit_details,
+    t_burst,
+    fig_width,
+    output,
+    scattering_index,
+    fitted_index_err,
+    tau_at_ref,
+    ref_freq,
+):
+    """Two-column subband diagnostic: per-band profiles (left) and τ vs frequency (right)."""
+    n_bands = len(fit_details["freq"])
+    fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
+    gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
+
+    ax_left = None
+    for i in range(n_bands):
+        if ax_left is None:
+            ax = fig.add_subplot(gs[i, 0])
+            ax_left = ax
+        else:
+            ax = fig.add_subplot(gs[i, 0], sharex=ax_left)
+        profile = fit_details["profile"][i]
+        popt = fit_details["popt"][i]
+        tau_val = fit_details["tau"][i]
+        tau_err = fit_details["tau_err"][i]
+        freq_val = fit_details["freq"][i]
+        fit_curve = scattered_gaussian(t_burst, *popt)
+
+        tau_label = (
+            f"$\\tau={tau_val:.3f}\\pm{tau_err:.3f}$ ms"
+            if np.isfinite(tau_err) and tau_err > 0
+            else f"$\\tau={tau_val:.3f}$ ms"
+        )
+        ax.plot(t_burst, profile, "k-", linewidth=1.0)
+        ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
+        ax.set_ylabel(r"S [arb.]")
+        ax.set_yticklabels([])
+        ax.set_ylim(bottom=np.nanmin(profile) * 1.1, top=np.nanmax(profile) * 1.3)
+        ax.text(0.02, 0.95, f"{freq_val:.1f} MHz", transform=ax.transAxes, va="top", fontsize=8)
+        if i == n_bands - 1:
+            ax.set_xlabel("Time [ms]")
+        else:
+            ax.tick_params(labelbottom=False)
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+
+    ax_tau = fig.add_subplot(gs[:, 1])
+    band_freqs = np.array(fit_details["freq"])
+    band_taus = np.array(fit_details["tau"])
+    ax_tau.plot(band_freqs, band_taus, "ko", markersize=4, label="Measured $\\tau$")
+    freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
+    tau_grid = tau_at_ref * (freq_grid / ref_freq) ** scattering_index
+    ax_tau.plot(
+        freq_grid,
+        tau_grid,
+        "b-",
+        linewidth=1.5,
+        label=f"α={scattering_index:.2f}±{fitted_index_err:.2f}",
+    )
+    ax_tau.set_xlabel("Frequency [MHz]")
+    ax_tau.set_ylabel("τ [ms]")
+    ax_tau.legend()
+    ax_tau.grid(True, alpha=0.3)
+
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + "_subbands" + (ext if ext else ".png")
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"Subband diagnostic plot saved to {out}")
+    plt.close(fig)
+
+
+def plot_subband_pa(
+    sorted_bands,
+    burst_ds,
+    burst_ds_q,
+    burst_ds_u,
+    t_burst,
+    fit_details,
+    freq,
+    fig_width,
+    ds,
+    ntime,
+    output,
+):
+    """Single-column subband PA overplot. Returns pa_band_info for summary use."""
+    n_bands = len(sorted_bands)
+    fig = plt.figure(figsize=(fig_width, max(4, n_bands * 1.5)), constrained_layout=False)
+    gs = plt.GridSpec(n_bands, 1, hspace=0)
+    ax_share = None
+    twin_axes = []
+    pa_smoothed = []
+    pa_band_info = []
+
+    for i, (freq_val, lo, hi) in enumerate(sorted_bands):
+        prof_i = np.nanmean(burst_ds[lo:hi, :], axis=0)
+        q_prof = np.nanmean(burst_ds_q[lo:hi, :], axis=0)
+        u_prof = np.nanmean(burst_ds_u[lo:hi, :], axis=0)
+        pa = 0.5 * np.degrees(np.arctan2(u_prof, q_prof))
+        pa_smooth = gaussian_filter1d(pa, sigma=2.0, mode="nearest")
+
+        off_n = max(1, ntime // 10)
+        I_off = ds[lo:hi, :off_n]
+        I_mean_off = np.nanmean(I_off)
+        sigma_I = np.nanstd(I_off)
+        pa_masked = pa_smooth.copy()
+        pa_masked[prof_i < I_mean_off + 0.5 * sigma_I] = np.nan
+        pa_smoothed.append(pa_masked)
+        pa_band_info.append((freq_val, pa_masked))
+
+        ax = fig.add_subplot(gs[i, 0], sharex=ax_share)
+        if ax_share is None:
+            ax_share = ax
+        ax.plot(t_burst, prof_i, "k-", linewidth=1.0)
+
+        for j, fv in enumerate(fit_details["freq"]):
+            if abs(fv - freq_val) < 0.01:
+                popt_j = fit_details["popt"][j]
+                tau_j = fit_details["tau"][j]
+                tau_label = (
+                    f"$\\tau={tau_j:.3f}\\pm{fit_details['tau_err'][j]:.3f}$ ms"
+                    if np.isfinite(fit_details["tau_err"][j]) and fit_details["tau_err"][j] > 0
+                    else f"$\\tau={tau_j:.3f}$ ms"
+                )
+                fit_curve = scattered_gaussian(t_burst, *popt_j)
+                ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
+                break
+
+        ax_twin = ax.twinx()
+        ax_twin.scatter(t_burst, pa_masked, color=IBM_PALETTE[0], s=2)
+        ax_twin.set_ylabel("PA [deg.]")
+        twin_axes.append(ax_twin)
+
+        ax.set_ylabel(r"S [arb.]")
+        ax.tick_params(labelleft=False)
+        i0 = np.nanmin(prof_i)
+        i1 = np.nanmax(prof_i)
+        dy = i1 - i0
+        if dy > 0:
+            ax.set_ylim(i0 - 0.1 * dy, i1 * 1.3)
+        ax.text(0.02, 0.95, f"{freq_val:.1f} MHz",
+                transform=ax.transAxes, va="top", fontsize=8)
+        ax.legend(loc="upper right")
+        if i == n_bands - 1:
+            ax.set_xlabel("Time [ms]")
+        else:
+            ax.tick_params(labelbottom=False)
+
+    if pa_smoothed:
+        all_pa = np.concatenate(pa_smoothed)
+        pa_min, pa_max = np.nanmin(all_pa), np.nanmax(all_pa)
+        pa_range = pa_max - pa_min
+        if pa_range > 0:
+            pa_pad = 0.1 * pa_range
+            for ax_t in twin_axes:
+                ax_t.set_ylim(pa_min - pa_pad, pa_max + pa_pad)
+
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + "_subbands_pa" + (ext if ext else ".png")
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"Subband PA plot saved to {out}")
+    plt.close(fig)
+    return pa_band_info
+
+
+def plot_pa_summary(pa_band_info, t_burst, fig_width, output):
+    """Single-panel PA summary: all subbands overplotted."""
+    if not pa_band_info:
+        return
+    pa_band_info_sorted = sorted(pa_band_info, key=lambda x: -x[0])
+    fig = plt.figure(figsize=(fig_width, fig_width * 0.6))
+    ax = fig.add_subplot(111)
+    cmap = plt.get_cmap("plasma", len(pa_band_info_sorted))
+    for k, (fv, pa_vals) in enumerate(pa_band_info_sorted):
+        ax.plot(t_burst, pa_vals, color=cmap(k), linewidth=1.0, label=f"{fv:.0f} MHz")
+    ax.set_xlabel("Time [ms]")
+    ax.set_ylabel("PA [deg.]")
+    ax.legend(loc="best", ncol=2, fontsize=8)
+    ax.grid(True, alpha=0.3)
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + "_pa_summary" + (ext if ext else ".png")
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"PA summary plot saved to {out}")
+    plt.close(fig)
+
+
+def plot_cn2_profile(s, cn2, ldeg, bdeg, lg_peak, lg_eff_kpc, output=None):
+    """Single-panel C_n^2 profile with peak and effective-distance markers."""
+    fig, ax = plt.subplots(figsize=pub_figsize(height_ratio=0.65))
+    ax.plot(s, cn2, color="tab:blue", lw=1.2, label=r"$C_n^2$")
+    ax.set_xlabel("Distance from observer (kpc)")
+    ax.set_ylabel(r"$C_n^2$ (m$^{-20/3}$)")
+    ax.set_title(f"NE2025  (l={ldeg:.2f} deg, b={bdeg:.2f} deg)")
+    ax.set_xscale("log")
+    ax.grid(alpha=0.3)
+    ax.axvline(
+        lg_peak,
+        color="tab:green",
+        lw=1.0,
+        ls="--",
+        label=rf"$L_g$ peak = {lg_peak:.3f} kpc",
+    )
+    if lg_eff_kpc is not None:
+        ax.axvline(
+            lg_eff_kpc,
+            color="tab:orange",
+            lw=1.0,
+            ls="-.",
+            label=rf"$L_g$ (weighted) = {lg_eff_kpc:.3f} kpc",
+        )
+    ax.legend(loc="upper left", fontsize=8)
+    plt.tight_layout()
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + "_Cn2" + (ext if ext else ".pdf")
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"Saved Cn2 profile plot to {out}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_acf_fit(
+    lags_sym,
+    acf_sym,
+    best_fit,
+    best_n_comp,
+    component_noise_errs,
+    lag_zoom,
+    delta_nu_d,
+    dnu_err,
+    output,
+    figsize=None,
+):
+    """Single-panel ACF fit with best Lorentzian model and component overlays."""
+    if figsize is None:
+        figsize = pub_figsize(height_ratio=1.0)
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    xabs = np.abs(lags_sym)
+    comp_colors = IBM_PALETTE[::-1]
+    labels = ["Lorentzian", "Double Lorentzian", "Triple Lorentzian"]
+
+    ax.plot(lags_sym, acf_sym, label="ACF", color="k", lw=2)
+    if delta_nu_d is not None and best_fit and "popt" in best_fit:
+        model_fn = [lorentzian, lorentzian_2c, lorentzian_3c][best_n_comp - 1]
+        label = (
+            f"{labels[best_n_comp - 1]}\n"
+            + rf"$\Delta \nu_{{\rm d}} = {delta_nu_d:.2f} \pm {dnu_err:.2f}$ MHz"
+            if best_n_comp == 1
+            else f"{labels[best_n_comp - 1]} fit"
+        )
+        ax.plot(
+            lags_sym,
+            model_fn(xabs, *best_fit["popt"]),
+            "-",
+            label=label,
+            lw=1.5,
+            color=comp_colors[0],
+        )
+        if best_n_comp > 1:
+            components, A_fit, C_fit = _decode_lorentzian_components(best_n_comp, best_fit["popt"])
+            for i, (w, d) in enumerate(components, start=1):
+                errs = component_noise_errs[i - 1] if (i - 1) < len(component_noise_errs) else {}
+                dnu_err_i = errs.get("dnu_err", np.nan)
+                comp = A_fit * w / (1.0 + (xabs / d) ** 2)
+                ax.plot(
+                    lags_sym,
+                    comp,
+                    ls="--",
+                    lw=1.5,
+                    alpha=0.9,
+                    label=rf"$\Delta \nu_{{\rm d}} = {d:.2f} \pm {dnu_err_i:.2f}$ MHz",
+                    color=comp_colors[i],
+                )
+    ax.set_xlim(-lag_zoom, lag_zoom)
+    ax.set_xlabel("Frequency lag [MHz]")
+    ax.set_ylabel("ACF power")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, loc="upper right")
+    plt.tight_layout()
+    if output:
+        savefig_rasterized(output, dpi=300, fig=fig)
+        print(f"\nSaved spectrum+ACF plot to {output}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def _acf_1d(x):
+    """Unbiased autocovariance of 1D array x (zero-lag and positive lags)."""
+    n = len(x)
+    xc = x - np.nanmean(x)
+    xc[~np.isfinite(xc)] = 0.0
+    result = np.correlate(xc, xc, mode="full")[n - 1 :]
+    counts = np.arange(n, 0, -1)
+    return result / counts
+
+
+def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=None):
+    """Compute time-resolved modulation index from ACF Lorentzian fits per time bin.
+
+    For each time bin the spectrum is averaged, its ACF computed, and a 1-component
+    Lorentzian A(Δν) = C + A/(1 + (Δν/d)²) is fitted. The modulation index for that
+    bin is m = √A.
+
+    Parameters
+    ----------
+    ds_onpulse : ndarray, shape (nfreq, ntime)
+        Baseline-subtracted on-pulse dynamic spectrum.
+    off_pulse : ndarray, shape (nfreq, n_off)
+        Baseline-subtracted off-pulse data for noise estimation.
+    freq : ndarray, shape (nfreq,)
+        Channel frequencies in MHz.
+    i_sigma : float
+        Number of off-pulse standard deviations for the I threshold.
+    nbins : int or None
+        If set, average the time axis into nbins before computing.
+
+    Returns
+    -------
+    dict with keys: i_profile, mod_index, mod_err, weighted_mean,
+                    weighted_mean_err, mask, i_cut, t_centers
+    """
+    nfreq = ds_onpulse.shape[0]
+    df = float(np.abs(freq[1] - freq[0])) if freq.size > 1 else 1.0
+    total_bw = float(np.abs(freq[-1] - freq[0]))
+    max_lag_mhz = min(20.0, 0.15 * total_bw)
+
+    # I threshold from off-pulse noise
+    i_off_std = np.nanstd(off_pulse) if off_pulse is not None and off_pulse.size > 0 else 1.0
+    i_cut = i_sigma * i_off_std / np.sqrt(nfreq)
+
+    # Time binning
+    ntime = ds_onpulse.shape[1]
+    t_centers = None
+    if nbins is not None and nbins > 1:
+        bin_edges = np.linspace(0, ntime, nbins + 1).astype(int)
+    else:
+        nbins = ntime
+        bin_edges = np.arange(ntime + 1)
+
+    i_prof = np.zeros(nbins)
+    mod_idx = np.full(nbins, np.nan)
+    mod_err = np.full(nbins, np.nan)
+    t_centers = np.zeros(nbins)
+
+    for k in range(nbins):
+        lo, hi = bin_edges[k], bin_edges[k + 1]
+        t_centers[k] = 0.5 * (lo + hi - 1)
+        spectrum = np.nanmean(ds_onpulse[:, lo:hi], axis=1)
+        i_prof[k] = np.nanmean(spectrum)
+
+        # Skip bins below the I threshold
+        if i_prof[k] < i_cut or not np.isfinite(i_prof[k]):
+            continue
+
+        # ACF and Lorentzian fit
+        acf = _acf_1d(spectrum)
+        lags = np.arange(len(acf)) * df
+        fit_ok = (lags > 0) & (lags < max_lag_mhz) & np.isfinite(acf)
+        lag_fit = lags[fit_ok]
+        acf_fit = acf[fit_ok]
+        if lag_fit.size < 5:
+            continue
+
+        d_guess = max_lag_mhz / 4.0
+        A_guess = float(acf[0]) if np.isfinite(acf[0]) else 0.1
+        C_guess = float(np.nanmedian(acf_fit[-min(5, len(acf_fit)):]))
+        try:
+            popt, pcov = curve_fit(
+                lorentzian, lag_fit, acf_fit, p0=[d_guess, A_guess, C_guess],
+                maxfev=2000,
+            )
+            A_val = float(popt[1])
+            if A_val <= 0:
+                continue
+            mod_idx[k] = np.sqrt(A_val)
+            if pcov is not None and np.isfinite(pcov[1, 1]):
+                mod_err[k] = np.sqrt(max(0.0, pcov[1, 1])) / (2.0 * mod_idx[k])
+        except Exception:
+            continue
+
+    mask = i_prof >= i_cut
+
+    # Weighted mean over masked bins
+    good = mask & np.isfinite(mod_idx) & (mod_err > 0)
+    wmean = np.nan
+    wmean_err = np.nan
+    if np.any(good):
+        w = 1.0 / mod_err[good] ** 2
+        wsum = np.nansum(w)
+        if wsum > 0:
+            wmean = np.nansum(mod_idx[good] * w) / wsum
+            wmean_err = 1.0 / np.sqrt(wsum)
+
+    return {
+        "i_profile": i_prof,
+        "mod_index": mod_idx,
+        "mod_err": mod_err,
+        "weighted_mean": wmean,
+        "weighted_mean_err": wmean_err,
+        "mask": mask,
+        "i_cut": i_cut,
+        "t_centers": t_centers,
+    }
+
+
+def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
+                          weighted_mean, weighted_mean_err=0.0,
+                          i_cut=None, output=None, fig_width=None,
+                          max_err_frac=0.5, ncol=None):
+    """Two-panel: time-resolved modulation index (top, from ACF fits) and pulse profile (bottom).
+
+    Parameters
+    ----------
+    t_mod : ndarray
+        Time axis for the modulation index (bin centers).
+    t_profile : ndarray
+        Time axis for the full-resolution pulse profile.
+    mod_index, mod_err : ndarray
+        Modulation index values and errors.
+    i_profile : ndarray
+        Full-resolution I profile for the bottom panel.
+    weighted_mean, weighted_mean_err : float
+        Weighted mean modulation index and its uncertainty.
+    i_cut : float or None
+        I-level threshold line.
+    max_err_frac : float
+        Points with fractional error mod_err/mod_index > this are masked.
+    ncol : int or None
+        Number of columns for the LaTeX document (passed to pub_figsize).
+    """
+    if fig_width is None:
+        fig_width, _ = pub_figsize(ncol=ncol)
+    fig = plt.figure(figsize=(fig_width, fig_width), constrained_layout=False)
+    gs = plt.GridSpec(2, 1, hspace=0)
+
+    # Mask unreliable points
+    with np.errstate(divide='ignore', invalid='ignore'):
+        good = np.isfinite(mod_index) & np.isfinite(mod_err) & (mod_err > 0) & (mod_err / mod_index < max_err_frac)
+
+    # Top panel: modulation index
+    ax_m = fig.add_subplot(gs[0, 0])
+    if np.any(good):
+        ax_m.errorbar(t_mod[good], mod_index[good], yerr=mod_err[good],
+                      fmt='o', color=IBM_PALETTE[2],
+                      markersize=2, capsize=2, capthick=0.5, linewidth=0.5)
+
+        # Peak modulation index for legend
+        peak_idx = np.argmax(mod_index[good])
+        m_peak = mod_index[good][peak_idx]
+        m_peak_err = mod_err[good][peak_idx]
+
+    ax_m.axhline(weighted_mean, color=IBM_PALETTE[2], alpha=0.7, linewidth=1.5, linestyle='--',
+                 label=rf'$\langle m_g \rangle = {weighted_mean:.4f} \pm {weighted_mean_err:.4f}$')
+    if np.any(good):
+        ax_m.plot([], [], ' ', label=rf'$m_g^{{\rm peak}} = {m_peak:.4f} \pm {m_peak_err:.4f}$')
+    ax_m.set_ylabel(r'$m_g$')
+    ax_m.tick_params(labelbottom=False)
+    ax_m.legend(loc='upper right', fontsize=8)
+    ax_m.grid(True, alpha=0.3)
+
+    # Bottom panel: pulse profile (full resolution)
+    ax_p = fig.add_subplot(gs[1, 0], sharex=ax_m)
+    ax_p.plot(t_profile, i_profile, 'k-', linewidth=1.0)
+    #if i_cut is not None:
+    #    ax_p.axhline(i_cut, color='0.5', linewidth=0.8, linestyle=':', alpha=0.5)
+    ax_p.set_xlabel('Time [ms]')
+    ax_p.set_yticklabels([])
+    ax_p.set_ylabel(r'S [arb.]')
+    ax_p.grid(True, alpha=0.3)
+
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + '_modulation' + (ext if ext else '.png')
+        savefig_rasterized(out, dpi=300, fig=fig)
+        print(f"Modulation index plot saved to {out}")
     else:
         plt.show()
     plt.close(fig)
