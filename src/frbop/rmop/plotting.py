@@ -1073,9 +1073,7 @@ def plot_poincare_projections_frequency(
 		cn = np.sqrt(cx**2 + cy**2 + cz**2)
 		cx, cy, cz = (cx / cn, cy / cn, cz / cn) if cn > 1e-10 else (0., 0., 1.)
 	else:
-		cx = np.nanmean(q_f); cy = np.nanmean(u_f); cz = np.nanmean(v_f)
-		cn = np.sqrt(cx**2 + cy**2 + cz**2)
-		cx, cy, cz = (cx / cn, cy / cn, cz / cn) if cn > 1e-10 else (0., 0., 1.)
+		cx, cy, cz = (0., 0., 1.)
 
 	lon0 = np.degrees(np.arctan2(cy, cx))
 	lat0 = np.degrees(np.arcsin(np.clip(cz, -1.0, 1.0)))
@@ -1099,7 +1097,7 @@ def plot_poincare_projections_frequency(
 	half = max(half, np.tan(np.radians(30)))
 
 	ang_half = np.degrees(np.arctan(half))
-	grid_step = 30
+	grid_step = 60
 
 	projection_map = {
 		'gnom': ('gnom', 'Gnomonic\n(great circles → straight lines)'),
@@ -1193,7 +1191,7 @@ def plot_poincare_projections_frequency(
 				fontsize=style['annotation'], linewidth=0.5, color='lightgray', zorder=1)
 		elif proj == 'robin':
 			bsmp.drawparallels(
-				np.arange(-90, 91, grid_step),
+				np.arange(-90, 91, grid_step/2),
 				labels=[True, False, False, True],
 				fontsize=style['annotation'], linewidth=0.5, color='lightgray', zorder=1)
 			bsmp.drawmeridians(
@@ -1220,7 +1218,7 @@ def plot_poincare_projections_frequency(
 			try:
 				px, py = bsmp(plon, plat)
 				if np.isfinite(px) and np.isfinite(py):
-					ax.annotate(lbl, (px, py), fontsize=style['annotation'], color='steelblue',
+					ax.annotate(lbl, (px, py), fontsize=style['annotation'], color='royalblue',
 								ha='center', va='center',
 								bbox=dict(boxstyle='round,pad=0.1', fc='white',
 										  ec='none', alpha=0.6), zorder=5)
@@ -1265,7 +1263,7 @@ def plot_poincare_projections_frequency(
 			sigma_lat_deg = sigma_lat_deg[:n_plot]
 		fin_s = np.isfinite(sx) & np.isfinite(sy)
 		if np.any(fin_s):
-			scatter_sizes = 40.0
+			scatter_sizes = 25.0
 			ax.scatter(sx[fin_s], sy[fin_s],
 					   c=freq_mhz[fin_s], cmap='plasma', norm=norm,
 					   s=scatter_sizes, edgecolors='black', linewidths=0.6,
@@ -1300,7 +1298,7 @@ def plot_poincare_projections_frequency(
 					ty = np.asarray(ty, dtype=float)
 					ok = np.isfinite(tx) & np.isfinite(ty)
 					if np.nansum(ok) >= 2:
-						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line'],
+						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line']*2,
 								color='black', alpha=0.95, zorder=2)
 
 		ax.tick_params(axis='both', labelsize=style['tick'])
@@ -1917,9 +1915,7 @@ def plot_poincare_projections(
 		cn = np.sqrt(cx**2 + cy**2 + cz**2)
 		cx, cy, cz = (cx/cn, cy/cn, cz/cn) if cn > 1e-10 else (0., 0., 1.)
 	else:
-		cx = np.nanmean(q_f); cy = np.nanmean(u_f); cz = np.nanmean(v_f)
-		cn = np.sqrt(cx**2 + cy**2 + cz**2)
-		cx, cy, cz = (cx/cn, cy/cn, cz/cn) if cn > 1e-10 else (0., 0., 1.)
+		cx, cy, cz = (0., 0., 1.)
 
 	lon0 = np.degrees(np.arctan2(cy, cx))
 	lat0 = np.degrees(np.arcsin(np.clip(cz, -1.0, 1.0)))

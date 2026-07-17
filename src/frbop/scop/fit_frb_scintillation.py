@@ -633,6 +633,7 @@ def main():
         plot_modulation_index(
             t_mod, t_burst, mi["mod_index"], mi["mod_err"], pulse_profile,
             mi["weighted_mean"], mi["weighted_mean_err"],
+            dnu_d=mi["dnu_d"], dnu_d_err=mi["dnu_d_err"],
             i_cut=mi["i_cut"], output=args.output, ncol=args.pub_col,
         )
 

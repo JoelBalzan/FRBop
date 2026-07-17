@@ -722,6 +722,8 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
     i_prof = np.zeros(nbins)
     mod_idx = np.full(nbins, np.nan)
     mod_err = np.full(nbins, np.nan)
+    dnu_d = np.full(nbins, np.nan)
+    dnu_d_err = np.full(nbins, np.nan)
     t_centers = np.zeros(nbins)
 
     for k in range(nbins):
@@ -749,14 +751,19 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         try:
             popt, pcov = curve_fit(
                 lorentzian, lag_fit, acf_fit, p0=[d_guess, A_guess, C_guess],
+                bounds=([0, 0, -np.inf], [np.inf, np.inf, np.inf]),
                 maxfev=2000,
             )
             A_val = float(popt[1])
-            if A_val <= 0:
+            d_val = float(popt[0])
+            if A_val <= 0 or d_val <= 0:
                 continue
             mod_idx[k] = np.sqrt(A_val)
+            dnu_d[k] = d_val
             if pcov is not None and np.isfinite(pcov[1, 1]):
                 mod_err[k] = np.sqrt(max(0.0, pcov[1, 1])) / (2.0 * mod_idx[k])
+            if pcov is not None and np.isfinite(pcov[0, 0]):
+                dnu_d_err[k] = np.sqrt(max(0.0, pcov[0, 0]))
         except Exception:
             continue
 
@@ -777,6 +784,8 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         "i_profile": i_prof,
         "mod_index": mod_idx,
         "mod_err": mod_err,
+        "dnu_d": dnu_d,
+        "dnu_d_err": dnu_d_err,
         "weighted_mean": wmean,
         "weighted_mean_err": wmean_err,
         "mask": mask,
@@ -787,37 +796,25 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
 
 def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
                           weighted_mean, weighted_mean_err=0.0,
+                          dnu_d=None, dnu_d_err=None,
                           i_cut=None, output=None, fig_width=None,
                           max_err_frac=0.5, ncol=None):
-    """Two-panel: time-resolved modulation index (top, from ACF fits) and pulse profile (bottom).
-
-    Parameters
-    ----------
-    t_mod : ndarray
-        Time axis for the modulation index (bin centers).
-    t_profile : ndarray
-        Time axis for the full-resolution pulse profile.
-    mod_index, mod_err : ndarray
-        Modulation index values and errors.
-    i_profile : ndarray
-        Full-resolution I profile for the bottom panel.
-    weighted_mean, weighted_mean_err : float
-        Weighted mean modulation index and its uncertainty.
-    i_cut : float or None
-        I-level threshold line.
-    max_err_frac : float
-        Points with fractional error mod_err/mod_index > this are masked.
-    ncol : int or None
-        Number of columns for the LaTeX document (passed to pub_figsize).
-    """
+    """Three-panel: modulation index (top), scintillation bandwidth (middle),
+    and pulse profile (bottom)."""
     if fig_width is None:
         fig_width, _ = pub_figsize(ncol=ncol)
-    fig = plt.figure(figsize=(fig_width, fig_width), constrained_layout=False)
+    fig = plt.figure(figsize=(fig_width, fig_width * 0.7), constrained_layout=False)
     gs = plt.GridSpec(2, 1, hspace=0)
 
     # Mask unreliable points
     with np.errstate(divide='ignore', invalid='ignore'):
-        good = np.isfinite(mod_index) & np.isfinite(mod_err) & (mod_err > 0) & (mod_err / mod_index < max_err_frac)
+        good = np.isfinite(mod_index) & (mod_index > 0) & np.isfinite(mod_err) & (mod_err > 0) & (mod_err / mod_index < max_err_frac)
+    if dnu_d is not None:
+        good &= np.isfinite(dnu_d) & (dnu_d > 0)
+        if dnu_d_err is not None:
+            good &= np.isfinite(dnu_d_err) & (dnu_d_err > 0)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                good &= (dnu_d_err / dnu_d < max_err_frac)
 
     # Top panel: modulation index
     ax_m = fig.add_subplot(gs[0, 0])
@@ -826,7 +823,6 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
                       fmt='o', color=IBM_PALETTE[2],
                       markersize=2, capsize=2, capthick=0.5, linewidth=0.5)
 
-        # Peak modulation index for legend
         peak_idx = np.argmax(mod_index[good])
         m_peak = mod_index[good][peak_idx]
         m_peak_err = mod_err[good][peak_idx]
@@ -840,11 +836,29 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
     ax_m.legend(loc='upper right', fontsize=8)
     ax_m.grid(True, alpha=0.3)
 
+    ## Middle panel: scintillation bandwidth
+    #ax_d = fig.add_subplot(gs[1, 0], sharex=ax_m)
+    #if dnu_d is not None and np.any(good):
+    #    y = dnu_d[good]
+    #    yerr = dnu_d_err[good] if dnu_d_err is not None else None
+    #    ax_d.errorbar(t_mod[good], y, yerr=yerr,
+    #                  fmt='o', color=IBM_PALETTE[1],
+    #                  markersize=2, capsize=2, capthick=0.5, linewidth=0.5)
+    #    if np.any(np.isfinite(y)):
+    #        dnu_mean = np.nanmean(y)
+    #        dnu_sem = np.nanstd(y, ddof=1) / np.sqrt(np.sum(np.isfinite(y)))
+    #        ax_d.axhline(dnu_mean, color=IBM_PALETTE[1], alpha=0.7,
+    #                     linewidth=1.5, linestyle='--',
+    #                     label=rf'$\langle \delta\nu_d \rangle = {dnu_mean:.3f} \pm {dnu_sem:.3f}$ MHz')
+    #        ax_d.legend(loc='upper right', fontsize=8)
+#
+    #ax_d.set_ylabel(r'$\delta\nu_d$ [MHz]')
+    #ax_d.tick_params(labelbottom=False)
+    #ax_d.grid(True, alpha=0.3)
+
     # Bottom panel: pulse profile (full resolution)
     ax_p = fig.add_subplot(gs[1, 0], sharex=ax_m)
     ax_p.plot(t_profile, i_profile, 'k-', linewidth=1.0)
-    #if i_cut is not None:
-    #    ax_p.axhline(i_cut, color='0.5', linewidth=0.8, linestyle=':', alpha=0.5)
     ax_p.set_xlabel('Time [ms]')
     ax_p.set_yticklabels([])
     ax_p.set_ylabel(r'S [arb.]')
