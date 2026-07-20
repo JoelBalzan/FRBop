@@ -41,14 +41,22 @@ class ShrineMixin:
 
 		Rows are DM trials; columns are time samples (frequency-summed L).
 		This matches the (delta_DM, time) layout expected by SHRINE get_kc.
+
+		L for each DM trial is computed via sqrt(mean(Q,f)² + mean(U,f)²)
+		(average Q and U over frequency FIRST, then compute L).  This avoids
+		the Rice bias that plagues mean(sqrt(Q²+U²),f).
 		"""
 		dm_values = np.asarray(dm_values, dtype=float)
+		self._nonshrine_dm_values = dm_values.copy()
 		n_dm = dm_values.shape[0]
 		L_dm = np.zeros((n_dm, output_size), dtype=float)
+
 		for i, dm in enumerate(dm_values):
 			dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 			dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
-			L_dm[i] = self._linear_time_profile_from_qu(dedisp_q, dedisp_u)
+			q_ts = np.nansum(dedisp_q, axis=0)
+			u_ts = np.nansum(dedisp_u, axis=0)
+			L_dm[i] = np.sqrt(q_ts**2 + u_ts**2)
 		self._nonshrine_L_dm_reference = L_dm
 		return L_dm
 
@@ -71,14 +79,14 @@ class ShrineMixin:
 			reference_data_2d = self._nonshrine_L_dm_reference
 		if self._nonshrine_resolved_kc is not None:
 			if not self._nonshrine_kc_printed:
-				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc}")
 				self._nonshrine_kc_printed = True
 			return int(self._nonshrine_resolved_kc)
 
 		if self.nonshrine_kc is not None:
 			self._nonshrine_resolved_kc = int(self.nonshrine_kc)
 			if not self._nonshrine_kc_printed:
-				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc}")
 				self._nonshrine_kc_printed = True
 			return self._nonshrine_resolved_kc
 
@@ -108,7 +116,7 @@ class ShrineMixin:
 			if self._nonshrine_resolved_kc <= 0:
 				raise RuntimeError(f"Invalid kc from minimise_uncertainty: {self._nonshrine_resolved_kc}")
 			if not self._nonshrine_kc_printed:
-				print(f"Found kc of: {self._nonshrine_resolved_kc}")
+				print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc}")
 				self._nonshrine_kc_printed = True
 			return self._nonshrine_resolved_kc
 
@@ -117,7 +125,7 @@ class ShrineMixin:
 			kc = shrine_get_kc(ci_data)
 		self._nonshrine_resolved_kc = int(kc)
 		if not self._nonshrine_kc_printed:
-			print(f"Found kc of: {self._nonshrine_resolved_kc}")
+			print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc}")
 			self._nonshrine_kc_printed = True
 		return self._nonshrine_resolved_kc
 
@@ -125,6 +133,7 @@ class ShrineMixin:
 		self._nonshrine_resolved_kc = None
 		self._nonshrine_kc_printed = False
 		self._nonshrine_L_dm_reference = None
+		self._nonshrine_dm_values = None
 
 	def maybe_kc_smooth_nonshrine(self,
 									   data_i: Optional[np.ndarray],
@@ -189,6 +198,33 @@ class ShrineMixin:
 
 		subprocess.run(cmd, cwd=str(run_dir), check=True)
 		return run_dir
+
+	def save_nonshrine_L_dm_diagnostics(self, label: str = "frb", segment_tag: str = "seg"):
+		"""
+		Run the SHRINE structure pipeline on the L(DM, t) reference data and
+		save all diagnostic plots (I_max, noise_max, DCT_spectrum, etc.)
+		in the shrine_logs directory alongside the I-based SHRINE outputs.
+		"""
+		if self._nonshrine_L_dm_reference is None:
+			print("L(DM, t) diagnostics skipped (no L reference).")
+			return
+		if self._nonshrine_resolved_kc is None:
+			print("L(DM, t) diagnostics skipped (kc not resolved).")
+			return
+		if self._nonshrine_dm_values is None:
+			print("L(DM, t) diagnostics skipped (no DM values stored).")
+			return
+
+		run_prefix = f"{label}_{segment_tag}_L_dm"
+		self.run_shrine_method(
+			script_name="maximise_structure.py",
+			run_prefix=run_prefix,
+			dm_values=self._nonshrine_dm_values,
+			i_data=self._nonshrine_L_dm_reference,
+			include_input_dm=True,
+			force_kc=self._nonshrine_resolved_kc,
+			save_all=True,
+		)
 
 	def save_nonshrine_run_outputs(self,
 								   run_prefix: str,

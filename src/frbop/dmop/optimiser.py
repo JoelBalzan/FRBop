@@ -45,8 +45,9 @@ class DMOptimiser(
                  nonshrine_kc_smooth: bool = False,
                  nonshrine_shrine_like_errors: bool = False,
                  nonshrine_kc_minimise_uncertainty: bool = False,
-                 nonshrine_kc: Optional[int] = None,
-                 shrine_kc: Optional[int] = None,
+                 nonshrine_kc: Optional[List[int]] = None,
+                 shrine_kc: Optional[List[int]] = None,
+                 sync_kc: bool = False,
                  li_i_sigma_cut: float = 2.0,
                  debias_linear: bool = False,
                  random_seed: Optional[int] = None,
@@ -95,15 +96,25 @@ class DMOptimiser(
             self.nonshrine_shrine_like_errors
         )
         self.nonshrine_kc_minimise_uncertainty = bool(nonshrine_kc_minimise_uncertainty)
-        self.nonshrine_kc = None if nonshrine_kc is None else int(nonshrine_kc)
-        if self.nonshrine_kc is not None and self.nonshrine_kc <= 0:
-            raise ValueError("nonshrine_kc must be positive")
-        self.shrine_kc = None if shrine_kc is None else int(shrine_kc)
-        if self.shrine_kc is not None and self.shrine_kc <= 0:
-            raise ValueError("shrine_kc must be positive")
+        self.sync_kc = bool(sync_kc)
+        if nonshrine_kc is not None and len(nonshrine_kc) > 0:
+            self.nonshrine_kc = [int(k) for k in nonshrine_kc]
+            for k in self.nonshrine_kc:
+                if k <= 0:
+                    raise ValueError("nonshrine_kc values must be positive")
+        else:
+            self.nonshrine_kc = None
+        if shrine_kc is not None and len(shrine_kc) > 0:
+            self.shrine_kc = [int(k) for k in shrine_kc]
+            for k in self.shrine_kc:
+                if k <= 0:
+                    raise ValueError("shrine_kc values must be positive")
+        else:
+            self.shrine_kc = None
         self._nonshrine_resolved_kc: Optional[int] = None
         self._nonshrine_kc_printed = False
         self._nonshrine_L_dm_reference: Optional[np.ndarray] = None
+        self._nonshrine_dm_values: Optional[np.ndarray] = None
         self.li_i_sigma_cut = float(li_i_sigma_cut)
         if self.li_i_sigma_cut <= 0:
             raise ValueError("li_i_sigma_cut must be positive")

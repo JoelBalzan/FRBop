@@ -155,16 +155,19 @@ class PolarisationMixin:
 
 	def _debiased_linear_from_qu(self, data_q: np.ndarray, data_u: np.ndarray,
 						   q_rms: np.ndarray, u_rms: np.ndarray,
-						   cutoff: float = 1.57, eps: float = 1e-12) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+						   cutoff: float = 1.57, eps: float = 1e-12,
+						   debias: Optional[bool] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 		"""
 		Optionally debias linear polarisation using propagated sigma_L and detection cutoff.
 		"""
+		if debias is None:
+			debias = self.debias_linear
 		L_meas = np.sqrt(data_q**2 + data_u**2)
 		sigma_L = np.sqrt(data_q**2 * q_rms**2 + data_u**2 * u_rms**2) / np.maximum(L_meas, eps)
 		r = L_meas / np.maximum(sigma_L, eps)
 		det = r >= cutoff
 
-		if self.debias_linear:
+		if debias:
 			L_out = np.zeros_like(L_meas)
 			L_out[det] = np.sqrt(np.maximum(L_meas[det]**2 - sigma_L[det]**2, 0.0))
 		else:

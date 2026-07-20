@@ -156,15 +156,22 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument(
 		"--nonshrine-kc",
+		nargs='*',
 		type=int,
 		default=None,
-		help="Fixed kc value for non-SHRINE smoothing (default: auto per trial)",
+		help="Fixed kc value(s) for non-SHRINE smoothing, one per segment (default: auto per segment)",
 	)
 	parser.add_argument(
 		"--shrine-kc",
+		nargs='*',
 		type=int,
 		default=None,
-		help="Fixed kc for SHRINE structure and S/N methods (default: auto from I(t,DM))",
+		help="Fixed kc value(s) for SHRINE structure/S/N methods, one per segment (default: auto per segment)",
+	)
+	parser.add_argument(
+		"--sync-kc",
+		action="store_true",
+		help="Set non-SHRINE kc to match SHRINE kc (overrides --nonshrine-kc)",
 	)
 	parser.add_argument(
 		"--nonshrine-kc-minimise-uncertainty", "--nonshrine-min-uncert",
@@ -185,21 +192,21 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--methods",
 		nargs="+",
-		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
-		help="Methods to run (default: all). Choices: structure, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li",
+		help="Methods to run (default: all). Choices: structure, structure-l, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li",
 	)
 	parser.add_argument(
 		"--exclude-methods",
 		nargs="+",
-		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Methods to exclude from run/plots/analysis",
 	)
 	parser.add_argument(
 		"--disable-method-errors", "--no-method-err",
 		nargs="+",
-		choices=["structure", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "min_uncertainty", "minimise_uncertainty", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Exclude specified methods from component DM/dn_e comparison plots and disable "
 		"their uncertainty overlays in per-segment comparison plots "
@@ -318,7 +325,15 @@ def main():
 	print(f"  - Linear debiasing: {args.debias_linear}")
 	print(f"  - Non-SHRINE kc smoothing: {args.nonshrine_kc_smooth}")
 	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
-	if args.nonshrine_kc is not None:
+	if args.sync_kc:
+		if args.shrine_kc is not None:
+			if args.nonshrine_kc is not None:
+				print("  - --sync-kc overrides --nonshrine-kc")
+			args.nonshrine_kc = args.shrine_kc.copy()
+			print(f"  - Non-SHRINE kc synced to SHRINE kc: {args.nonshrine_kc}")
+		else:
+			print("  - --sync-kc set: non-SHRINE kc will be synced from SHRINE auto-detected kc")
+	elif args.nonshrine_kc is not None:
 		print(f"  - Non-SHRINE kc value: {args.nonshrine_kc}")
 	if args.shrine_kc is not None:
 		print(f"  - SHRINE structure/S/N kc value: {args.shrine_kc}")
@@ -385,6 +400,7 @@ def main():
 
 	method_alias_to_key = {
 		'structure': 'structure',
+		'structure-l': 'structure_L',
 		'snr': 'snr',
 		'min-uncertainty': 'min_uncertainty',
 		'minimise-uncertainty': 'min_uncertainty',
@@ -392,7 +408,7 @@ def main():
 		'pa-shrine': 'pa_slope_shrine',
 		'li': 'l_i_mean',
 	}
-	default_method_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+	default_method_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 	if args.methods is None:
 		selected_method_keys = default_method_order.copy()
 	else:
@@ -413,7 +429,7 @@ def main():
 		disabled_method_keys = {method_alias_to_key[alias] for alias in args.disable_method_errors}
 
 	if (stokes_q is None or stokes_u is None):
-		qu_methods = {'pa_slope', 'pa_slope_shrine', 'l_i_mean'}
+		qu_methods = {'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L'}
 		removed_qu = [m for m in selected_method_keys if m in qu_methods]
 		if len(removed_qu) > 0:
 			selected_method_keys = [m for m in selected_method_keys if m not in qu_methods]
@@ -424,6 +440,7 @@ def main():
 
 	method_key_to_name = {
 		'structure': 'structure',
+		'structure_L': 'structure-l',
 		'snr': 'snr',
 		'min_uncertainty': 'min-uncertainty',
 		'pa_slope': 'pa',
@@ -462,6 +479,7 @@ def main():
 		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
 		nonshrine_kc=args.nonshrine_kc,
 		shrine_kc=args.shrine_kc,
+		sync_kc=args.sync_kc,
 		li_i_sigma_cut=args.li_sig,
 		debias_linear=args.debias_linear,
 		random_seed=args.seed,
@@ -543,7 +561,8 @@ def main():
 		results = optimiser.compare_methods(dm_range, peak_region, n_points=grid_n_points, dm_step=args.dm_step, 
 										segment_tag=segment_tag,
 											label=args.label,
-											selected_methods=selected_method_keys)
+											selected_methods=selected_method_keys,
+											segment_index=i)
 		all_results.append(results)
 		
 		# Print results
@@ -560,6 +579,8 @@ def main():
 				+ " pc cm⁻³"
 			)
 			print(f"    Metric value: {result['metric']:.6f}")
+			if result.get('kc') is not None:
+				print(f"    kc: {result['kc']}")
 			if result.get('uncertainty_method') is not None:
 				print(f"    Uncertainty method: {result.get('uncertainty_method')}")
 		
@@ -585,6 +606,11 @@ def main():
 				label=args.label,
 				save_path=range_path,
 			)
+
+		optimiser.save_nonshrine_L_dm_diagnostics(
+			label=args.label,
+			segment_tag=segment_tag,
+		)
 
 		if args.structure_max_cubes_dir:
 			output_dir = Path(args.structure_max_cubes_dir)

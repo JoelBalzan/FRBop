@@ -67,6 +67,7 @@ class PlottingMixin:
 			'pa_slope': 'PA',
 			'pa_slope_shrine': 'PA (SHRINE)',
 			'l_i_mean': r'$\Pi_L$ mean',
+			'structure_L': 'Structure (L)',
 		}
 		fs_title = plt.rcParams.get('axes.titlesize', 11)
 		fs_label = plt.rcParams.get('axes.labelsize', 11)
@@ -479,6 +480,7 @@ class PlottingMixin:
 		if data_u is None:
 			data_u = self.stokes_u
 		self._reset_nonshrine_kc_state()
+		_scan_shrine_kc = self.shrine_kc[0] if isinstance(self.shrine_kc, list) else self.shrine_kc
 		
 		dm_values = self._build_dm_values(dm_range, n_points=n_points, dm_step=dm_step)
 		
@@ -520,7 +522,7 @@ class PlottingMixin:
 			i_data=i_data,
 			include_input_dm=True,
 			save_all=True,
-			force_kc=self.shrine_kc,
+			force_kc=_scan_shrine_kc,
 		)
 		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
 
@@ -532,7 +534,7 @@ class PlottingMixin:
 			i_data=i_data,
 			include_input_dm=False,
 			save_all=True,
-			force_kc=self.shrine_kc,
+			force_kc=_scan_shrine_kc,
 		)
 		sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
 		if not sn_path.exists():
@@ -587,13 +589,15 @@ class PlottingMixin:
 			'pa_slope': 'green',
 			'pa_slope_shrine': 'teal',
 			'l_i_mean': 'purple',
+			'structure_L': 'orange',
 		}
 		labels = {
 			'structure': 'Structure Metric (SHRINE)',
 			'snr': 'S/N',
 			'pa_slope': "Weighted PA Slope magnitude",
 			'pa_slope_shrine': "Weighted PA Slope magnitude (SHRINE-smoothed PA)",
-			'l_i_mean': "L/I (mean)"
+			'l_i_mean': "L/I (mean)",
+			'structure_L': "Structure Metric (L)"
 		}
 		
 		for idx, (metric_name, metric_values) in enumerate(metrics.items()):
@@ -688,7 +692,7 @@ class PlottingMixin:
 
 		fig, axes = plt.subplots(
 			1, 3,
-			figsize=pub_figsize(ncol=1, height_ratio=0.5),
+			figsize=pub_figsize(ncol=1, height_ratio=0.3),
 		)
 
 		for i, (dedisp, taxis, title, dm) in enumerate(zip(
@@ -704,7 +708,7 @@ class PlottingMixin:
 				vmin=vmin,
 				vmax=vmax,
 			)
-			ax.set_title(title)
+			#ax.set_title(title)
 			dm_text = self._format_dm(dm, 3)
 			ax.text(
 				0.98, 0.98,

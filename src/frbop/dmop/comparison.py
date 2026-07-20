@@ -12,7 +12,8 @@ class ComparisonMixin:
 					   dm_step: Optional[float] = None,
 					   segment_tag: str = "segment1",
 					   label: str = "frb",
-					   selected_methods: Optional[List[str]] = None) -> Dict:
+					   selected_methods: Optional[List[str]] = None,
+					   segment_index: int = 0) -> Dict:
 		"""
 		Compare all optimisation methods on the same data.
 		
@@ -43,8 +44,10 @@ class ComparisonMixin:
 		print(f"Comparing methods on DM range [{dm_range[0]:.2f}, {dm_range[1]:.2f}] pc cm^-3")
 
 		has_qu = data_q is not None and data_u is not None
+		_shrine_kc = self.shrine_kc[segment_index] if self.shrine_kc is not None else None
+		_nonshrine_kc = self.nonshrine_kc[segment_index] if self.nonshrine_kc is not None else None
 		results: Dict[str, Dict] = {}
-		all_method_keys = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		all_method_keys = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 		if selected_methods is None:
 			selected = set(all_method_keys)
 		else:
@@ -59,15 +62,17 @@ class ComparisonMixin:
 		run_pa = 'pa_slope' in selected
 		run_pa_shrine = 'pa_slope_shrine' in selected
 		run_li_mean = 'l_i_mean' in selected
+		run_structure_L = 'structure_L' in selected
 		run_qu_methods = run_pa or run_pa_shrine or run_li_mean
-		if run_qu_methods and not has_qu:
-			print("  - Skipping selected PA/LI methods (no Stokes Q/U provided)")
+		if (run_qu_methods or run_structure_L) and not has_qu:
+			print("  - Skipping selected PA/LI/structure_L methods (no Stokes Q/U provided)")
 			run_pa = False
 			run_pa_shrine = False
 			run_li_mean = False
 			run_qu_methods = False
+			run_structure_L = False
 
-		if not (run_structure or run_snr or run_min_uncertainty or run_qu_methods):
+		if not (run_structure or run_snr or run_min_uncertainty or run_qu_methods or run_structure_L):
 			print("  - No methods selected after filtering; returning empty results.")
 			return results
 
@@ -84,6 +89,30 @@ class ComparisonMixin:
 		li_mean_errors = np.zeros(len(dm_values), dtype=float) if run_li_mean else None
 
 		self._reset_nonshrine_kc_state()
+		if _nonshrine_kc is not None:
+			self._nonshrine_resolved_kc = _nonshrine_kc
+
+		# If sync_kc and no explicit nonshrine_kc, resolve kc from I data now
+		# so the sweep loop uses the synced kc for kc smoothing.
+		if self.sync_kc and _nonshrine_kc is None:
+			if _shrine_kc is not None:
+				_nonshrine_kc = _shrine_kc
+				self._nonshrine_resolved_kc = _shrine_kc
+				if not self._nonshrine_kc_printed:
+					print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc} (synced from SHRINE kc)")
+					self._nonshrine_kc_printed = True
+			else:
+				print(f"  - Pre-computing I(DM, t) for kc sync ({len(dm_values)} trials)...")
+				_i_for_kc = np.zeros((len(dm_values), output_size), dtype=float)
+				for j, dm in enumerate(dm_values):
+					if j % 25 == 0:
+						print(f"\r    Progress: {j}/{len(dm_values)}", end='', flush=True)
+					_ded = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
+					_i_for_kc[j] = np.nansum(_ded, axis=0)
+				print(f"\r    Progress: {len(dm_values)}/{len(dm_values)}", flush=True)
+				self.resolve_nonshrine_kc(_i_for_kc)
+				_nonshrine_kc = self._nonshrine_resolved_kc
+
 		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 		time_axis = self.time_ms[0] + np.arange(output_size) * dt
 		if run_qu_methods:
@@ -121,11 +150,11 @@ class ComparisonMixin:
 				i_data=i_data,
 				include_input_dm=True,
 				save_all=True,
-				force_kc=self.shrine_kc,
+				force_kc=_shrine_kc,
 			)
 			structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
 			summary_path = run_dir_structure / f"{run_prefix_structure}_structure_summaryfile.txt"
-			kc = self.shrine_kc
+			kc = _shrine_kc
 			if kc is None and summary_path.exists():
 				with open(summary_path, "r") as f:
 					for line in f:
@@ -178,7 +207,7 @@ class ComparisonMixin:
 				i_data=i_data,
 				include_input_dm=False,
 				save_all=True,
-				force_kc=self.shrine_kc,
+				force_kc=_shrine_kc,
 			)
 			sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
 			if not sn_path.exists():
@@ -189,11 +218,13 @@ class ComparisonMixin:
 			dedispersed_snr = self.dedisperse(data, optimal_dm_snr, mode=self.dedisp_mode)
 			metric_snr = float(snr_values[max_idx_snr])
 			snr_uncertainty = self._uncertainty_from_snr_drop(dm_values, snr_values, max_idx_snr, drop=1.0)
+			snr_kc = _shrine_kc
 			results['snr'] = {
 				'dm': optimal_dm_snr,
 				'metric': metric_snr,
 				'dedispersed': dedispersed_snr,
 				'method': 'S/N Maximising (SHRINE)',
+				'kc': snr_kc,
 				'run_dir': str(run_dir_snr),
 				'dm_values': dm_values.copy(),
 				'metric_values': np.asarray(snr_values, dtype=float).copy(),
@@ -313,6 +344,7 @@ class ComparisonMixin:
 				'dedispersed_u': best_dedisp_u_pa,
 				'dedispersed_v': best_dedisp_v_pa,
 				'method': 'PA Slope Maximising',
+				'kc': self._nonshrine_resolved_kc,
 				'pa_plot_kind': 'raw',
 				'pa_plot_time': best_time_axis.copy(),
 				'pa_plot_series': best_pa_deg.copy(),
@@ -417,12 +449,66 @@ class ComparisonMixin:
 				'dedispersed_u': self.dedisperse(data_u, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode),
 				'dedispersed_v': dedisp_v_li,
 				'method': r'$\Pi_L$ Maximising (mean)',
+				'kc': self._nonshrine_resolved_kc,
 				'run_dir': str(run_dir_li_mean),
 				'dm_values': dm_values.copy(),
 				'metric_values': li_mean_values.copy(),
 				**li_mean_uncertainty,
 			}
 
-		return results
-	
+		if run_structure_L:
+			print("  - Testing Structure Maximising on L polarisation...")
+			l_dm_data = self.build_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
+			run_prefix_structure_L = f"{label}_{segment_tag}_structure_L"
+			run_dir_structure_L = self.run_shrine_method(
+				script_name="maximise_structure.py",
+				run_prefix=run_prefix_structure_L,
+				dm_values=dm_values,
+				i_data=l_dm_data,
+				include_input_dm=True,
+				save_all=True,
+				force_kc=_nonshrine_kc if _nonshrine_kc is not None else self._nonshrine_resolved_kc,
+			)
+			structure_L_values = np.loadtxt(run_dir_structure_L / f"{run_prefix_structure_L}_SPs.dat")
+			summary_path = run_dir_structure_L / f"{run_prefix_structure_L}_structure_summaryfile.txt"
+			kc_L = None
+			if summary_path.exists():
+				with open(summary_path, "r") as f:
+					for line in f:
+						if line.strip().startswith("kc:"):
+							try:
+								kc_L = int(line.split(":", 1)[1].strip())
+							except Exception:
+								kc_L = None
+							break
+			max_idx_structure_L = int(np.argmax(structure_L_values))
+			optimal_dm_structure_L = float(dm_values[max_idx_structure_L])
+			dedispersed_L_i = self.dedisperse(data, optimal_dm_structure_L, mode=self.dedisp_mode)
+			metric_structure_L = float(structure_L_values[max_idx_structure_L])
+			structure_L_uncertainty = self._structure_uncertainty_from_shrine_outputs(
+				dm_values=dm_values,
+				structure_values=structure_L_values,
+				run_dir=run_dir_structure_L,
+				run_prefix=run_prefix_structure_L,
+				best_idx=max_idx_structure_L,
+			)
+			results['structure_L'] = {
+				'dm': optimal_dm_structure_L,
+				'metric': metric_structure_L,
+				'dedispersed': dedispersed_L_i,
+				'method': 'Structure Maximising (L)',
+				'kc': kc_L,
+				'run_dir': str(run_dir_structure_L),
+				'dm_values': dm_values.copy(),
+				'metric_values': np.asarray(structure_L_values, dtype=float).copy(),
+				**structure_L_uncertainty,
+			}
+			if has_qu:
+				n_time_out = results['structure_L']['dedispersed'].shape[1]
+				results['structure_L']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_structure_L, output_size=n_time_out, mode=self.dedisp_mode)
+				results['structure_L']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_structure_L, output_size=n_time_out, mode=self.dedisp_mode)
+			if data_v is not None:
+				n_time_out = results['structure_L']['dedispersed'].shape[1]
+				results['structure_L']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_structure_L, output_size=n_time_out, mode=self.dedisp_mode)
 
+		return results

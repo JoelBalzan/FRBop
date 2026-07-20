@@ -48,7 +48,7 @@ class ComponentsMixin:
 			if component_ids.ndim != 1 or component_ids.shape[0] != n_components:
 				raise ValueError("component_ids must be 1D with one value per component")
 
-		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 		first_methods = list(all_results[0].keys())
 		common_methods = [m for m in first_methods if all(m in comp for comp in all_results)]
 		if len(common_methods) == 0:
@@ -349,7 +349,7 @@ class ComponentsMixin:
 			print("dn_e diagnostics plot skipped (no dn_e data).")
 			return
 
-		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean']
+		preferred_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 		method_names = [m for m in preferred_order if m in methods and m not in excluded]
 		method_names.extend([m for m in methods.keys() if m not in method_names and m not in excluded])
 		if len(method_names) == 0:

@@ -18,6 +18,55 @@ from .diagnostics import summarize_posterior
 warnings.filterwarnings('ignore')
 
 
+def debiased_linear_from_qu(
+    data_q: np.ndarray,
+    data_u: np.ndarray,
+    noise_q: np.ndarray,
+    noise_u: np.ndarray,
+    cutoff: float = 1.57,
+    eps: float = 1e-12,
+    debias: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute optionally debiased linear polarisation L = sqrt(Q² + U²).
+
+    Applies Ricean debiasing and a detection cutoff on L/sigma_L.
+
+    Parameters
+    ----------
+    data_q, data_u : np.ndarray
+        Stokes Q and U arrays.
+    noise_q, noise_u : np.ndarray
+        Per-sample noise estimates for Q and U (same shape as data).
+    cutoff : float
+        Detection threshold on L/sigma_L (default 1.57 ~ 1-sigma).
+    eps : float
+        Small constant to avoid division by zero.
+    debias : bool
+        Apply Ricean debiasing L_deb = sqrt(max(L² - sigma_L², 0)).
+
+    Returns
+    -------
+    L_out : np.ndarray
+        Debiased (or raw) linear polarisation.
+    sigma_L : np.ndarray
+        Propagated uncertainty on L.
+    det : np.ndarray (bool)
+        Detection mask where L/sigma_L >= cutoff.
+    """
+    L_meas = np.sqrt(data_q ** 2 + data_u ** 2)
+    sigma_L = np.sqrt(data_q ** 2 * noise_q ** 2 + data_u ** 2 * noise_u ** 2) / np.maximum(L_meas, eps)
+    det = L_meas / np.maximum(sigma_L, eps) >= cutoff
+
+    if debias:
+        L_out = np.zeros_like(L_meas)
+        L_out[det] = np.sqrt(np.maximum(L_meas[det] ** 2 - sigma_L[det] ** 2, 0.0))
+    else:
+        L_out = L_meas
+
+    return L_out, sigma_L, det
+
+
 def _patch_scipy_bilby_compat() -> None:
     """Patch known bilby/scipy symbol mismatches for older bilby releases."""
     try:
@@ -425,7 +474,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                        n_time_bins: Optional[int] = None,
                        noise_fraction: float = 0.1,
                        offpulse_std: Optional[np.ndarray] = None,
-                       exclude_edge_bins: int = 0) -> Dict:
+                       exclude_edge_bins: int = 0,
+                       debias_linear: bool = False) -> Dict:
     """
     Fit RM for time-series data (multiple time samples).
 
@@ -580,6 +630,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     v_bin = np.zeros(n_bins_actual)
     time_binned = np.zeros(n_bins_actual)
     i_snr_array = np.zeros(n_bins_actual)
+    snr_array_L = np.zeros(n_bins_actual)
+    sigma_L_bins = np.zeros(n_bins_actual)
     time_bin_start = np.zeros(n_bins_actual, dtype=int)
     time_bin_end = np.zeros(n_bins_actual, dtype=int)
 
@@ -632,16 +684,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         u_bin[i] = u_val / (i_val + 1e-10)
         v_bin[i] = v_val / (i_val + 1e-10)
 
-        P_amp = np.sqrt(q_val**2 + u_val**2 + v_val**2) + 1e-10
-        pa_array[i] = np.degrees(0.5 * np.arctan2(u_val, q_val))
-        ea_array[i] = np.degrees(0.5 * np.arcsin(np.clip(v_val / P_amp, -1.0, 1.0)))
-
-        P_frac_bins[i] = P_amp / (i_val + 1e-10)
-        L_frac_bins[i] = np.sqrt(q_val**2 + u_val**2) / (i_val + 1e-10)
-        V_frac_bins[i] = v_val / (i_val + 1e-10)
-
         # ----------------------------------------------------------------
-        # PA / EA error propagation
+        # Noise scaling
         # noise_q/noise_u are per single-channel single-time-bin estimates.
         # After averaging over n_freq_used channels and n_time_in_bin time
         # bins the noise on the mean is reduced by sqrt(n_freq * n_time).
@@ -651,6 +695,29 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         noise_q_bin = noise_q / noise_scale
         noise_u_bin = noise_u / noise_scale
         noise_v_bin = noise_v / noise_scale if noise_v > 0 else 0.0
+
+        # Linear polarisation with optional Ricean debiasing
+        L_meas = np.sqrt(q_val**2 + u_val**2)
+        sigma_L = np.sqrt(
+            q_val**2 * noise_q_bin**2 + u_val**2 * noise_u_bin**2
+        ) / max(L_meas, 1e-12)
+        L_snr = L_meas / max(sigma_L, 1e-12)
+        snr_array_L[i] = L_snr
+        sigma_L_bins[i] = sigma_L
+        L_det = L_snr >= (1.57 if debias_linear else 3.0)
+
+        if debias_linear and L_det:
+            L_val = np.sqrt(max(L_meas**2 - sigma_L**2, 0.0))
+        else:
+            L_val = L_meas
+
+        P_amp = np.sqrt(L_val**2 + v_val**2) + 1e-10
+        pa_array[i] = np.degrees(0.5 * np.arctan2(u_val, q_val))
+        ea_array[i] = np.degrees(0.5 * np.arcsin(np.clip(v_val / P_amp, -1.0, 1.0)))
+
+        P_frac_bins[i] = P_amp / (i_val + 1e-10)
+        L_frac_bins[i] = L_val / (i_val + 1e-10)
+        V_frac_bins[i] = v_val / (i_val + 1e-10)
 
         P_lin_sq = q_val**2 + u_val**2 + 1e-20
         pa_sigma_rad = 0.5 * np.sqrt(
@@ -665,10 +732,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         denom = np.sqrt(max(1.0 - (v_val / P_amp)**2, 1e-10))
         ea_sigma_rad = 0.5 * (sigma_VoverP / denom)
 
-        noise_L_bin = np.sqrt(noise_q_bin**2 + noise_u_bin**2) / np.sqrt(2.0)
-        L_snr = np.sqrt(P_lin_sq) / (noise_L_bin + 1e-10)
-
-        if L_snr < 3.0:
+        if not L_det:
             pa_err_array[i] = np.nan
             ea_err_array[i] = np.nan
             pa_array[i] = np.nan
@@ -752,4 +816,6 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         'time_bin_end': time_bin_end,
         'i_snr': i_snr_array,
         'valid_bins': valid_bins,
+        'l_snr': snr_array_L,
+        'sigma_l': sigma_L_bins,
     }

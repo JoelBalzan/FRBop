@@ -17,7 +17,7 @@ from frbop.utils.plotting import set_pub_style
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
 from .diagnostics import time_series_sigma_rm_diagnostic
 from .constants import set_pub_col
-from .fitter import RMFitter, fit_rm_time_series
+from .fitter import RMFitter, debiased_linear_from_qu, fit_rm_time_series
 from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_poincare_projections_frequency,
                        plot_poincare_sphere, plot_poincare_sphere_frequency,
@@ -360,6 +360,12 @@ def main() -> None:
         type=float,
         default=0.1,
         help="Fraction of Stokes I samples used for offpulse noise estimation (default: 0.10)",
+    )
+    parser.add_argument(
+        "--debias-linear",
+        action="store_true",
+        default=False,
+        help="Apply Ricean debiasing to linear polarisation L = sqrt(Q^2 + U^2)",
     )
 
     # Physics helpers
@@ -737,11 +743,11 @@ def main() -> None:
             q_val = np.asarray(stokes_q, dtype=float)
             u_val = np.asarray(stokes_u, dtype=float)
             i_val = np.asarray(stokes_i, dtype=float)
-            l_val = np.sqrt(q_val ** 2 + u_val ** 2)
-            sigma_l = np.sqrt(
-                (q_val ** 2 * sigma_q_chan ** 2 + u_val ** 2 * sigma_u_chan ** 2)
-                / (l_val ** 2 + 1e-20)
+            l_val, sigma_l, l_det = debiased_linear_from_qu(
+                q_val, u_val, sigma_q_chan, sigma_u_chan,
+                debias=args.debias_linear,
             )
+            l_val[~l_det] = 0.0
             burn_pol_frac_err = np.sqrt(
                 (sigma_l / (i_val + 1e-10)) ** 2
                 + ((l_val * sigma_i_chan) / ((i_val + 1e-10) ** 2)) ** 2
@@ -1187,11 +1193,11 @@ def main() -> None:
                             f"({len(freq_pk)} channels)"
                         )
 
-                l_pk = np.sqrt(stokes_q_pk ** 2 + stokes_u_pk ** 2)
-                sigma_l_pk = np.sqrt(
-                    (stokes_q_pk ** 2 * sigma_q_pk ** 2 + stokes_u_pk ** 2 * sigma_u_pk ** 2)
-                    / (l_pk ** 2 + 1e-20)
+                l_pk, sigma_l_pk, l_det_pk = debiased_linear_from_qu(
+                    stokes_q_pk, stokes_u_pk, sigma_q_pk, sigma_u_pk,
+                    debias=args.debias_linear,
                 )
+                l_pk[~l_det_pk] = 0.0
                 burn_err_pk = np.sqrt(
                     (sigma_l_pk / (stokes_i_pk + 1e-10)) ** 2
                     + ((l_pk * sigma_i_pk) / ((stokes_i_pk + 1e-10) ** 2)) ** 2
@@ -1368,7 +1374,8 @@ def main() -> None:
                 n_time_bins=args.time_bins,
                 exclude_edge_bins=0,
                 noise_fraction=args.offpulse,
-                offpulse_std=off_std
+                offpulse_std=off_std,
+                debias_linear=args.debias_linear,
             )
 
             l_weights_region = None
