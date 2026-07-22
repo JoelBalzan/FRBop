@@ -2144,7 +2144,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 						offpulse_std: Optional[np.ndarray] = None,
 						full_time_series: Optional[np.ndarray] = None,
 						peak_mask_bounds: Optional[List[Tuple[int, int]]] = None,
-						show_full_time: bool = True
+						show_full_time: bool = True,
+						show_legends: bool = True
 						):
 	"""
 	Plot RM as a function of time.
@@ -2398,7 +2399,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax_pa.set_title(f'Peak {peak_idx+1}: PA & EA', fontsize=style['title'], fontweight='bold')
 		ax_pa.grid(True, alpha=0.3)
-		#ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		if show_legends:
+			ax_pa.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 		ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
 
 		# ── Row 1: Pulse Profile + RM (MIDDLE panel) ────────────────────────
@@ -2446,12 +2448,12 @@ def plot_rm_time_series(time_array: np.ndarray,
 			ax_top_twin.axhline(y=rm_avg, color=IBM_PALETTE[-1], linestyle='--',
 								linewidth=0.8, alpha=0.6, zorder=0)
 
-		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=style['line'], label='I')
+		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=style['line']*.8, label='I')
 		ax_top.set_ylabel(r'S [arb.]', fontsize=style['label'])
 		ax_top.tick_params(axis='y', labelsize=style['tick'])
 		ax_top.tick_params(right=False, labelright=False)
-		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=style['line'], label='L', alpha=1)
-		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=style['line'], label='V', alpha=1)
+		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=style['line']*.5, label='L', alpha=0.8)
+		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=style['line']*.5, label='V', alpha=0.8)
 
 		if time_series_data is not None and freq_hz is not None and not rm_results.get('is_binned', False):
 			if time_series_data['I'].shape[0] == len(time_array):
@@ -2562,8 +2564,9 @@ def plot_rm_time_series(time_array: np.ndarray,
 				final_handles.append(h)
 				final_labels.append(lab)
 				seen.add(lab)
-			#if final_handles:
-			#	ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
+			if final_handles:
+				if show_legends:
+					ax_top.legend(final_handles, final_labels, fontsize=style['legend'], loc='best', borderaxespad=0.9)
 		ax_top.tick_params(axis='x', labelbottom=False)
 
 		# ── Row 2: Polarisation fractions ────────────────────────────────────
@@ -2695,7 +2698,8 @@ def plot_rm_time_series(time_array: np.ndarray,
 		if n_peaks > 1:
 			ax3.set_title(f'Peak {peak_idx+1}: Polarisation Fractions', fontsize=style['title'], fontweight='bold')
 		ax3.grid(True, alpha=0.3)
-		#ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
+		if show_legends:
+			ax3.legend(loc='best', fontsize=style['legend'], borderaxespad=0.9)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
 		# ── Row 3: disabled ──────────────────────────────────────────────
@@ -2723,7 +2727,8 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
                                    time_series_data: Optional[Dict] = None,
                                    full_res_time: Optional[np.ndarray] = None,
                                    n_pa_bins: int = 0,
-                                   show_full_time: bool = True
+                                   show_full_time: bool = True,
+                                   show_legends: bool = True
                                    ):
 	"""
 	Plot derotated (RM-corrected) PA and polarisation fraction time series.
@@ -2842,7 +2847,8 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	ax_pa.set_ylabel(r'PA [deg.]', fontsize=style['label'])
 	ax_pa.grid(True, alpha=0.3)
 	ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
-	ax_pa.legend(fontsize=style['legend'], loc='best')
+	if show_legends:
+		ax_pa.legend(fontsize=style['legend'], loc='best')
 
 	# -- Middle panel: pulse profile + RM --
 	ax_twin = ax_top.twinx()
@@ -2902,7 +2908,8 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	ax_top.grid(True, alpha=0.3)
 	ax_top.tick_params(axis='x', labelbottom=False)
 	#ax_top.legend(fontsize=style['legend'], loc='upper left')
-	ax_twin.legend(fontsize=style['legend'], loc='upper right')
+	if show_legends:
+		ax_twin.legend(fontsize=style['legend'], loc='upper right')
 
 	bt = np.asarray(rm_results.get('time', time_peak)) * 1e3
 
@@ -2948,7 +2955,8 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	ax_bot.set_xlabel('Time [ms]', fontsize=style['label'])
 	ax_bot.grid(True, alpha=0.3)
 	ax_bot.tick_params(axis='both', labelsize=style['tick'])
-	ax_bot.legend(fontsize=style['legend'], loc='best')
+	if show_legends:
+		ax_bot.legend(fontsize=style['legend'], loc='best')
 
 	if show_full_time and full_time is not None and len(full_time) > 1:
 		ax_pa.set_xlim(full_time[0] * 1e3, full_time[-1] * 1e3)

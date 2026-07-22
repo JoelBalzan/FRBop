@@ -178,6 +178,12 @@ def main() -> None:
         help="Generate derotated (RM-corrected) time series plot",
     )
     parser.add_argument(
+        "--legends",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show legends on plots (default: True)",
+    )
+    parser.add_argument(
         "--poincare",
         action="store_true",
         help="Generate Poincare sphere plot (time-dependent only; requires --time-series)",
@@ -1511,7 +1517,8 @@ def main() -> None:
                 offpulse_std=off_std,
                 full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None,
                 peak_mask_bounds=onpulse_regions,
-                show_full_time=args.full_time
+                show_full_time=args.full_time,
+                show_legends=args.legends,
             )
 
             if args.derotate_plot:
@@ -1524,6 +1531,7 @@ def main() -> None:
                     full_res_time=full_res_time,
                     n_pa_bins=args.pa_bins,
                     show_full_time=args.full_time,
+                    show_legends=args.legends,
                 )
 
             if args.poincare:
