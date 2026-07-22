@@ -2717,6 +2717,246 @@ def plot_rm_time_series(time_array: np.ndarray,
 	plt.close()
 
 
+def plot_rm_corrected_time_series(time_array: np.ndarray,
+                                   rm_results: Dict,
+                                   output_file: str = 'rm_corrected_time_series.png',
+                                   time_series_data: Optional[Dict] = None,
+                                   full_res_time: Optional[np.ndarray] = None,
+                                   n_pa_bins: int = 0,
+                                   show_full_time: bool = True
+                                   ):
+	"""
+	Plot derotated (RM-corrected) PA and polarisation fraction time series.
+
+	Q/U are derotated per time sample using the binned RM, reconstructing the
+	corrected dynamic spectrum, then full-resolution PA and L/I are computed.
+	"""
+	time_peak = np.asarray(time_array, dtype=float)
+	good = np.isfinite(time_peak) & np.isfinite(rm_results.get('rm', np.full_like(time_peak, np.nan)))
+	tms_good = time_peak[good] * 1e3
+
+	style = plot_style()
+	fig = plt.figure(figsize=pub_figsize(height_ratio=1.5), constrained_layout=False)
+	gs = GridSpec(3, 1, figure=fig, height_ratios=[1, 1, 0.8], hspace=0, wspace=0.3)
+	fig.subplots_adjust(left=0.18, right=0.82)
+
+	ax_pa = fig.add_subplot(gs[0, 0])
+	ax_top = fig.add_subplot(gs[1, 0], sharex=ax_pa)
+	ax_bot = fig.add_subplot(gs[2, 0], sharex=ax_pa)
+
+	# -- Full-resolution data for context --
+	full_time = None
+	I_full = L_full = V_full = None
+	if time_series_data is not None and 'time' in time_series_data:
+		full_time = np.asarray(time_series_data['time'])
+		if time_series_data['I'].ndim == 2:
+			if time_series_data['I'].shape[0] == len(full_time):
+				time_axis_dim = 0
+			else:
+				time_axis_dim = 1
+		else:
+			time_axis_dim = 0
+
+		if time_axis_dim == 0:
+			I_full = np.nanmean(time_series_data['I'], axis=1)
+			Q_full = np.nanmean(time_series_data['Q'], axis=1)
+			U_full = np.nanmean(time_series_data['U'], axis=1)
+			V_full = np.nanmean(time_series_data['V'], axis=1) if 'V' in time_series_data else np.zeros_like(I_full)
+		else:
+			I_full = np.nanmean(time_series_data['I'], axis=0)
+			Q_full = np.nanmean(time_series_data['Q'], axis=0)
+			U_full = np.nanmean(time_series_data['U'], axis=0)
+			V_full = np.nanmean(time_series_data['V'], axis=0) if 'V' in time_series_data else np.zeros_like(I_full)
+		L_full = np.sqrt(Q_full**2 + U_full**2)
+
+	# -- Full-resolution data for error computation (not plotted) --
+	pa_corr_full = rm_results.get('pa_corr_full')
+	l_corr_full = rm_results.get('l_corr_full')
+
+	# -- PA binning via --pa-bins (masked to good RM-bin windows) --
+	tbin_start = rm_results.get('time_bin_start')
+	tbin_end = rm_results.get('time_bin_end')
+	good_mask = None
+	if full_res_time is not None and tbin_start is not None and tbin_end is not None:
+		good_mask = np.zeros(len(full_res_time), dtype=bool)
+		for i in np.where(good)[0]:
+			s, e = int(tbin_start[i]), int(tbin_end[i])
+			good_mask[s:e] = True
+
+	if full_time is not None and Q_full is not None and U_full is not None:
+		pa_orig_full = 0.5 * np.degrees(np.arctan2(U_full, Q_full))
+		mask_orig = np.isfinite(pa_orig_full)
+		if full_res_time is not None and good_mask is not None:
+			idx = np.searchsorted(full_time, full_res_time)
+			idx = idx[(idx >= 0) & (idx < len(full_time))]
+			orig_slice = np.zeros(len(full_time), dtype=bool)
+			orig_slice[idx] = good_mask[:len(idx)]
+			mask_orig &= orig_slice
+		if np.any(mask_orig) and n_pa_bins > 0 and np.sum(mask_orig) > n_pa_bins:
+			t_orig = full_time[mask_orig] * 1e3
+			pa_orig = np.degrees(np.unwrap(np.radians(pa_orig_full[mask_orig])))
+			bin_edges = np.linspace(t_orig.min(), t_orig.max(), n_pa_bins + 1)
+			bc_o, pa_o, pa_oe = [], [], []
+			for b in range(n_pa_bins):
+				sel = (t_orig >= bin_edges[b]) & (t_orig < bin_edges[b + 1])
+				if b == n_pa_bins - 1:
+					sel = (t_orig >= bin_edges[b]) & (t_orig <= bin_edges[b + 1])
+				if not np.any(sel):
+					continue
+				pa_o.append(np.nanmean(pa_orig[sel]))
+				pa_oe.append(np.nanstd(pa_orig[sel]) / max(np.sqrt(np.nansum(sel)), 1.0))
+				bc_o.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
+			bc_o, pa_o, pa_oe = [np.array(x) for x in (bc_o, pa_o, pa_oe)]
+			ok_o = np.isfinite(bc_o) & np.isfinite(pa_o) & np.isfinite(pa_oe) & (pa_oe <= 20.0)
+			if np.any(ok_o):
+				ax_pa.errorbar(bc_o[ok_o], pa_o[ok_o], yerr=pa_oe[ok_o],
+							   fmt='o', color='cornflowerblue', ecolor='gray',
+							   markersize=3, capsize=2, label=r'PA$_{\rm orig}$', zorder=3)
+
+	if pa_corr_full is not None and full_res_time is not None:
+		frt = np.asarray(full_res_time, dtype=float)
+		mask_corr = np.isfinite(pa_corr_full)
+		if good_mask is not None:
+			mask_corr &= good_mask
+		if np.any(mask_corr) and n_pa_bins > 0 and np.sum(mask_corr) > n_pa_bins:
+			t_corr = frt[mask_corr] * 1e3
+			pa_corr_u = np.degrees(np.unwrap(np.radians(pa_corr_full[mask_corr])))
+			bin_edges = np.linspace(t_corr.min(), t_corr.max(), n_pa_bins + 1)
+			bc_c, pa_c, pa_ce = [], [], []
+			for b in range(n_pa_bins):
+				sel = (t_corr >= bin_edges[b]) & (t_corr < bin_edges[b + 1])
+				if b == n_pa_bins - 1:
+					sel = (t_corr >= bin_edges[b]) & (t_corr <= bin_edges[b + 1])
+				if not np.any(sel):
+					continue
+				pa_c.append(np.nanmean(pa_corr_u[sel]))
+				pa_ce.append(np.nanstd(pa_corr_u[sel]) / max(np.sqrt(np.nansum(sel)), 1.0))
+				bc_c.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
+			bc_c, pa_c, pa_ce = [np.array(x) for x in (bc_c, pa_c, pa_ce)]
+			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce) & (pa_ce <= 20.0)
+			if np.any(ok_c):
+				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='o',
+							   color='red', ecolor='gray',
+							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
+
+	ax_pa.set_ylabel(r'PA [deg.]', fontsize=style['label'])
+	ax_pa.grid(True, alpha=0.3)
+	ax_pa.tick_params(axis='both', labelsize=style['tick'], labelbottom=False)
+	ax_pa.legend(fontsize=style['legend'], loc='best')
+
+	# -- Middle panel: pulse profile + RM --
+	ax_twin = ax_top.twinx()
+	ax_top.spines['right'].set_visible(False)
+	ax_twin.spines['left'].set_visible(False)
+	ax_twin.spines['top'].set_visible(False)
+	ax_twin.spines['bottom'].set_visible(False)
+	ax_twin.yaxis.set_label_position('right')
+	ax_twin.yaxis.tick_right()
+	ax_twin.set_ylabel(r'RM [rad m$^{{-2}}$]', fontsize=style['label'])
+	ax_twin.tick_params(axis='y', labelsize=style['tick'])
+
+	if I_full is not None and full_time is not None:
+		ax_top.plot(full_time * 1e3, I_full, 'k-', linewidth=style['line'], label='I')
+		ax_top.plot(full_time * 1e3, L_full, 'r-', linewidth=style['line'], label='L', alpha=0.7)
+		ax_top.plot(full_time * 1e3, V_full, 'b-', linewidth=style['line'], label='V', alpha=0.7)
+
+	ax_top.set_ylabel(r'S [arb.]', fontsize=style['label'])
+	ax_top.tick_params(axis='y', labelsize=style['tick'], right=False, labelright=False)
+
+	rm_good = rm_results['rm'][good]
+	rm_err_good = rm_results.get('rm_err', np.full_like(rm_good, np.nan))[good]
+
+	xerr_half = None
+	if (full_time is not None and 'time_bin_start' in rm_results
+			and 'time_bin_end' in rm_results):
+		bs = rm_results['time_bin_start'][good]
+		be = rm_results['time_bin_end'][good]
+		xerr_half = (full_time[np.maximum(be.astype(int) - 1, 0)] - full_time[bs.astype(int)]) / 2 * 1e3
+
+	ax_twin.errorbar(tms_good, rm_good, yerr=rm_err_good, xerr=xerr_half,
+					 fmt='o', color='cornflowerblue', markersize=5, capsize=2,
+					 markeredgecolor='white', markeredgewidth=1, label='RM')
+	rm_valid = rm_good[np.isfinite(rm_good)]
+	if len(rm_valid) > 0:
+		rm_avg = np.nanmean(rm_valid)
+		ax_twin.axhline(y=rm_avg, color='cornflowerblue', linestyle='--',
+						linewidth=0.8, alpha=0.6, zorder=0)
+
+	rm_corr = rm_results.get('rm_corr')
+	rm_corr_err = rm_results.get('rm_corr_err')
+	if rm_corr is not None and rm_corr_err is not None:
+		rm_corr_good = rm_corr[good]
+		rm_corr_err_good = rm_corr_err[good]
+		corr_finite = np.isfinite(rm_corr_good)
+		if np.any(corr_finite):
+			xerr_corr = xerr_half[corr_finite] if xerr_half is not None else None
+			ax_twin.errorbar(tms_good[corr_finite], rm_corr_good[corr_finite],
+							 yerr=rm_corr_err_good[corr_finite],
+							 xerr=xerr_corr,
+							 fmt='s', color=IBM_PALETTE[-1], markersize=5, capsize=2,
+							 markeredgecolor='white', markeredgewidth=1,
+							 label=r'RM$_{\rm corr}$', zorder=5)
+			ax_twin.axhline(y=np.nanmean(rm_corr_good[corr_finite]), color=IBM_PALETTE[-1], linestyle='--',
+							linewidth=0.8, alpha=0.6, zorder=0)
+
+	ax_top.grid(True, alpha=0.3)
+	ax_top.tick_params(axis='x', labelbottom=False)
+	#ax_top.legend(fontsize=style['legend'], loc='upper left')
+	ax_twin.legend(fontsize=style['legend'], loc='upper right')
+
+	bt = np.asarray(rm_results.get('time', time_peak)) * 1e3
+
+	# Original L/I per-bin markers (RM-binned only)
+	l_orig_bin = rm_results.get('L_frac_bin', np.full_like(time_peak, np.nan))
+	l_orig_good = l_orig_bin[good]
+	l_orig_ok = np.isfinite(tms_good) & np.isfinite(l_orig_good)
+	if np.any(l_orig_ok):
+		ax_bot.errorbar(tms_good[l_orig_ok], l_orig_good[l_orig_ok],
+						fmt='o', color='cornflowerblue', ecolor='gray',
+						markersize=2, capsize=2, label=r'$\Pi_{L,{\rm orig}}$',
+						zorder=5)
+
+	# Corrected L/I fraction (RM-bin markers only)
+	l_corr_frac = rm_results.get('l_corr_frac', np.full_like(time_peak, np.nan))
+	lf_bin = np.asarray(l_corr_frac)
+
+	# Error from scatter of full-res samples within each RM-bin window
+	tbin_start = rm_results.get('time_bin_start')
+	tbin_end = rm_results.get('time_bin_end')
+	errs = np.full(len(bt), np.nan)
+	if l_corr_full is not None and tbin_start is not None and tbin_end is not None:
+		for idx in range(min(len(tbin_start), len(bt))):
+			s, e = int(tbin_start[idx]), int(tbin_end[idx])
+			if e <= s:
+				continue
+			vals = l_corr_full[s:e]
+			vals = vals[np.isfinite(vals)]
+			if len(vals) >= 2:
+				errs[idx] = np.nanstd(vals) / np.sqrt(len(vals))
+
+	bin_ok = np.isfinite(bt) & np.isfinite(lf_bin) & np.isfinite(errs)
+	if np.any(bin_ok):
+		ax_bot.errorbar(bt[bin_ok], lf_bin[bin_ok], yerr=errs[bin_ok],
+						fmt='s', color='red', ecolor='gray', markersize=2,
+						capsize=2, label=r'$\Pi_{L,{\rm corr}}$', zorder=10)
+
+		ylow = np.nanmin(lf_bin[bin_ok])
+		yhigh = np.nanmax(lf_bin[bin_ok])
+		ax_bot.set_ylim(ylow - 0.1, yhigh + 0.1)
+
+	ax_bot.set_ylabel(r'$\Pi_{L}$', fontsize=style['label'])
+	ax_bot.set_xlabel('Time [ms]', fontsize=style['label'])
+	ax_bot.grid(True, alpha=0.3)
+	ax_bot.tick_params(axis='both', labelsize=style['tick'])
+	ax_bot.legend(fontsize=style['legend'], loc='best')
+
+	if show_full_time and full_time is not None and len(full_time) > 1:
+		ax_pa.set_xlim(full_time[0] * 1e3, full_time[-1] * 1e3)
+
+	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
+	print(f"Corrected time series plot saved to {output_file}")
+	plt.close()
+
 
 def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 					output_file: str = 'rm_fitting_results.png',

@@ -635,6 +635,17 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     time_bin_start = np.zeros(n_bins_actual, dtype=int)
     time_bin_end = np.zeros(n_bins_actual, dtype=int)
 
+    pa_corr_deg = np.full(n_bins_actual, np.nan)
+    pa_corr_err_deg = np.full(n_bins_actual, np.nan)
+    l_corr_frac = np.full(n_bins_actual, np.nan)
+    q_corr_bin = np.full(n_bins_actual, np.nan)
+    u_corr_bin = np.full(n_bins_actual, np.nan)
+    rm_corr = np.full(n_bins_actual, np.nan)
+    rm_corr_err = np.full(n_bins_actual, np.nan)
+
+    pa_corr_full = np.full(n_time, np.nan)
+    l_corr_full = np.full(n_time, np.nan)
+
     # -------------------------------------------------------------------------
     # Main loop over time bins
     # -------------------------------------------------------------------------
@@ -783,6 +794,75 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
             rm_array[i] = median
             rm_err_array[i] = max(median - low, high - median)
 
+        # ----------------------------------------------------------------
+        # Derotate Q/U using fitted RM, then re-measure PA & L
+        # ----------------------------------------------------------------
+        if np.isfinite(rm_array[i]):
+            c = 299792458.0
+            lambda_sq_bin = (c / freq_fit) ** 2
+
+            # Per-bin (time-averaged) corrected scalars
+            P_obs = stokes_q + 1j * stokes_u
+            P_corr = P_obs * np.exp(-2j * rm_array[i] * lambda_sq_bin)
+            q_corr_freq = np.real(P_corr)
+            u_corr_freq = np.imag(P_corr)
+            q_corr_mn = np.nanmean(q_corr_freq)
+            u_corr_mn = np.nanmean(u_corr_freq)
+
+            q_corr_bin[i] = q_corr_mn / (i_val + 1e-10)
+            u_corr_bin[i] = u_corr_mn / (i_val + 1e-10)
+            l_corr = np.sqrt(q_corr_mn**2 + u_corr_mn**2)
+            l_corr_frac[i] = l_corr / (i_val + 1e-10)
+            pa_corr_deg[i] = np.degrees(0.5 * np.arctan2(u_corr_mn, q_corr_mn))
+            pa_corr_err_deg[i] = np.degrees(
+                0.5 * np.sqrt(
+                    (u_corr_mn**2 * noise_q_bin**2 + q_corr_mn**2 * noise_u_bin**2)
+                    / max(q_corr_mn**2 + u_corr_mn**2, 1e-20)
+                )
+            )
+
+            # Re-run RM synthesis on the derotated Q/U to check correction
+            try:
+                fitter_corr = RMFitter(freq_fit, stokes_i, q_corr_freq, u_corr_freq, None)
+                result_corr = fitter_corr._fit_rm_with_rmtools(
+                    rm_range=rm_range, n_rm=n_rm,
+                    noise_i=noise_i_perchan / np.sqrt(n_time_in_bin),
+                    noise_q=noise_q_perchan / np.sqrt(n_time_in_bin),
+                    noise_u=noise_u_perchan / np.sqrt(n_time_in_bin),
+                )
+                rm_corr[i] = result_corr.get('rm_clean_peak', result_corr.get('rm_peak', np.nan))
+                rm_corr_err[i] = result_corr.get('rm_clean_err',
+                                                  result_corr.get('dphi_peak_pi_fit',
+                                                                  result_corr.get('noise_estimate', 0) * 2))
+            except Exception:
+                rm_corr[i] = np.nan
+                rm_corr_err[i] = np.nan
+
+            # Full time-resolution corrected PA and L/I from the derotated dspec
+            for t in range(bin_start, bin_end):
+                if time_axis == 0:
+                    q_t = time_series_data['Q'][t, :]
+                    u_t = time_series_data['U'][t, :]
+                    i_t = time_series_data['I'][t, :]
+                else:
+                    q_t = time_series_data['Q'][:, t]
+                    u_t = time_series_data['U'][:, t]
+                    i_t = time_series_data['I'][:, t]
+
+                if n_edge > 0:
+                    q_t = q_t[n_edge:-n_edge]
+                    u_t = u_t[n_edge:-n_edge]
+                    i_t = i_t[n_edge:-n_edge]
+
+                P_obs_t = q_t + 1j * u_t
+                P_corr_t = P_obs_t * np.exp(-2j * rm_array[i] * lambda_sq_bin)
+                q_corr_t = np.nanmean(np.real(P_corr_t))
+                u_corr_t = np.nanmean(np.imag(P_corr_t))
+                i_mn_t = np.nanmean(i_t)
+
+                pa_corr_full[t] = np.degrees(0.5 * np.arctan2(u_corr_t, q_corr_t))
+                l_corr_full[t] = np.sqrt(q_corr_t**2 + u_corr_t**2) / (i_mn_t + 1e-10)
+
     # -------------------------------------------------------------------------
     # Masking
     # -------------------------------------------------------------------------
@@ -791,6 +871,13 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     rm_array[~valid_bins] = np.nan
     rm_err_array[~valid_bins] = np.nan
     snr_array[~valid_bins] = np.nan
+    pa_corr_deg[~valid_bins] = np.nan
+    pa_corr_err_deg[~valid_bins] = np.nan
+    l_corr_frac[~valid_bins] = np.nan
+    q_corr_bin[~valid_bins] = np.nan
+    u_corr_bin[~valid_bins] = np.nan
+    rm_corr[~valid_bins] = np.nan
+    rm_corr_err[~valid_bins] = np.nan
 
     return {
         'time': time_binned,
@@ -818,4 +905,14 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         'valid_bins': valid_bins,
         'l_snr': snr_array_L,
         'sigma_l': sigma_L_bins,
+        'pa_corr_deg': pa_corr_deg,
+        'pa_corr_err_deg': pa_corr_err_deg,
+        'l_corr_frac': l_corr_frac,
+        'q_corr_bin': q_corr_bin,
+        'u_corr_bin': u_corr_bin,
+        'pa_corr_full': pa_corr_full,
+        'l_corr_full': l_corr_full,
+        'rm_corr': rm_corr,
+        'rm_corr_err': rm_corr_err,
+        'time_full': np.asarray(times, dtype=float),
     }

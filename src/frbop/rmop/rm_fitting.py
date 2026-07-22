@@ -19,6 +19,7 @@ from .diagnostics import time_series_sigma_rm_diagnostic
 from .constants import set_pub_col
 from .fitter import RMFitter, debiased_linear_from_qu, fit_rm_time_series
 from .plotting import (plot_burns_law_fits, plot_poincare_projections,
+                       plot_rm_corrected_time_series,
                        plot_poincare_projections_frequency,
                        plot_poincare_sphere, plot_poincare_sphere_frequency,
                        plot_poincare_sphere_subbands,
@@ -170,6 +171,12 @@ def main() -> None:
     )
 
     # Poincare plots
+    parser.add_argument(
+        "--derotate-plot",
+        action="store_true",
+        default=False,
+        help="Generate derotated (RM-corrected) time series plot",
+    )
     parser.add_argument(
         "--poincare",
         action="store_true",
@@ -1409,7 +1416,10 @@ def main() -> None:
                         'pa_err', 'ea_err', 'i_snr', 'pol_angle_0',
                         'pol_angle_ref', 'P_frac_bin', 'L_frac_bin',
                         'V_frac_bin', 'q_bin', 'u_bin', 'v_bin',
-                        'time_bin_start', 'time_bin_end']
+                        'time_bin_start', 'time_bin_end',
+                        'pa_corr_deg', 'pa_corr_err_deg', 'l_corr_frac',
+                        'q_corr_bin', 'u_corr_bin',
+                        'pa_corr_full', 'l_corr_full', 'rm_corr', 'rm_corr_err', 'time_full']
         for key in _concat_keys:
             parts = [r[key] for r in all_rm_results if key in r]
             if parts:
@@ -1448,6 +1458,12 @@ def main() -> None:
         if "pa_deg" in rm_results:
             print(f"  Mean PA = {np.nanmean(rm_results['pa_deg']):.2f} deg")
             print(f"  Mean EA = {np.nanmean(rm_results['ea_deg']):.2f} deg")
+
+        if "rm_corr" in rm_results:
+            rm_corr_valid = rm_results["rm_corr"][np.isfinite(rm_results["rm_corr"])]
+            if len(rm_corr_valid) > 0:
+                print(f"  Mean RM (corrected) = {np.nanmean(rm_corr_valid):.4f} rad/m^2")
+                print(f"  std RM (corrected)  = {np.nanstd(rm_corr_valid):.4f} rad/m^2")
 
         if not args.no_plot:
             if args.separate_peaks:
@@ -1497,6 +1513,18 @@ def main() -> None:
                 peak_mask_bounds=onpulse_regions,
                 show_full_time=args.full_time
             )
+
+            if args.derotate_plot:
+                full_res_time = rm_results.get('time_full')
+                plot_rm_corrected_time_series(
+                    rm_results["time"],
+                    rm_results,
+                    f"{args.output}_corrected_time_series.{args.ext}",
+                    time_series_data=full_time_series_data,
+                    full_res_time=full_res_time,
+                    n_pa_bins=args.pa_bins,
+                    show_full_time=args.full_time,
+                )
 
             if args.poincare:
                 pt_bins = args.time_bins if args.time_bins and args.time_bins > 0 else None
