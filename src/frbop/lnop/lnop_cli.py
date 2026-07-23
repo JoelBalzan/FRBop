@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import numpy as np
 
@@ -23,7 +24,7 @@ def main():
             "\n"
             "Examples:\n"
             "  frbop ln Vx.npy Vy.npy --dt 1.25e-9\n"
-            "  frbop ln Vx.npy Vy.npy --n-log-bins 10 --output results\n"
+            "  frbop ln Vx.npy Vy.npy --n-log-bins 10 --outdir /scratch/user/frb123 --label frb123\n"
         ),
     )
 
@@ -53,8 +54,10 @@ def main():
     adv.add_argument("--off-pulse-gap-widths", type=int, default=5,
                      help="Off-pulse filter shift in burst widths (default: 5)")
 
-    parser.add_argument("-o", "--output", default="lnop_results",
-                        help="Output prefix (default: lnop_results)")
+    parser.add_argument("-o", "--outdir", default=".",
+                        help="Output directory (default: .)")
+    parser.add_argument("--label", default="lnop",
+                        help="Run label / output prefix (default: lnop)")
     parser.add_argument("--ext", default="png",
                         help="Figure extension (default: png)")
     parser.add_argument("--no-plot", action="store_true",
@@ -67,6 +70,8 @@ def main():
     args = parser.parse_args()
     set_pub_col(args.pub_col)
     set_pub_style(use_latex=False)
+    os.makedirs(args.outdir, exist_ok=True)
+    output_prefix = os.path.join(args.outdir, args.label)
 
     cfg = SearchConfig(
         dt=args.dt,
@@ -128,11 +133,11 @@ def main():
             print(f"    Significance  : {'PASS' if cand['significance_ok'] else 'FAIL'}")
             print(f"    Polarisation  : {'PASS' if cand['polarization_ok'] else 'FAIL'}")
 
-    np.savez(f"{args.output}_candidates.npz",
+    np.savez(f"{output_prefix}_candidates.npz",
              candidates=np.array(candidates) if candidates else np.array([]),
              dt=cfg.dt, min_lag=cfg.min_lag, frame=cfg.frame,
              Vx_file=args.Vx, Vy_file=args.Vy)
-    print(f"\nSaved: {args.output}_candidates.npz")
+    print(f"\nSaved: {output_prefix}_candidates.npz")
 
     if not args.no_plot:
         lags_s = result["lags_seconds"]
@@ -144,15 +149,15 @@ def main():
 
         plot_time_lag_correlation(lags_s, Cx, Cy,
                                   candidates=candidates,
-                                  output=args.output, ext=args.ext)
+                                  output=output_prefix, ext=args.ext)
         plot_epsilon(lags_s, eps_x, eps_y,
                      candidates=candidates,
-                     output=args.output, ext=args.ext)
+                     output=output_prefix, ext=args.ext)
         plot_bin_summary(candidates, edges,
-                         output=args.output, ext=args.ext)
+                         output=output_prefix, ext=args.ext)
         plot_polarization_scatter(eps_x, eps_y,
                                    candidates=candidates,
-                                   output=args.output, ext=args.ext)
+                                   output=output_prefix, ext=args.ext)
 
 
 if __name__ == "__main__":
