@@ -5,7 +5,8 @@ import numpy as np
 
 from frbop.utils.plotting import set_pub_col, set_pub_style
 
-from .core import SearchConfig, run_search
+from .core import (SearchConfig, detect_leakage_period, make_matched_filter,
+                    off_pulse_stats, run_search, time_lag_correlation)
 from .plotting import (plot_bin_summary, plot_epsilon,
                        plot_polarization_scatter, plot_time_lag_correlation)
 
@@ -19,12 +20,21 @@ def main():
             "  1. Build a matched filter from the burst's intensity profile.\n"
             "  2. Auto-correlate the voltage stream in the time-lag domain.\n"
             "  3. Calibrate noise using off-pulse (burst-free) data.\n"
-            "  4. Bin the time-lag spectrum logarithmically; compute chi^2 per bin.\n"
+            "  4. Bin the time-lag spectrum logarithmically; compute chi^2 per\n"
+            "     bin against an OFF-PULSE-derived null model.\n"
             "  5. Apply delay/significance/polarization vetoes to flag candidates.\n"
             "\n"
+            "--frame / --min-lag / --delay-veto-tol default to None, in which\n"
+            "case they're derived from --dt (see SearchConfig.resolve()) rather\n"
+            "than assuming CHIME-specific constants. If you don't know your\n"
+            "instrument's PFB-inversion leakage period, pass\n"
+            "--detect-leakage-period to estimate it empirically from your own\n"
+            "off-pulse data before the search runs.\n"
+            "\n"
             "Examples:\n"
-            "  frbop ln Vx.npy Vy.npy --dt 1.25e-9\n"
-            "  frbop ln Vx.npy Vy.npy --n-log-bins 10 --outdir /scratch/user/frb123 --label frb123\n"
+            "  frbop ln Vx.npy Vy.npy --dt 2.976e-9\n"
+            "  frbop ln Vx.npy Vy.npy --detect-leakage-period --n-log-bins 10 "
+            "--outdir /scratch/user/frb123 --label frb123\n"
         ),
     )
 
@@ -32,9 +42,10 @@ def main():
     parser.add_argument("Vy", help="Y-polarisation voltage timestream (.npy)")
 
     parser.add_argument("--dt", type=float, default=2.97619048e-9,
-                        help="Voltage sample spacing [s] (default: 2.976e-09)")
-    parser.add_argument("--min-lag", type=float, default=2.56e-6,
-                        help="Minimum absolute lag for first logarithmic bin [s] (default: 2.560e-06)")
+                        help="Voltage sample spacing [s] (default: 2.976e-09, "
+                             "i.e. 1/336 MHz -- appropriate for ASKAP/CELEBI "
+                             "voltages already PFB-inverted to full band "
+                             "resolution; check this matches your data)")
     parser.add_argument("--n-log-bins", type=int, default=8,
                         help="Number of logarithmic lag bins (default: 8)")
     parser.add_argument("--n-off-pulse", type=int, default=5,
@@ -42,9 +53,18 @@ def main():
 
     adv = parser.add_argument_group("advanced search-config options")
     adv.add_argument("--frame", type=float, default=None,
-                     help="PFB frame duration for delay veto [s] (default: None, veto disabled)")
-    adv.add_argument("--delay-veto-tol", type=float, default=0.625e-9,
-                     help="Delay veto tolerance [s] (default: 6.250e-10)")
+                     help="PFB-inversion leakage period for the delay veto [s]. "
+                          "Default: None (veto disabled). Use "
+                          "--detect-leakage-period to estimate this from your "
+                          "own data, or set explicitly if known.")
+    adv.add_argument("--min-lag", type=float, default=None,
+                     help="Minimum |lag| for the first logarithmic bin [s]. "
+                          "Default: None -> derived as 4*frame if --frame is "
+                          "set, else falls back to CHIME's 2.56e-6 s (verify "
+                          "this is meaningful for your instrument).")
+    adv.add_argument("--delay-veto-tol", type=float, default=None,
+                     help="Delay veto tolerance [s]. Default: None -> dt/2 "
+                          "(half a native sample), not CHIME's fixed 0.625 ns.")
     adv.add_argument("--n-gauss-threshold", type=float, default=1e-2,
                      help="N_gauss significance threshold (default: 1.00e-02)")
     adv.add_argument("--polarization-percentile", type=float, default=99.0,
@@ -53,6 +73,14 @@ def main():
                      help="Max top chi^2 values kept per bin (default: 2048)")
     adv.add_argument("--off-pulse-gap-widths", type=int, default=5,
                      help="Off-pulse filter shift in burst widths (default: 5)")
+    adv.add_argument("--detect-leakage-period", action="store_true",
+                     help="Empirically scan the off-pulse correlation for a "
+                          "periodic leakage comb before the search, and use "
+                          "the best match for --frame if --frame wasn't set "
+                          "explicitly. Always inspect the printed candidates "
+                          "yourself -- this is a starting point, not a "
+                          "substitute for knowing your pipeline's PFB "
+                          "inversion parameters.")
 
     parser.add_argument("-o", "--outdir", default=".",
                         help="Output directory (default: .)")
@@ -101,8 +129,47 @@ def main():
     N = len(Vx)
     duration_s = N * cfg.dt
     print(f"  Samples: {N}, duration: {duration_s:.4e} s")
-    print(f"  dt: {cfg.dt:.3e} s, min_lag: {cfg.min_lag:.3e} s"
-          + (f", frame: {cfg.frame:.3e} s" if cfg.frame is not None else ""))
+    print(f"  dt: {cfg.dt:.3e} s")
+
+    # ---- Optional: empirically estimate the PFB-inversion leakage period ----
+    if args.detect_leakage_period:
+        print("\nRunning preliminary PFB leakage-period detection "
+              "(off-pulse data only) ...")
+        Wx2_prelim, Wy2_prelim, mask_prelim = make_matched_filter(Vx, Vy)
+        burst_width = max(int(mask_prelim.sum()), 1)
+        off_shift = args.off_pulse_gap_widths * burst_width
+        lags_x_prelim, _ = time_lag_correlation(Vx, Wx2_prelim)
+        lags_seconds_prelim = lags_x_prelim * cfg.dt
+        _, Cx_off_stack_prelim = off_pulse_stats(Vx, Wx2_prelim, off_shift,
+                                                  args.n_off_pulse)
+        detected_period, _ = detect_leakage_period(
+            lags_seconds_prelim, Cx_off_stack_prelim, cfg.dt)
+
+        if detected_period is None:
+            print("  No clear periodic leakage detected in the searched "
+                  "range -- leaving --frame as given.")
+        else:
+            print(f"  Best candidate leakage period: {detected_period:.4e} s")
+            if cfg.frame is None:
+                cfg.frame = detected_period
+                print(f"  --frame not set explicitly; using this detected "
+                      f"period. VERIFY this against the printed candidates "
+                      f"above before trusting the delay veto on real "
+                      f"candidates.")
+            else:
+                print(f"  --frame was set explicitly to {cfg.frame:.4e} s; "
+                      f"leaving it unchanged (detection is informational).")
+
+    # ---- Print resolved (instrument-derived, not hardcoded) config ----
+    resolved_tol, resolved_min_lag = cfg.resolve()
+    print(f"\n  frame (delay veto period): "
+          f"{cfg.frame if cfg.frame is not None else 'disabled (None)'}")
+    print(f"  delay_veto_tol (resolved): {resolved_tol:.3e} s"
+          + ("" if args.delay_veto_tol is not None else "  [derived as dt/2]"))
+    print(f"  min_lag (resolved)       : {resolved_min_lag:.3e} s"
+          + ("" if args.min_lag is not None else
+             ("  [derived as 4*frame]" if cfg.frame is not None
+              else "  [CHIME fallback -- verify this applies to your data]")))
     print(f"  Log bins: {args.n_log_bins}, off-pulse realisations: {args.n_off_pulse}")
     print()
 
@@ -134,8 +201,11 @@ def main():
             print(f"    Polarisation  : {'PASS' if cand['polarization_ok'] else 'FAIL'}")
 
     np.savez(f"{output_prefix}_candidates.npz",
-             candidates=np.array(candidates) if candidates else np.array([]),
-             dt=cfg.dt, min_lag=cfg.min_lag, frame=cfg.frame,
+             candidates=np.array(candidates, dtype=object) if candidates else np.array([]),
+             bin_diagnostics=np.array(result["bin_diagnostics"], dtype=object),
+             dt=cfg.dt, min_lag=result["resolved_min_lag"],
+             frame=cfg.frame if cfg.frame is not None else np.nan,
+             delay_veto_tol=result["resolved_delay_veto_tol"],
              Vx_file=args.Vx, Vy_file=args.Vy)
     print(f"\nSaved: {output_prefix}_candidates.npz")
 
