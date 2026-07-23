@@ -83,8 +83,10 @@ class SearchConfig:
 
 def make_matched_filter(Vx, Vy, downsample_factor=16, noise_floor_sigma=3.0):
     def _one_pol(V):
-        intensity = np.abs(V) ** 2
+        intensity = (np.abs(V) ** 2).astype(np.float32, copy=False)
         smoothed = gaussian_filter1d(intensity, sigma=downsample_factor / 2.355)
+        smoothed = smoothed.astype(np.float32, copy=False)  # guard against
+        # scipy silently upcasting internally on some versions/backends
         med = np.median(smoothed)
         mad = np.median(np.abs(smoothed - med))
         sigma = 1.4826 * mad
@@ -132,11 +134,20 @@ def time_lag_correlation(V, W2, max_lag_samples=None):
     return lags, C
 
 
-def off_pulse_stats(V, W2, shift_samples, n_realizations, gap_samples=None):
+def off_pulse_stats(V, W2, shift_samples, n_realizations, gap_samples=None,
+                     max_lag_samples=None):
     """
     Repeat the time-lag correlation with the matched filter shifted to
     several burst-free regions (Sec. IV A/D). Returns the per-realization
-    (lags, C) list and the stacked array of shape (n_realizations, N).
+    (lags, C) list and the stacked array of shape (n_realizations, n_lags).
+
+    max_lag_samples truncates each realization's output to |lag| <=
+    max_lag_samples before stacking -- pass this in from run_search based
+    on your largest bin edge. The FFT itself still needs the full N-length
+    transform internally (that's an unavoidable transient cost of circular
+    correlation), but there is no reason to keep >4 GB of unused far-lag
+    output resident in memory afterwards if your bins only go out to a few
+    ms. This is the single biggest lever for reducing persistent memory.
     """
     if gap_samples is None:
         gap_samples = shift_samples
@@ -144,7 +155,7 @@ def off_pulse_stats(V, W2, shift_samples, n_realizations, gap_samples=None):
     for i in range(n_realizations):
         shift = -(i + 1) * abs(gap_samples)
         W2_off = shift_filter(W2, shift)
-        lags, C = time_lag_correlation(V, W2_off)
+        lags, C = time_lag_correlation(V, W2_off, max_lag_samples=max_lag_samples)
         realizations.append((lags, C))
     stacked = np.stack([C for _, C in realizations], axis=0)
     return realizations, stacked
@@ -152,18 +163,29 @@ def off_pulse_stats(V, W2, shift_samples, n_realizations, gap_samples=None):
 
 def off_pulse_noise_power(V, W2, shift_samples, n_realizations, gap_samples=None):
     """
-    FIXED: sum_t N^2(t) W^2(t) (Eq. A15), estimated directly from
-    burst-free stretches of the VOLTAGE timestream weighted by the
-    (unshifted) matched filter shape -- not from the correlation output.
-    Averaged over several off-pulse shifts for stability.
+    sum_t N^2(t) W^2(t) (Eq. A15), estimated from burst-free stretches of
+    the voltage timestream weighted by the matched filter shape.
+
+    OPTIMIZED: W2 is zero everywhere except the (typically narrow)
+    on-pulse support, so there's no reason to materialize a full N-length
+    np.roll(V, shift) copy (previously ~480 MB per realization for a
+    complex64 N=6e7 array) just to multiply almost all of it by zero.
+    Instead we gather only the samples V[(support - shift) % N] at the
+    filter's nonzero indices -- O(support size), not O(N).
     """
+    N = len(V)
+    support = np.flatnonzero(W2)
+    if support.size == 0:
+        return 0.0
+    W2_support = W2[support]
     if gap_samples is None:
         gap_samples = shift_samples
     powers = []
     for i in range(n_realizations):
         shift = -(i + 1) * abs(gap_samples)
-        V_off = np.roll(V, shift)
-        powers.append(np.sum(np.abs(V_off) ** 2 * W2))
+        idx = (support - shift) % N
+        V_local = V[idx]
+        powers.append(np.sum(np.abs(V_local) ** 2 * W2_support))
     return float(np.mean(powers))
 
 
@@ -181,13 +203,21 @@ def recover_epsilon(C_tau, Gamma):
     Eq. 8: eps^2 = C^2 (Gamma+1) / (Gamma^2 - C^2 Gamma^2 - C^2 Gamma).
     Works elementwise on arrays of any shape (used both for 1-D on-pulse
     C(that) and 2-D off-pulse [n_realizations x N] stacks).
+
+    FIX: previously forced Gamma (and everything derived from it) to
+    float64 via `dtype=float`, which silently doubled the memory of
+    every downstream eps array regardless of the input precision. Now
+    preserves C_tau's own dtype (falling back to float32, never lower,
+    e.g. if C_tau happens to be an integer/bool array).
     """
-    Gamma = np.asarray(Gamma, dtype=float)
-    C2 = C_tau ** 2
+    C_tau = np.asarray(C_tau)
+    out_dtype = C_tau.dtype if np.issubdtype(C_tau.dtype, np.floating) else np.float32
+    Gamma = np.asarray(Gamma, dtype=out_dtype)
+    C2 = (C_tau.astype(out_dtype, copy=False)) ** 2
     denom = Gamma ** 2 - C2 * Gamma ** 2 - C2 * Gamma
-    denom = np.where(denom <= 0, np.nan, denom)
-    eps2 = C2 * (Gamma + 1) / denom
-    eps = np.sign(C_tau) * np.sqrt(np.clip(eps2, 0, None))
+    denom = np.where(denom <= 0, np.nan, denom).astype(out_dtype, copy=False)
+    eps2 = (C2 * (Gamma + 1) / denom).astype(out_dtype, copy=False)
+    eps = (np.sign(C_tau) * np.sqrt(np.clip(eps2, 0, None))).astype(out_dtype, copy=False)
     return eps
 
 
