@@ -262,9 +262,32 @@ def bin_covariance(eps_x_bin, eps_y_bin):
     return mu, cov
 
 
-def chi2_values(eps_x, eps_y, mu, cov):
-    """chi^2 = (eps - mu)^T G^-1 (eps - mu)  (Eq. 13), evaluated elementwise."""
-    inv_cov = np.linalg.inv(cov)
+def chi2_values(eps_x, eps_y, mu, cov, rcond=1e-12):
+    """
+    chi^2 = (eps - mu)^T G^-1 (eps - mu)  (Eq. 13), evaluated elementwise.
+
+    Uses the Moore-Penrose pseudo-inverse rather than a strict inverse.
+    G_i can be singular or near-singular in real usage -- e.g. a lag bin
+    with too few off-pulse points, or eps_X/eps_Y coming out numerically
+    identical (perfectly correlated -> zero determinant). A strict inverse
+    raises LinAlgError and kills the whole run; pinv degrades gracefully
+    (using 0 in place of 1/0 for the degenerate direction), which is the
+    right behaviour for a search you don't want crashing on one bad bin.
+    """
+    if not np.all(np.isfinite(cov)):
+        return np.full(len(eps_x), np.nan)
+    # Warn on near-singular covariance -- still usable via pinv, but the
+    # chi^2 in the degenerate direction is not meaningful, so a candidate
+    # driven mainly by that direction should be treated with suspicion.
+    eigvals = np.linalg.eigvalsh(cov)
+    if eigvals.min() < rcond * eigvals.max():
+        import warnings
+        warnings.warn(
+            f"Near-singular bin covariance (eigenvalues {eigvals}); "
+            f"chi^2 in the degenerate direction is unreliable for this bin.",
+            stacklevel=2,
+        )
+    inv_cov = np.linalg.pinv(cov, rcond=rcond)
     diff = np.vstack([eps_x - mu[0], eps_y - mu[1]])  # (2, n)
     chi2 = np.einsum('in,ij,jn->n', diff, inv_cov, diff)
     return chi2
