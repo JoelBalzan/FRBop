@@ -18,8 +18,9 @@ rm = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.3", "RM-Tools>=1.4.2", "basema
 scint = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.4", "pyyaml>=6.0", "mwprop>=2.0.3", "astropy>=7.2", "mpmath>=1.4.1"]
 scatt = ["numpy>=1.20"]
 sn = ["numpy>=1.20", "matplotlib>=3.4"]
+ln = ["numpy>=1.20", "scipy>=1.7", "matplotlib>=3.4"]
 all = [
-  "frbop[dm,pa,rm,scint,scatt,sn]"
+  "frbop[dm,pa,rm,scint,scatt,sn,ln]"
 ]
 
 [project.scripts]

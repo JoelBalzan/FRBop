@@ -5,6 +5,7 @@ from typing import Sequence
 
 COMMANDS = {
     "dm": ("DM optimization", "frbop.dmop.dm_optimisation"),
+    "ln": ("Lensing search", "frbop.lnop.lnop_cli"),
     "pa": ("PA / RVM fitting", "frbop.paop.paop_cli"),
     "rm": ("RM fitting", "frbop.rmop.rm_fitting"),
     "scint": ("Scintillation fit", "frbop.scop.fit_frb_scintillation"),
@@ -48,7 +49,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  frbop rm -i I.npy -q Q.npy -u U.npy --freq freq.npy\n"
             "  frbop scint FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
             "  frbop scatt FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy\n"
-            "  frbop sn -x xpol.npy -y ypol.npy -p parameters.txt"
+            "  frbop sn -x xpol.npy -y ypol.npy -p parameters.txt\n"
+            "  frbop ln Vx.npy Vy.npy --dt 1.25e-9 --frame 2.56e-6"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
