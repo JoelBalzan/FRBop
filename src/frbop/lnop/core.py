@@ -170,8 +170,8 @@ def run_search(Vx, Vy, cfg, n_off_pulse=5, off_pulse_gap_widths=5,
     lags_y, Cy = time_lag_correlation(Vy, Wy2)
     lags_seconds = lags_x * cfg.dt
 
-    _, Cx_off_stack = off_pulse_stats(Vx, Wx2, off_shift, n_off_pulse, cfg.dt)
-    _, Cy_off_stack = off_pulse_stats(Vy, Wy2, off_shift, n_off_pulse, cfg.dt)
+    _, Cx_off_stack = off_pulse_stats(Vx, Wx2, off_shift, n_off_pulse)
+    _, Cy_off_stack = off_pulse_stats(Vy, Wy2, off_shift, n_off_pulse)
 
     Fx = np.sum(np.abs(Vx) ** 2 * Wx2)
     Fy = np.sum(np.abs(Vy) ** 2 * Wy2)
