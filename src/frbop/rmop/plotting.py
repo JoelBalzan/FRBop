@@ -2817,6 +2817,14 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 				ax_pa.errorbar(bc_o[ok_o], pa_o[ok_o], yerr=pa_oe[ok_o],
 							   fmt='o', color='cornflowerblue', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm orig}$', zorder=3)
+		elif n_pa_bins == 0:
+			pa_orig_bin = rm_results.get('pa_deg', np.full_like(time_peak, np.nan))
+			pa_orig_err = rm_results.get('pa_err_deg', np.full_like(time_peak, np.nan))
+			if np.any(np.isfinite(pa_orig_bin[good])):
+				pa_orig_unw = np.degrees(np.unwrap(np.radians(pa_orig_bin[good])))
+				ax_pa.errorbar(tms_good, pa_orig_unw, yerr=pa_orig_err[good],
+							   fmt='o', color='cornflowerblue', ecolor='gray',
+							   markersize=3, capsize=2, label=r'PA$_{\rm orig}$', zorder=3)
 
 	if pa_corr_full is not None and full_res_time is not None:
 		frt = np.asarray(full_res_time, dtype=float)
@@ -2840,8 +2848,16 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			bc_c, pa_c, pa_ce = [np.array(x) for x in (bc_c, pa_c, pa_ce)]
 			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce) & (pa_ce <= 20.0)
 			if np.any(ok_c):
-				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='o',
+				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='s',
 							   color='red', ecolor='gray',
+							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
+		elif n_pa_bins == 0:
+			pa_corr_bin = rm_results.get('pa_corr_deg', np.full_like(time_peak, np.nan))
+			pa_corr_err = rm_results.get('pa_corr_err_deg', np.full_like(time_peak, np.nan))
+			pa_corr_unw = np.degrees(np.unwrap(np.radians(pa_corr_bin[good])))
+			if len(pa_corr_unw) > 0:
+				ax_pa.errorbar(tms_good, pa_corr_unw, yerr=pa_corr_err[good],
+							   fmt='s', color='red', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
 
 	ax_pa.set_ylabel(r'PA [deg.]', fontsize=style['label'])

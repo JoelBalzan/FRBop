@@ -306,7 +306,7 @@ class ComparisonMixin:
 
 		# PA slope (raw masked PA)
 		if run_pa and pa_values is not None:
-			max_idx_pa = int(np.argmax(pa_values))
+			max_idx_pa = int(np.argmax(np.abs(pa_values)))
 			optimal_dm_pa = float(dm_values[max_idx_pa])
 			best_dedisp_i_pa = self.dedisperse(data, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pa = self.dedisperse(data_q, optimal_dm_pa, output_size=output_size, mode=self.dedisp_mode)
@@ -358,7 +358,7 @@ class ComparisonMixin:
 
 		# PA slope (SHRINE-smoothed PA)
 		if run_pa_shrine and pa_shrine_values is not None:
-			max_idx_pas = int(np.argmax(pa_shrine_values))
+			max_idx_pas = int(np.argmax(np.abs(pa_shrine_values)))
 			optimal_dm_pas = float(dm_values[max_idx_pas])
 			best_dedisp_i_pas = self.dedisperse(data, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)
 			best_dedisp_q_pas = self.dedisperse(data_q, optimal_dm_pas, output_size=output_size, mode=self.dedisp_mode)

@@ -510,7 +510,7 @@ class PlottingMixin:
 				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
 				pa_slope_values[i] = self.pa_slope_metric(sm_q, sm_u, time_axis, sm_i)
 				if l_i_mean_values is not None:
-					l_i_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean')
+					l_i_mean_values[i] = self.linear_to_stokes_i_metric(sm_q, sm_u, sm_i, mode='mean', use_fwhm_window=True)
 
 		run_tag = f"scan_{int(np.round(dm_values[0] * 1000))}_{int(np.round(dm_values[-1] * 1000))}_{len(dm_values)}"
 

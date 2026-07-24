@@ -161,10 +161,13 @@ class UncertaintyMixin:
 		low_idx = int(possible_max_ranges[0][0])
 		low_dm = float(dm[low_idx]) if 0 <= low_idx < len(dm) else None
 		high_dm = None
-		if len(possible_max_ranges[-1]) == 2:
-			high_idx = int(possible_max_ranges[-1][1])
+		last = possible_max_ranges[-1]
+		if len(last) == 2:
+			high_idx = int(last[1])
 			if 0 <= high_idx < len(dm):
 				high_dm = float(dm[high_idx])
+		elif len(last) == 1:
+			high_dm = float(dm[-1])
 		return low_dm, high_dm
 
 	def _uncertainty_from_half_prominence(self,
@@ -349,7 +352,7 @@ class UncertaintyMixin:
 			best_idx = int(np.argmax(metric))
 			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE metric uncertainty")
 
-		max_idx = int(np.argmax(metric))
+		max_idx = int(np.argmax(np.abs(metric)))
 
 		# Fill non-finite values before DCT
 		finite = np.isfinite(metric)
@@ -384,7 +387,7 @@ class UncertaintyMixin:
 		relative_uncertainty[~np.isfinite(relative_uncertainty)] = 0.0
 
 		max_metric = float(metric[max_idx])
-		adjusted_metrics = metric + (metric * relative_uncertainty)
+		adjusted_metrics = metric + np.abs(metric) * relative_uncertainty
 		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
 		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE metric uncertainty")
@@ -478,7 +481,7 @@ class UncertaintyMixin:
 		profiles = np.asarray(reference_profiles, dtype=float)
 
 		if profiles.ndim != 2 or profiles.shape[0] != dm.shape[0] or metric.shape[0] != dm.shape[0]:
-			best_idx = int(np.argmax(metric))
+			best_idx = int(np.argmax(np.abs(metric)))
 			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE relative uncertainty")
 
 		# Replace non-finite values row-wise so DCT/filtering remains stable.
@@ -495,7 +498,7 @@ class UncertaintyMixin:
 		ci_data = dct(profiles_finite, norm='ortho')
 		k_len = ci_data.shape[1]
 		if k_len < 2:
-			best_idx = int(np.argmax(metric))
+			best_idx = int(np.argmax(np.abs(metric)))
 			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE relative uncertainty")
 
 		if kc is None:
@@ -511,7 +514,7 @@ class UncertaintyMixin:
 		filter_diag = np.diag(hp * f_l)
 
 		delta_i = profiles_finite - i_smooth
-		max_idx = int(np.argmax(metric))
+		max_idx = int(np.argmax(np.abs(metric)))
 		delta_delta_i = delta_i - delta_i[max_idx]
 
 		relative_uncertainty = shrine_uncertainty_calc(delta_delta_i, lpf_data, filter_diag)
@@ -519,7 +522,7 @@ class UncertaintyMixin:
 		relative_uncertainty[~np.isfinite(relative_uncertainty)] = 0.0
 
 		max_metric = float(metric[max_idx])
-		adjusted_metrics = metric + (metric * relative_uncertainty)
+		adjusted_metrics = metric + np.abs(metric) * relative_uncertainty
 		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
 		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
 		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE relative uncertainty")

@@ -63,7 +63,7 @@ class PolarisationMixin:
 		except Exception:
 			return (0.0, 0.0) if return_error else 0.0
 
-		slope_magnitude = float(np.abs(coeffs[0]))
+		slope_magnitude = float(coeffs[0])
 		if not np.isfinite(slope_magnitude):
 			return (0.0, 0.0) if return_error else 0.0
 
