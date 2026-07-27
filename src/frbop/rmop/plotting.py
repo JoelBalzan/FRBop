@@ -2848,7 +2848,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			bc_c, pa_c, pa_ce = [np.array(x) for x in (bc_c, pa_c, pa_ce)]
 			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce) & (pa_ce <= 20.0)
 			if np.any(ok_c):
-				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='s',
+				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='o',
 							   color='red', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
 		elif n_pa_bins == 0:
@@ -2857,7 +2857,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			pa_corr_unw = np.degrees(np.unwrap(np.radians(pa_corr_bin[good])))
 			if len(pa_corr_unw) > 0:
 				ax_pa.errorbar(tms_good, pa_corr_unw, yerr=pa_corr_err[good],
-							   fmt='s', color='red', ecolor='gray',
+							   fmt='o', color='red', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
 
 	ax_pa.set_ylabel(r'PA [deg.]', fontsize=style['label'])
@@ -2915,7 +2915,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			ax_twin.errorbar(tms_good[corr_finite], rm_corr_good[corr_finite],
 							 yerr=rm_corr_err_good[corr_finite],
 							 xerr=xerr_corr,
-							 fmt='s', color=IBM_PALETTE[-1], markersize=5, capsize=2,
+							 fmt='o', color=IBM_PALETTE[-1], markersize=5, capsize=2,
 							 markeredgecolor='white', markeredgewidth=1,
 							 label=r'RM$_{\rm corr}$', zorder=5)
 			ax_twin.axhline(y=np.nanmean(rm_corr_good[corr_finite]), color=IBM_PALETTE[-1], linestyle='--',
@@ -2936,7 +2936,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	if np.any(l_orig_ok):
 		ax_bot.errorbar(tms_good[l_orig_ok], l_orig_good[l_orig_ok],
 						fmt='o', color='cornflowerblue', ecolor='gray',
-						markersize=2, capsize=2, label=r'$\Pi_{L,{\rm orig}}$',
+						markersize=3, capsize=2, label=r'$\Pi_{L,{\rm orig}}$',
 						zorder=5)
 
 	# Corrected L/I fraction (RM-bin markers only)
@@ -2960,7 +2960,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	bin_ok = np.isfinite(bt) & np.isfinite(lf_bin) & np.isfinite(errs)
 	if np.any(bin_ok):
 		ax_bot.errorbar(bt[bin_ok], lf_bin[bin_ok], yerr=errs[bin_ok],
-						fmt='s', color='red', ecolor='gray', markersize=2,
+						fmt='o', color='red', ecolor='gray', markersize=3,
 						capsize=2, label=r'$\Pi_{L,{\rm corr}}$', zorder=10)
 
 		ylow = np.nanmin(lf_bin[bin_ok])
