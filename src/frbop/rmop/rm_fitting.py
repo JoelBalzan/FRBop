@@ -374,12 +374,6 @@ def main() -> None:
         default=0.1,
         help="Fraction of Stokes I samples used for offpulse noise estimation (default: 0.10)",
     )
-    parser.add_argument(
-        "--debias-linear",
-        action="store_true",
-        default=False,
-        help="Apply Ricean debiasing to linear polarisation L = sqrt(Q^2 + U^2)",
-    )
 
     # Physics helpers
     parser.add_argument(
@@ -758,7 +752,6 @@ def main() -> None:
             i_val = np.asarray(stokes_i, dtype=float)
             l_val, sigma_l, l_det = debiased_linear_from_qu(
                 q_val, u_val, sigma_q_chan, sigma_u_chan,
-                debias=args.debias_linear,
             )
             l_val[~l_det] = 0.0
             burn_pol_frac_err = np.sqrt(
@@ -1208,7 +1201,6 @@ def main() -> None:
 
                 l_pk, sigma_l_pk, l_det_pk = debiased_linear_from_qu(
                     stokes_q_pk, stokes_u_pk, sigma_q_pk, sigma_u_pk,
-                    debias=args.debias_linear,
                 )
                 l_pk[~l_det_pk] = 0.0
                 burn_err_pk = np.sqrt(
@@ -1388,7 +1380,6 @@ def main() -> None:
                 exclude_edge_bins=0,
                 noise_fraction=args.offpulse,
                 offpulse_std=off_std,
-                debias_linear=args.debias_linear,
             )
 
             l_weights_region = None

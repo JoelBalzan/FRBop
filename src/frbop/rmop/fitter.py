@@ -25,10 +25,9 @@ def debiased_linear_from_qu(
     noise_u: np.ndarray,
     cutoff: float = 1.57,
     eps: float = 1e-12,
-    debias: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Compute optionally debiased linear polarisation L = sqrt(Q² + U²).
+    Compute Ricean-debiased linear polarisation L = sqrt(Q² + U²).
 
     Applies Ricean debiasing and a detection cutoff on L/sigma_L.
 
@@ -42,13 +41,11 @@ def debiased_linear_from_qu(
         Detection threshold on L/sigma_L (default 1.57 ~ 1-sigma).
     eps : float
         Small constant to avoid division by zero.
-    debias : bool
-        Apply Ricean debiasing L_deb = sqrt(max(L² - sigma_L², 0)).
 
     Returns
     -------
     L_out : np.ndarray
-        Debiased (or raw) linear polarisation.
+        Debiased linear polarisation.
     sigma_L : np.ndarray
         Propagated uncertainty on L.
     det : np.ndarray (bool)
@@ -58,11 +55,8 @@ def debiased_linear_from_qu(
     sigma_L = np.sqrt(data_q ** 2 * noise_q ** 2 + data_u ** 2 * noise_u ** 2) / np.maximum(L_meas, eps)
     det = L_meas / np.maximum(sigma_L, eps) >= cutoff
 
-    if debias:
-        L_out = np.zeros_like(L_meas)
-        L_out[det] = np.sqrt(np.maximum(L_meas[det] ** 2 - sigma_L[det] ** 2, 0.0))
-    else:
-        L_out = L_meas
+    L_out = np.zeros_like(L_meas)
+    L_out[det] = np.sqrt(np.maximum(L_meas[det] ** 2 - sigma_L[det] ** 2, 0.0))
 
     return L_out, sigma_L, det
 
@@ -474,8 +468,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                        n_time_bins: Optional[int] = None,
                        noise_fraction: float = 0.1,
                        offpulse_std: Optional[np.ndarray] = None,
-                       exclude_edge_bins: int = 0,
-                       debias_linear: bool = False) -> Dict:
+                       exclude_edge_bins: int = 0) -> Dict:
     """
     Fit RM for time-series data (multiple time samples).
 
@@ -715,9 +708,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         L_snr = L_meas / max(sigma_L, 1e-12)
         snr_array_L[i] = L_snr
         sigma_L_bins[i] = sigma_L
-        L_det = L_snr >= (1.57 if debias_linear else 3.0)
+        L_det = L_snr >= 1.57
 
-        if debias_linear and L_det:
+        if L_det:
             L_val = np.sqrt(max(L_meas**2 - sigma_L**2, 0.0))
         else:
             L_val = L_meas
