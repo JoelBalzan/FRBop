@@ -49,7 +49,6 @@ class DMOptimiser(
                  shrine_kc: Optional[List[int]] = None,
                  sync_kc: bool = False,
                  li_i_sigma_cut: float = 2.0,
-                 debias_linear: bool = False,
                  random_seed: Optional[int] = None,
                  # Optional radiometer noise parameters (if provided, use radiometer eqn noise)
                  sefd: Optional[float] = None,
@@ -75,6 +74,9 @@ class DMOptimiser(
         self.stokes_v = stokes_v
         self.freq_mhz = freq_mhz
         self.time_ms = time_ms
+        for data in (self.stokes_i, self.stokes_q, self.stokes_u, self.stokes_v):
+            if data is not None:
+                data[np.isnan(data)] = 0.0
         self.n_freq, self.n_time = stokes_i.shape
         self.reference_freq = reference_freq if reference_freq is not None else np.max(freq_mhz)
         self.input_dm = float(input_dm)
@@ -118,7 +120,6 @@ class DMOptimiser(
         self.li_i_sigma_cut = float(li_i_sigma_cut)
         if self.li_i_sigma_cut <= 0:
             raise ValueError("li_i_sigma_cut must be positive")
-        self.debias_linear = bool(debias_linear)
         self.random_seed = random_seed
         self.rng = np.random.default_rng(random_seed)
 

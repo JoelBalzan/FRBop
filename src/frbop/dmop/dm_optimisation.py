@@ -185,11 +185,6 @@ def parse_args() -> argparse.Namespace:
 		help="Stokes I sigma cutoff for L/I mean masking (default: 2.0)",
 	)
 	parser.add_argument(
-		"--debias-linear",
-		action="store_true",
-		help="Enable linear-polarisation debiasing for PA/L/I metrics.",
-	)
-	parser.add_argument(
 		"--methods",
 		nargs="+",
 		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
@@ -322,7 +317,6 @@ def main():
 	print(f"  - PA weight strength: {args.pa_weight_strength}")
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
 	print(f"  - PA min run: {args.pa_min_run}")
-	print(f"  - Linear debiasing: {args.debias_linear}")
 	print(f"  - Non-SHRINE kc smoothing: {args.nonshrine_kc_smooth}")
 	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
 	if args.sync_kc:
@@ -481,7 +475,6 @@ def main():
 		shrine_kc=args.shrine_kc,
 		sync_kc=args.sync_kc,
 		li_i_sigma_cut=args.li_sig,
-		debias_linear=args.debias_linear,
 		random_seed=args.seed,
 	)
 

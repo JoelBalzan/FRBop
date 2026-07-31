@@ -38,10 +38,11 @@ class PlottingMixin:
 		has_qu = self.stokes_q is not None and self.stokes_u is not None
 
 		_, target_h = pub_figsize(ncol=1)
+		baseline_rows = 5
 		figsize = pub_grid_figsize(
 		    ncol=1,
 		    n_rows=n_methods + 1,
-		    row_height=target_h / (n_methods + 1),
+		    row_height=target_h / baseline_rows,
 			width_scale=1.2,
 		)
 		fig, axes = plt.subplots(
@@ -400,6 +401,11 @@ class PlottingMixin:
 					linewidth=2.0,
 					color=colour_manager.color(method_name),
 				)
+				if method_name in ('pa_slope', 'pa_slope_shrine'):
+					y_lo, y_hi = scan_ax.get_ylim()
+					if y_lo <= 0.0 <= y_hi:
+						scan_ax.axhline(0.0, color='black', linestyle='-', linewidth=1.0, alpha=0.6)
+						scan_ax.set_ylim(y_lo, y_hi)
 				scan_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.4,
 							alpha=0.9,
 							label=(f'Input DM'))#={self._format_dm(self.input_dm, 3)}' if show_scan_legend else None))
