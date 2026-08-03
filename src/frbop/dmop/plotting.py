@@ -1,6 +1,6 @@
 """Plotting and DM-space scanning utilities."""
 
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -451,6 +451,284 @@ class PlottingMixin:
 		else:
 			plt.show()
 	
+	def plot_single_method_comparison(self,
+									   method_key: str,
+									   all_results: List[Dict],
+									   dm_range: Tuple[float, float],
+									   peak_regions: List[Tuple[int, int]],
+									   label: str = "frb",
+									   save_path: Optional[str] = None,
+									   show_errors: bool = True):
+		"""
+		Single-method component comparison with a max-range overview row.
+
+		Layout (one method):
+		  Row 1 (max range): the full envelope dedispersed dynamic spectrum and
+		  Stokes I time profile with the component regions shaded and labelled
+		  (no PA/L), plus a per-component best-DM comparison against the input
+		  DM (DM on the x-axis).
+		  Rows 2..n (components): each component's dedispersed dynamic spectrum,
+		  corrected Stokes I profile (no PA/L), and the metric-vs-DM curve.
+		"""
+		n_segments = len(all_results)
+		if n_segments == 0:
+			print("  Single-method comparison skipped (no segment results).")
+			return
+
+		max_start = int(min(r[0] for r in peak_regions))
+		max_end = int(max(r[1] for r in peak_regions))
+
+		n_rows = 1 + n_segments
+		_, target_h = pub_figsize(ncol=1)
+		baseline_rows = 5
+		figsize = pub_grid_figsize(
+			ncol=1,
+			n_rows=n_rows,
+			row_height=target_h / baseline_rows,
+			width_scale=1.2,
+		)
+		fig, axes = plt.subplots(
+			n_rows, 5, figsize=figsize,
+			gridspec_kw={'width_ratios': [0.85, 0.1, 0.85, 0.15, 0.8]},
+		)
+		if n_rows == 1:
+			axes = np.atleast_2d(axes)
+
+		for spacer_ax in axes[:, 1]:
+			fig.delaxes(spacer_ax)
+		for spacer_ax in axes[:, 3]:
+			fig.delaxes(spacer_ax)
+		axes = np.stack((axes[:, 0], axes[:, 2], axes[:, 4]), axis=1)
+
+		seg_colours = ['#ffb000', '#785ef0', '#00b0ff', '#00d16b', '#ff5b5b',
+					   '#d000d0', '#3b3b3b']
+
+		method_label = {
+			'structure': 'Structure',
+			'snr': 'S/N',
+			'min_uncertainty': 'Min. Uncertainty',
+			'pa_slope': 'PA',
+			'pa_slope_shrine': 'PA (SHRINE)',
+			'l_i_mean': r'$\Pi_L$ mean',
+			'structure_L': 'Structure (L)',
+		}
+		fs_title = plt.rcParams.get('axes.titlesize', 11)
+		fs_label = plt.rcParams.get('axes.labelsize', 11)
+		fs_tick = plt.rcParams.get('xtick.labelsize', 10)
+		fs_legend = plt.rcParams.get('legend.fontsize', 9)
+		fs_labelpad = 2
+
+		# --- Row 0: max range overview ----------------------------------------
+		max_time = self.time_ms[max_start:max_end]
+		max_dspec = self.stokes_i[:, max_start:max_end]
+		display_slice = slice(None)
+		nonzero = np.any(np.isfinite(max_dspec) & (max_dspec != 0.0), axis=0)
+		if np.any(nonzero):
+			first_valid = int(np.argmax(nonzero))
+			last_valid = int(len(nonzero) - np.argmax(nonzero[::-1]))
+			if first_valid < last_valid:
+				display_slice = slice(first_valid, last_valid)
+		max_dspec = max_dspec[:, display_slice]
+		max_time = max_time[display_slice]
+		vmin0, vmax0 = self._robust_vmin_vmax(max_dspec)
+		dax = axes[0, 0]
+		dax.imshow(
+			max_dspec,
+			aspect='auto',
+			extent=[max_time[0], max_time[-1], self.freq_mhz[0], self.freq_mhz[-1]],
+			cmap='plasma',
+			origin='lower',
+			vmin=vmin0,
+			vmax=vmax0,
+		)
+		dax.set_title(
+			#f"{method_label.get(method_key, method_key)} - Max range\n"
+					   rf"DM$_{{\rm C}}$ = {self._format_dm(self.input_dm, 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
+		dax.set_ylabel('Frequency [MHz]')
+		dax.set_xlabel('Time [ms]')
+		dax.title.set_fontsize(fs_title)
+		dax.xaxis.label.set_size(fs_label)
+		dax.yaxis.label.set_size(fs_label)
+		dax.xaxis.labelpad = fs_labelpad
+		dax.yaxis.labelpad = fs_labelpad
+		dax.tick_params(axis='both', labelsize=fs_tick)
+
+		pax = axes[0, 1]
+		max_series = np.nansum(max_dspec, axis=0)
+		pax.plot(max_time, max_series, 'k-', linewidth=1)
+		pax.set_ylabel(r'S [arb.]')
+		pax.set_xlabel('Time [ms]')
+		pax.grid(True, alpha=0.3)
+		pax.title.set_fontsize(fs_title)
+		pax.xaxis.label.set_size(fs_label)
+		pax.yaxis.label.set_size(fs_label)
+		pax.xaxis.labelpad = fs_labelpad
+		pax.yaxis.labelpad = fs_labelpad
+		pax.tick_params(axis='both', labelsize=fs_tick)
+		pax.set_yticklabels([])
+
+		# Shade each component region on the max-range profile; label the profile.
+		p_max = float(np.nanmax(max_series)) if len(max_series) > 0 else 0.0
+		x_lo = float(max_time[0])
+		x_hi = float(max_time[-1])
+		clamped_bounds = []
+		for r_idx, (r0, r1) in enumerate(peak_regions):
+			x0 = float(self.time_ms[min(max(r0, 0), len(self.time_ms) - 1)])
+			x1 = float(self.time_ms[min(max(r1, 0), len(self.time_ms) - 1)])
+			clamped_bounds.append((min(max(x0, x_lo), x_hi), min(max(x1, x_lo), x_hi)))
+		flat_bounds = [b for pair in clamped_bounds for b in pair]
+		extreme_min = min(flat_bounds) if flat_bounds else None
+		extreme_max = max(flat_bounds) if flat_bounds else None
+		for r_idx, ((x0, x1), (r0, r1)) in enumerate(zip(clamped_bounds, peak_regions)):
+			seg_col = seg_colours[r_idx % len(seg_colours)]
+			for bx in (x0, x1):
+				if extreme_min is not None and extreme_max is not None and extreme_min < bx < extreme_max:
+					dax.axvline(bx, color='white', linewidth=0.8, alpha=0.9)
+			pax.axvspan(x0, x1, color=seg_col, alpha=0.15, zorder=0)
+			pax.text(x0, 0.8 * p_max, rf'$C_{{{r_idx + 1}}}$', fontsize=fs_label,
+					 fontweight='bold', color='black', ha='left', va='bottom',
+					 transform=pax.transData)
+
+		# Per-component DM vs input DM (right column of row 0); DM on the x-axis.
+		cmp_ax = axes[0, 2]
+		seg_pos = np.arange(1, n_segments + 1, dtype=float)
+		seg_dm = np.array([all_results[i][method_key]['dm'] for i in range(n_segments)])
+		for i in range(n_segments):
+			seg_col = seg_colours[i % len(seg_colours)]
+			if show_errors:
+				minus = float(all_results[i][method_key].get('uncertainty_minus') or 0.0)
+				plus = float(all_results[i][method_key].get('uncertainty_plus') or 0.0)
+				cmp_ax.errorbar([seg_dm[i]], [seg_pos[i]], xerr=[[minus], [plus]],
+								fmt='o', color=seg_col, capsize=3, elinewidth=1.8, markersize=5)
+			else:
+				cmp_ax.plot([seg_dm[i]], [seg_pos[i]], 'o', color=seg_col, markersize=5)
+		cmp_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.4, alpha=0.9,
+					   label=rf"DM$_{{\rm C}}$ = {self._format_dm(self.input_dm, 3)}")
+		cmp_ax.set_ylim(0.5, n_segments + 0.5)
+		cmp_ax.invert_yaxis()
+		cmp_ax.set_yticks(seg_pos)
+		cmp_ax.set_yticklabels([rf'$C_{{{i + 1}}}$' for i in range(n_segments)])
+		cmp_ax.set_title('Component DM comparison')
+		cmp_ax.set_xlabel(r'Best DM [$\mathrm{pc\,cm}^{{-3}}$]')
+		cmp_ax.grid(True, axis='x', alpha=0.3)
+		cmp_ax.legend(loc='best', fontsize=fs_legend)
+		cmp_ax.title.set_fontsize(fs_title)
+		cmp_ax.xaxis.label.set_size(fs_label)
+		cmp_ax.yaxis.label.set_size(fs_label)
+		cmp_ax.xaxis.labelpad = fs_labelpad
+		cmp_ax.yaxis.labelpad = fs_labelpad
+		cmp_ax.tick_params(axis='both', labelsize=fs_tick)
+
+		# --- Component rows -------------------------------------------------------
+		for seg in range(n_segments):
+			res = all_results[seg][method_key]
+			r0, r1 = peak_regions[seg]
+			row = seg + 1
+			seg_col = seg_colours[seg % len(seg_colours)]
+
+			n_time_out = res['dedispersed'].shape[1]
+			if len(self.time_ms) > 1:
+				dt_val = float(np.nanmedian(np.diff(self.time_ms)))
+			else:
+				dt_val = 1.0
+			delay_samples = self._get_delay_samples(res['dm'])
+			if self.dedisp_mode == 'crop':
+				start_shift = int(np.max(delay_samples))
+			else:
+				start_shift = int(np.min(delay_samples))
+			base_start = self.time_ms[min(r0, len(self.time_ms) - 1)]
+			time_disp = base_start + start_shift * dt_val + np.arange(n_time_out) * dt_val
+
+			display_slice = slice(None)
+			if self.dedisp_mode == 'expand_zero':
+				nonzero = np.any(np.isfinite(res['dedispersed']) & (res['dedispersed'] != 0.0), axis=0)
+				if np.any(nonzero):
+					first_valid = int(np.argmax(nonzero))
+					last_valid = int(len(nonzero) - np.argmax(nonzero[::-1]))
+					display_slice = slice(first_valid, last_valid)
+
+			plot_dedisp = res['dedispersed'][:, display_slice]
+			time_disp = time_disp[display_slice]
+			sax = axes[row, 0]
+			vmin, vmax = self._robust_vmin_vmax(plot_dedisp)
+			sax.imshow(
+				plot_dedisp,
+				aspect='auto',
+				extent=[time_disp[0], time_disp[-1], self.freq_mhz[0], self.freq_mhz[-1]],
+				cmap='plasma',
+				origin='lower',
+				vmin=vmin,
+				vmax=vmax,
+			)
+			sax.set_title(rf'$C_{{{seg + 1}}}$')
+			sax.set_ylabel('Frequency [MHz]')
+			sax.set_xlabel('Time [ms]')
+			sax.title.set_fontsize(fs_title)
+			sax.xaxis.label.set_size(fs_label)
+			sax.yaxis.label.set_size(fs_label)
+			sax.xaxis.labelpad = fs_labelpad
+			sax.yaxis.labelpad = fs_labelpad
+			sax.tick_params(axis='both', labelsize=fs_tick)
+
+			iax = axes[row, 1]
+			prof = np.nansum(plot_dedisp, axis=0)
+			iax.plot(time_disp, prof, 'k-', linewidth=1)
+			iax.set_title(rf"Optimal DM={self._format_dm(res['dm'], 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
+			iax.set_ylabel(r'S [arb.]')
+			iax.set_xlabel('Time [ms]')
+			iax.grid(True, alpha=0.3)
+			iax.title.set_fontsize(fs_title)
+			iax.xaxis.label.set_size(fs_label)
+			iax.yaxis.label.set_size(fs_label)
+			iax.xaxis.labelpad = fs_labelpad
+			iax.yaxis.labelpad = fs_labelpad
+			iax.tick_params(axis='both', labelsize=fs_tick)
+			iax.set_yticklabels([])
+
+			m_ax = axes[row, 2]
+			dm_vals = res.get('dm_values')
+			met_vals = res.get('metric_values')
+			if dm_vals is not None and met_vals is not None and len(met_vals) > 0:
+				if show_errors:
+					low_dm = res.get('uncertainty_low_dm')
+					high_dm = res.get('uncertainty_high_dm')
+					shade_low = float(dm_range[0]) if low_dm is None else float(low_dm)
+					shade_high = float(dm_range[1]) if high_dm is None else float(high_dm)
+					if shade_low <= shade_high:
+						m_ax.axvspan(shade_low, shade_high, color='tab:orange', alpha=0.18,
+									 label=r'$\delta$ DM')
+				m_ax.plot(dm_vals, met_vals, linewidth=2.0, color=seg_col)
+				m_ax.axvline(self.input_dm, color='gray', linestyle=':', linewidth=1.4,
+							 alpha=0.9, label=r'DM$_{\rm C}$')
+				m_ax.axvline(res['dm'], color='red', linestyle='--', linewidth=1.4,
+							 alpha=0.9, label='Best DM')
+				m_ax.set_title(f"Metric = {res['metric']:.3f}")
+				m_ax.set_xlim(dm_range[0], dm_range[1])
+				m_ax.set_xlabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
+				m_ax.set_ylabel('Metric')
+				m_ax.grid(True, alpha=0.3)
+				m_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+				if seg == 0:
+					m_ax.legend(loc='best', fontsize=fs_legend)
+			else:
+				m_ax.text(0.5, 0.5, 'No scan data', ha='center', va='center', transform=m_ax.transAxes)
+				m_ax.set_axis_off()
+			m_ax.title.set_fontsize(fs_title)
+			m_ax.xaxis.label.set_size(fs_label)
+			m_ax.yaxis.label.set_size(fs_label)
+			m_ax.xaxis.labelpad = fs_labelpad
+			m_ax.yaxis.labelpad = fs_labelpad
+			m_ax.tick_params(axis='both', labelsize=fs_tick)
+
+		plt.tight_layout(rect=[0.02, 0.02, 0.995, 0.995])
+		fig.subplots_adjust(wspace=0.04, hspace=0.5)
+
+		if save_path:
+			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			print(f"\nFigure saved to: {save_path}")
+		else:
+			plt.show()
+
 	def scan_dm_space(self, dm_range: Tuple[float, float], n_points: int = 100,
 					 data: Optional[np.ndarray] = None, dm_step: Optional[float] = None,
 					 data_q: Optional[np.ndarray] = None, data_u: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict]:

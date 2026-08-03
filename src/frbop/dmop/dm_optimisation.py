@@ -192,6 +192,14 @@ def parse_args() -> argparse.Namespace:
 		help="Methods to run (default: all). Choices: structure, structure-l, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li",
 	)
 	parser.add_argument(
+		"--single-method",
+		type=str,
+		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		default=None,
+		help="Run only this one method and produce a single-method segment comparison plot "
+		"(max-range overview row + one row per segment). Overrides --methods.",
+	)
+	parser.add_argument(
 		"--exclude-methods",
 		nargs="+",
 		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
@@ -403,7 +411,10 @@ def main():
 		'li': 'l_i_mean',
 	}
 	default_method_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
-	if args.methods is None:
+	if args.single_method is not None:
+		single_method_key = method_alias_to_key[args.single_method]
+		selected_method_keys = [single_method_key]
+	elif args.methods is None:
 		selected_method_keys = default_method_order.copy()
 	else:
 		selected_method_keys = []
@@ -577,19 +588,21 @@ def main():
 			if result.get('uncertainty_method') is not None:
 				print(f"    Uncertainty method: {result.get('uncertainty_method')}")
 		
-		# Plot comparison
-		print(f"\nGenerating comparison plot for {label} {i+1}...")
-		optimiser.plot_comparison(
-			results,
-			dm_range,
-			peak_region,
-			label=args.label,
-			save_path=f'{args.label}_dm_comparison_{label.lower()}{i+1}.{fig_ext}',
-			show_summary_errors=show_comparison_summary_errors,
-			show_scan_uncertainty=show_comparison_scan_uncertainty,
-			show_overlay_uncertainty=show_comparison_overlay_uncertainty,
-			disabled_error_methods=disabled_method_keys,
-		)
+		# Plot comparison (skipped in single-method mode; one combined plot is
+		# generated after the segment loop).
+		if args.single_method is None:
+			print(f"\nGenerating comparison plot for {label} {i+1}...")
+			optimiser.plot_comparison(
+				results,
+				dm_range,
+				peak_region,
+				label=args.label,
+				save_path=f'{args.label}_dm_comparison_{label.lower()}{i+1}.{fig_ext}',
+				show_summary_errors=show_comparison_summary_errors,
+				show_scan_uncertainty=show_comparison_scan_uncertainty,
+				show_overlay_uncertainty=show_comparison_overlay_uncertainty,
+				disabled_error_methods=disabled_method_keys,
+			)
 
 		if args.plot_range and 'structure' in results:
 			range_path = f'{args.label}_dm_range_{segment_tag}.{fig_ext}'
@@ -671,6 +684,18 @@ def main():
 					out_path = output_dir / f"{args.label}_{segment_tag}_structure_max_stokes.npy"
 					np.save(out_path, stokes_cube)
 					print(f"  - Saved structure-max Stokes cube: {out_path}")
+
+	if args.single_method is not None and len(all_results) > 0:
+		print(f"\nGenerating single-method comparison plot for {args.single_method}...")
+		optimiser.plot_single_method_comparison(
+			single_method_key,
+			all_results,
+			dm_range,
+			peak_regions,
+			label=args.label,
+			save_path=f'{args.label}_dm_comparison_single_{method_key_to_name[single_method_key]}.{fig_ext}',
+			show_errors=show_comparison_summary_errors,
+		)
 
 	if len(all_results) > 1:
 		# Compute component peak times for physical time ordering and L~c*Delta t.
