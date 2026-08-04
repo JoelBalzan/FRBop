@@ -157,12 +157,34 @@ def main():
 
     onpulse_mask = np.zeros(ntime, dtype=bool)
     if args.peak_indices is not None and len(args.peak_indices) > 0:
-        for start_idx, end_idx in parse_peak_index_pairs(args.peak_indices, ntime):
-            onpulse_mask[start_idx:end_idx] = True
-        if np.any(onpulse_mask):
-            print(f"Peak-index gating: {list(zip(*[iter(args.peak_indices)]*2))}")
+        peak_pairs = parse_peak_index_pairs(args.peak_indices, ntime)
+        if args.auto_peak_fwhm:
+            # Auto-measure the FWHM within each user-supplied crop
+            for start_idx, end_idx in peak_pairs:
+                crop_ts = ts_smooth[start_idx:end_idx]
+                if not np.any(np.isfinite(crop_ts)):
+                    continue
+                local_peak = start_idx + int(np.nanargmax(crop_ts))
+                (f_start, f_stop), fwhm_ms, _ = measure_fwhm_region(time, ts, local_peak)
+                f_start = max(f_start, start_idx)
+                f_stop  = min(f_stop, end_idx)
+                if f_stop > f_start:
+                    onpulse_mask[f_start:f_stop] = True
+                if np.isfinite(fwhm_ms):
+                    print(f"Auto FWHM gating in crop {start_idx}–{end_idx}: "
+                          f"{f_start}–{f_stop} (FWHM={fwhm_ms:.4f} ms)")
+                else:
+                    print(f"Auto FWHM gating in crop {start_idx}–{end_idx}: {f_start}–{f_stop}")
+            if not np.any(onpulse_mask):
+                print("Peak-index + auto-FWHM gating produced no valid samples; "
+                      "falling back to automatic window")
         else:
-            print("Peak-index gating produced no valid samples; falling back to automatic window")
+            for start_idx, end_idx in peak_pairs:
+                onpulse_mask[start_idx:end_idx] = True
+            if np.any(onpulse_mask):
+                print(f"Peak-index gating: {list(zip(*[iter(args.peak_indices)]*2))}")
+            else:
+                print("Peak-index gating produced no valid samples; falling back to automatic window")
     elif args.manual_peak_fwhm:
         (start_idx, end_idx), fwhm_ms = select_peak_fwhm_manual(time, ts)
         onpulse_mask[start_idx:end_idx] = True
@@ -197,11 +219,20 @@ def main():
     pulse_profile = np.nanmean(burst_ds, axis=0)
     t_burst       = time[onpulse_mask]
 
+    # Frequency mask for ACF fitting (shared by the full-band and time-resolved paths)
+    freq_mask = np.ones(nfreq, dtype=bool)
+    if args.fmin is not None:
+        freq_mask &= freq >= args.fmin
+    if args.fmax is not None:
+        freq_mask &= freq <= args.fmax
+
     # Store modulation-index data for later plotting (after Lorentzian fit)
     mi = None
     if args.mod_plot:
         mi = compute_modulation_index(burst_ds, off_pulse, freq,
-                                      i_sigma=args.mod_sigma, nbins=args.mod_nbins)
+                                      i_sigma=args.mod_sigma, nbins=args.mod_nbins,
+                                      min_snr=args.threshold_sigma,
+                                      raw_acf=args.raw_acf, freq_mask=freq_mask)
         if args.mod_nbins is not None and burst_ds.shape[1] > 1:
             dt = float(np.abs(t_burst[1] - t_burst[0]))
             bin_dur = dt * burst_ds.shape[1] / args.mod_nbins
@@ -249,13 +280,7 @@ def main():
     else:
         print(f"Power-law spectral index used for correction: {spec_index_used:.3f} +/- {spec_index_err:.3f}" if np.isfinite(spec_index_used) else "Power-law spectral index used for correction: None")
 
-    # Frequency mask for ACF fitting
-    freq_mask = np.ones(nfreq, dtype=bool)
-    if args.fmin is not None:
-        freq_mask &= freq >= args.fmin
-    if args.fmax is not None:
-        freq_mask &= freq <= args.fmax
-
+    # Frequency mask for ACF fitting (defined before the modulation-index block)
     freq_acf     = freq[freq_mask]
     spectrum_acf = corrected_spectrum[freq_mask]
     df_acf       = np.abs(freq_acf[1] - freq_acf[0]) if freq_acf.size > 1 else df
@@ -708,7 +733,17 @@ def main():
                 m_spec = float(np.nanstd(spectrum))
             print(f"\n  Best model ({best_n_comp}-component) parameters:")
             print(f"    m²  (ACF amplitude A) = {A_fit:.6f}")
-            print(f"    m   (modulation index) = {m:.6f}")
+            m_err = np.nan
+            if best_fit.get("pcov") is not None:
+                try:
+                    var_A = best_fit["pcov"][-2, -2]
+                    m_err = float(np.sqrt(max(var_A, 0.0))) / (2.0 * m) if m > 0 else np.nan
+                except Exception:
+                    pass
+            if np.isfinite(m_err):
+                print(f"    m   (modulation index) = {m:.6f} ± {m_err:.6f}")
+            else:
+                print(f"    m   (modulation index) = {m:.6f}")
             print(f"    m   (from spectrum)     = {m_spec:.6f}")
             print(f"    C   (offset)           = {C_fit:.6f}")
             for i, (w, d) in enumerate(components):

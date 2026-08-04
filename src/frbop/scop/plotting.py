@@ -10,6 +10,7 @@ from scipy.optimize import curve_fit
 from frbop.scop.fit_utils import _decode_lorentzian_components
 from frbop.scop.models import (lorentzian, lorentzian_2c, lorentzian_3c,
                                scattered_gaussian)
+from frbop.scop.power import correct_spectrum_powerlaw
 from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
                                   set_pub_col, set_pub_style)
 
@@ -676,12 +677,42 @@ def _acf_1d(x):
     return result / counts
 
 
-def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=None):
+def _weighted_linear_fit(x, y, yerr):
+    """Weighted least-squares line y = a + b*x with weights w = 1/yerr**2.
+
+    Returns (a, a_err, b, b_err) or None when the fit is not possible.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    yerr = np.asarray(yerr, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(yerr) & (yerr > 0)
+    if np.count_nonzero(finite) < 2:
+        return None
+    w = 1.0 / yerr[finite] ** 2
+    xf, yf = x[finite], y[finite]
+    X = np.column_stack([np.ones_like(xf), xf])
+    WX = X * w[:, None]
+    A = X.T @ WX
+    try:
+        cov = np.linalg.inv(A)
+    except np.linalg.LinAlgError:
+        return None
+    if not np.all(np.isfinite(cov)):
+        return None
+    a, b = cov @ (WX.T @ yf)
+    return a, float(np.sqrt(cov[0, 0])), b, float(np.sqrt(cov[1, 1]))
+
+
+def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=None,
+                             min_snr=1.0, raw_acf=False, freq_mask=None):
     """Compute time-resolved modulation index from ACF Lorentzian fits per time bin.
 
-    For each time bin the spectrum is averaged, its ACF computed, and a 1-component
-    Lorentzian A(Δν) = C + A/(1 + (Δν/d)²) is fitted. The modulation index for that
-    bin is m = √A.
+    Each time bin applies the same processing as the full-band measurement: the mean
+    spectrum is power-law corrected to the fractional residual (S - S̄)/S̄ via
+    correct_spectrum_powerlaw, its ACF computed, and a 1-component Lorentzian
+    A(Δν) = C + A/(1 + (Δν/d)²) fitted. The modulation index for that bin is then
+    m = √A (dimensionless, since the spectrum is already normalised). With
+    raw_acf=True the raw spectrum is used and m = √A/⟨I⟩.
 
     Parameters
     ----------
@@ -695,6 +726,12 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         Number of off-pulse standard deviations for the I threshold.
     nbins : int or None
         If set, average the time axis into nbins before computing.
+    min_snr : float
+        Minimum per-channel SNR for the power-law correction (matches --threshold-sigma).
+    raw_acf : bool
+        Skip the power-law residual correction and use the raw spectrum (matches --raw-acf).
+    freq_mask : ndarray of bool or None
+        Channel mask applied to the ACF fit, matching --fmin/--fmax (default: all channels).
 
     Returns
     -------
@@ -702,13 +739,18 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
                     weighted_mean_err, mask, i_cut, t_centers
     """
     nfreq = ds_onpulse.shape[0]
-    df = float(np.abs(freq[1] - freq[0])) if freq.size > 1 else 1.0
-    total_bw = float(np.abs(freq[-1] - freq[0]))
+    if freq_mask is None:
+        freq_mask = np.ones(nfreq, dtype=bool)
+    freq_fit = np.asarray(freq, dtype=float)[freq_mask]
+    df = float(np.abs(freq_fit[1] - freq_fit[0])) if freq_fit.size > 1 else 1.0
+    total_bw = float(np.abs(freq_fit[-1] - freq_fit[0]))
     max_lag_mhz = min(20.0, 0.15 * total_bw)
 
     # I threshold from off-pulse noise
     i_off_std = np.nanstd(off_pulse) if off_pulse is not None and off_pulse.size > 0 else 1.0
     i_cut = i_sigma * i_off_std / np.sqrt(nfreq)
+    off_pulse_rms = np.nanstd(off_pulse, axis=1) \
+        if off_pulse is not None and off_pulse.size > 0 else None
 
     # Time binning
     ntime = ds_onpulse.shape[1]
@@ -736,19 +778,28 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         if i_prof[k] < i_cut or not np.isfinite(i_prof[k]):
             continue
 
-        # ACF and Lorentzian fit
-        acf = _acf_1d(spectrum)
-        lags = np.arange(len(acf)) * df
-        fit_ok = (lags > 0) & (lags < max_lag_mhz) & np.isfinite(acf)
-        lag_fit = lags[fit_ok]
-        acf_fit = acf[fit_ok]
-        if lag_fit.size < 5:
-            continue
-
-        d_guess = max_lag_mhz / 4.0
-        A_guess = float(acf[0]) if np.isfinite(acf[0]) else 0.1
-        C_guess = float(np.nanmedian(acf_fit[-min(5, len(acf_fit)):]))
+        # Identical processing to the full-band path, applied per time bin:
+        # power-law residual correction (unless raw_acf) before the ACF fit
         try:
+            if raw_acf:
+                fit_spectrum = spectrum[freq_mask]
+            else:
+                corrected, _, _, _, _ = correct_spectrum_powerlaw(
+                    freq, spectrum, off_pulse_rms, min_snr=min_snr)
+                fit_spectrum = corrected[freq_mask]
+
+            # ACF and Lorentzian fit
+            acf = _acf_1d(fit_spectrum)
+            lags = np.arange(len(acf)) * df
+            fit_ok = (lags > 0) & (lags < max_lag_mhz) & np.isfinite(acf)
+            lag_fit = lags[fit_ok]
+            acf_fit = acf[fit_ok]
+            if lag_fit.size < 5:
+                continue
+
+            d_guess = max_lag_mhz / 4.0
+            A_guess = float(acf[0]) if np.isfinite(acf[0]) else 0.1
+            C_guess = float(np.nanmedian(acf_fit[-min(5, len(acf_fit)):]))
             popt, pcov = curve_fit(
                 lorentzian, lag_fit, acf_fit, p0=[d_guess, A_guess, C_guess],
                 bounds=([0, 0, -np.inf], [np.inf, np.inf, np.inf]),
@@ -758,7 +809,10 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
             d_val = float(popt[0])
             if A_val <= 0 or d_val <= 0:
                 continue
-            mod_idx[k] = np.sqrt(A_val)
+            m_val = np.sqrt(A_val)
+            if raw_acf:
+                m_val /= i_prof[k]
+            mod_idx[k] = m_val
             dnu_d[k] = d_val
             if pcov is not None and np.isfinite(pcov[1, 1]):
                 mod_err[k] = np.sqrt(max(0.0, pcov[1, 1])) / (2.0 * mod_idx[k])
@@ -780,6 +834,9 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
             wmean = np.nansum(mod_idx[good] * w) / wsum
             wmean_err = 1.0 / np.sqrt(wsum)
 
+    # Weighted linear fit over the same good bins (t_centers in sample units)
+    fit = _weighted_linear_fit(t_centers[good], mod_idx[good], mod_err[good]) if np.any(good) else None
+
     return {
         "i_profile": i_prof,
         "mod_index": mod_idx,
@@ -788,6 +845,11 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         "dnu_d_err": dnu_d_err,
         "weighted_mean": wmean,
         "weighted_mean_err": wmean_err,
+        "fit_ok": fit is not None,
+        "fit_intercept": fit[0] if fit is not None else np.nan,
+        "fit_intercept_err": fit[1] if fit is not None else np.nan,
+        "fit_slope": fit[2] if fit is not None else np.nan,
+        "fit_slope_err": fit[3] if fit is not None else np.nan,
         "mask": mask,
         "i_cut": i_cut,
         "t_centers": t_centers,
@@ -829,6 +891,23 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
 
     ax_m.axhline(weighted_mean, color=IBM_PALETTE[2], alpha=0.7, linewidth=1.5, linestyle='--',
                  label=rf'$\langle m_g \rangle = {weighted_mean:.4f} \pm {weighted_mean_err:.4f}$')
+    #if np.any(good):
+    #    mean_unw = float(np.nanmean(mod_index[good]))
+    #    n_good   = int(np.count_nonzero(good))
+    #    mean_unw_err = float(np.nanstd(mod_index[good], ddof=1) / np.sqrt(n_good)) if n_good > 1 else float('nan')
+    #    ax_m.axhline(mean_unw, color='k', alpha=0.6, linewidth=1.0, linestyle='-.',
+    #                 label=rf'$\overline{{m_g}} = {mean_unw:.4f} \pm {mean_unw_err:.4f}$')
+    fit = _weighted_linear_fit(t_mod[good], mod_index[good], mod_err[good]) if np.any(good) else None
+    fit_line = None
+    if fit is not None:
+        a, a_err, b, b_err = fit
+        x_line = np.array([float(np.min(t_mod[good])), float(np.max(t_mod[good]))])
+        fit_line, = ax_m.plot(x_line, a + b * x_line, color=IBM_PALETTE[3], alpha=0.8,
+                              linewidth=1.5, linestyle=':',
+                              #label=rf'$m_g(t) = {a:.3f} + ({b:.3f}\pm{b_err:.3f})\,t$'
+                              )
+        print(f"  m_g(t) weighted linear fit: intercept = {a:.4f} ± {a_err:.4f}, "
+              f"slope = {b:.4f} ± {b_err:.4f} per ms")
     if np.any(good):
         ax_m.plot([], [], ' ', label=rf'$m_g^{{\rm peak}} = {m_peak:.4f} \pm {m_peak_err:.4f}$')
     ax_m.set_ylabel(r'$m_g$')
@@ -863,6 +942,12 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
     ax_p.set_yticklabels([])
     ax_p.set_ylabel(r'S [arb.]')
     ax_p.grid(True, alpha=0.3)
+
+    # Extend the fitted line across the full width of the (shared) axes
+    if fit_line is not None:
+        x_bounds = np.asarray(ax_m.get_xlim())
+        fit_line.set_xdata(x_bounds)
+        fit_line.set_ydata(a + b * x_bounds)
 
     if output:
         base, ext = os.path.splitext(output)
