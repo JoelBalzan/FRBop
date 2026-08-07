@@ -22,7 +22,7 @@ from frbop.scop.gating import (find_burst_window, select_peak_fwhm_manual,
                                select_peaks_manual)
 from frbop.scop.models import (lorentzian, lorentzian_2c, lorentzian_3c,
                                scattered_gaussian)
-from frbop.scop.ne2025 import (estimate_lg_kpc_from_ne2025, get_cn2_profile,
+from frbop.scop.ne2025 import (estimate_lg_kpc_from_ne2025,
                                ne2025_scattering_prediction,
                                print_ne2025_scattering_prediction)
 from frbop.scop.physics import (estimate_ds_kpc_from_redshift,
@@ -905,8 +905,6 @@ def main():
     lg_kpc_for_calc = args.lg_kpc
     lg_peak_kpc     = args.lg_kpc
     lg_source       = "--lg-kpc"
-    _ne2025_s_kpc   = None   # set below if NE2025 is run
-    _ne2025_cn2     = None
     lg_eff_kpc      = None
     if lg_kpc_for_calc is None and args.estimate_lg_ne2025:
         gl_for_lg = args.gl_deg
@@ -927,9 +925,6 @@ def main():
                 if lg_eff_kpc is not None and lg_eff_kpc > 0:
                     lg_kpc_for_calc = lg_eff_kpc
                 lg_source = "NE2025"
-                # Keep the full profile for scattering predictions
-                _ne2025_s_kpc, _ne2025_cn2 = get_cn2_profile(
-                    gl_for_lg, gb_for_lg, da_kpc=args.lg_max_dist_kpc)
             except Exception as e:
                 print(f"\nNE2025 L_g estimate failed: {e}")
         else:
@@ -973,15 +968,16 @@ def main():
             ))
 
         # NE2025 scattering / scintillation prediction from Galactic screen
-        if lg_source == "NE2025" and _ne2025_s_kpc is not None and ds_kpc_for_calc is not None:
+        if lg_source == "NE2025" and ds_kpc_for_calc is not None:
             scatt_ref_mhz = float(args.scatt_ref_freq_mhz) if args.scatt_ref_freq_mhz else nu_for_two_screen
             try:
                 ne_pred = ne2025_scattering_prediction(
-                    _ne2025_s_kpc, _ne2025_cn2,
-                    lg_kpc=lg_kpc_for_calc,
+                    gl_for_lg, gb_for_lg,
                     ds_kpc=ds_kpc_for_calc,
                     nu_ref_mhz=scatt_ref_mhz,
                     v_iss_km_s=args.iss_velocity_km_s,
+                    lg_eff_kpc=lg_eff_kpc,
+                    lg_max_dist_kpc=args.lg_max_dist_kpc,
                 )
                 lg_peak_for_print = lg_peak_kpc if lg_source == "NE2025" else lg_kpc_for_calc
                 print_ne2025_scattering_prediction(ne_pred, lg_peak_for_print, ds_kpc_for_calc)
