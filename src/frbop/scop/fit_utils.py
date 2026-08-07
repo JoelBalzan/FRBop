@@ -4,24 +4,34 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 
-def compute_aic_bic(y, ymod, k):
+def compute_aic_bic(y, ymod, k, n_eff=None):
     resid = y - ymod
     rss = np.nansum(resid ** 2)
     n = y.size
     if rss <= 0:
         rss = 1e-12
-    aic = 2 * k + n * np.log(rss / n)
-    bic = k * np.log(n) + n * np.log(rss / n)
+    # ACF residuals are strongly correlated across lags; the effective number of
+    # independent samples is far smaller than the raw number of lags n. Using n_eff
+    # (e.g. fit_range / Delta nu_d) prevents the selection of spurious extra
+    # components that only absorb correlated realisation noise.
+    if n_eff is None or not np.isfinite(n_eff) or n_eff < 1.0:
+        n_eff = n
+    n_eff = min(float(n_eff), float(n))
+    aic = 2 * k + n_eff * np.log(rss / n_eff)
+    bic = k * np.log(n_eff) + n_eff * np.log(rss / n_eff)
     return aic, bic, rss
 
 
-def build_fit_diagnostics(y, ymod, k):
-    aic, bic, rss = compute_aic_bic(y, ymod, k)
+def build_fit_diagnostics(y, ymod, k, n_eff=None):
+    aic, bic, rss = compute_aic_bic(y, ymod, k, n_eff=n_eff)
     n = y.size
+    if n_eff is None or not np.isfinite(n_eff) or n_eff < 1.0:
+        n_eff = n
+    n_eff = min(float(n_eff), float(n))
     rmse = np.sqrt(rss / max(n, 1))
     tss = np.nansum((y - np.nanmean(y)) ** 2)
     r2 = 1.0 - rss / tss if tss > 0 else np.nan
-    aicc = aic + (2.0 * k * (k + 1)) / (n - k - 1) if n > (k + 1) else np.nan
+    aicc = aic + (2.0 * k * (k + 1)) / (n_eff - k - 1) if n_eff > (k + 1) else np.nan
     return dict(aic=aic, bic=bic, aicc=aicc, rss=rss, rmse=rmse, r2=r2)
 
 

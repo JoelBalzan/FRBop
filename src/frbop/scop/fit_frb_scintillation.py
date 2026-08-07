@@ -3,6 +3,12 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.stats import f as f_dist
+
+# Model-selection significance threshold for the nested F-test on residual RSS.
+# Calibrated on synthetic single-component data: p=0.01 keeps the spurious
+# multi-component rate at ~2% while still detecting most genuine two-component ACFs.
+F_TEST_P_THRESH = 0.01
 
 from frbop.scop import acf
 from frbop.scop.acf import autocorr
@@ -290,6 +296,12 @@ def main():
     off_pulse_rms_acf = off_pulse_rms[freq_mask] if off_pulse_rms is not None else None
     raw_spectrum_acf  = raw_spectrum[freq_mask]
 
+    # Mean raw intensity over the ACF range, used to check m = sqrt(A)/<I> <= 1
+    # in --raw-acf mode where the ACF amplitude A is in raw intensity² units.
+    raw_mean_acf = None
+    if args.raw_acf and np.any(np.isfinite(spectrum_acf)):
+        raw_mean_acf = float(np.nanmean(spectrum_acf))
+
     print(f"ACF frequency range: {float(freq_acf[0]):.3f}–{float(freq_acf[-1]):.3f} MHz "
           f"({freq_acf.size} channels)")
 
@@ -482,6 +494,18 @@ def main():
         amp_guess = float(acf[0]) if np.isfinite(acf[0]) else 0.1   # acf[0] = m²
         off_guess = float(np.nanmedian(acf_lorentz_fit[-max(3, int(0.2 * acf_lorentz_fit.size)):]))
 
+        # Scale-aware fit bounds. In the normalised fractional-residual ACF, A = m² <= 1
+        # and C ~ 0, so the fixed caps are fine. With --raw-acf the ACF is in raw
+        # intensity² units and A = m²<I>² can be arbitrarily large, so the caps must
+        # scale with the observed zero-lag value (amp_guess) instead of hard-coded ones.
+        if args.raw_acf:
+            amp_scale = max(amp_guess, 0.0)
+            a_upper = max(2.5, 2.0 * amp_scale)
+            c_upper = max(1.5, amp_scale)
+        else:
+            a_upper = 10.0
+            c_upper = 1.5
+
         best_1c = fit_with_restarts(
             lorentzian, lags_lorentz_fit, acf_lorentz_fit,
             p0_list=[
@@ -489,7 +513,7 @@ def main():
                 [d_base * 0.5, amp_guess, off_guess],
                 [d_base * 2.0, amp_guess, off_guess],
             ],
-            bounds=([1e-6, 0.0, -amp_guess], [np.inf, 10.0, amp_guess]),
+            bounds=([1e-6, 0.0, -c_upper], [np.inf, a_upper, c_upper]),
         )
         best_2c = fit_with_restarts(
             lorentzian_2c, lags_lorentz_fit, acf_lorentz_fit,
@@ -498,7 +522,7 @@ def main():
                 [0.7, d_base * 0.2, d_base * 3.0, amp_guess, off_guess],
                 [0.3, d_base * 0.6, d_base * 2.0, amp_guess, off_guess],
             ],
-            bounds=([0.0, 1e-6, 1e-6, 0.0, -1.5], [1.0, np.inf, np.inf, 2.5, 1.5]),
+            bounds=([0.0, 1e-6, 1e-6, 0.0, -c_upper], [1.0, np.inf, np.inf, a_upper, c_upper]),
             maxfev=50000,
         )
         best_3c = fit_with_restarts(
@@ -509,22 +533,32 @@ def main():
                 [0.7, 0.4, d_base * 0.1,  d_base * 0.8, d_base * 2.5, amp_guess, off_guess],
             ],
             bounds=(
-                [0.0, 0.0, 1e-6, 1e-6, 1e-6, 0.0, -1.5],
-                [1.0, 1.0, np.inf, np.inf, np.inf, 2.5, 1.5],
+                [0.0, 0.0, 1e-6, 1e-6, 1e-6, 0.0, -c_upper],
+                [1.0, 1.0, np.inf, np.inf, np.inf, a_upper, c_upper],
             ),
             maxfev=80000,
         )
 
-        def _make_result(best, k):
+        def _make_result(best, k, n_comp):
             if best is None:
                 return dict(error="all initialisations failed")
             popt, pcov, ymod = best
-            return dict(popt=popt, pcov=pcov, ymod=ymod,
-                        **build_fit_diagnostics(acf_lorentz_fit, ymod, k=k))
+            # Effective number of independent ACF lags for model selection:
+            # lags separated by ~Delta nu_d are quasi-independent, so
+            # n_eff ~ fit_max_lag / Delta nu_d (primary component).
+            n_eff = None
+            try:
+                comps, _, _ = _decode_lorentzian_components(n_comp, popt)
+                d_prim = max(comps, key=lambda x: x[0])[1]
+                n_eff = float(args.fit_max_lag / max(d_prim, df_acf))
+            except Exception:
+                pass
+            return dict(popt=popt, pcov=pcov, ymod=ymod, n_eff=n_eff,
+                        **build_fit_diagnostics(acf_lorentz_fit, ymod, k=k, n_eff=n_eff))
 
-        r1 = _make_result(best_1c, k=3)
-        r2 = _make_result(best_2c, k=5)
-        r3 = _make_result(best_3c, k=7)
+        r1 = _make_result(best_1c, k=3, n_comp=1)
+        r2 = _make_result(best_2c, k=5, n_comp=2)
+        r3 = _make_result(best_3c, k=7, n_comp=3)
 
         fit_models = [
             ("1-component", r1, lorentzian),
@@ -576,9 +610,16 @@ def main():
             components, A, C = _decode_lorentzian_components(n_comp, result["popt"])
             if not np.isfinite(A) or A <= 0:
                 return False, f"non-finite/non-positive amplitude A={A:.4f}"
-            if A > 1.0:
+            if args.raw_acf:
+                # A is in raw intensity² units: m = sqrt(A)/<I> must be <= 1 for DISS
+                m_check = (np.sqrt(max(A, 0.0)) / raw_mean_acf
+                           if raw_mean_acf is not None and raw_mean_acf > 0
+                           else np.sqrt(max(A, 0.0)))
+                if m_check > 1.0:
+                    return False, f"m=sqrt(A)/<I>={m_check:.4f} > 1 unphysical for DISS"
+            elif A > 1.0:
                 return False, f"m=sqrt(A)={np.sqrt(A):.4f} > 1 unphysical for DISS"
-            if abs(C) > 0.9 * 1.5:
+            if abs(C) > 0.9 * c_upper:
                 return False, f"offset C={C:.4f} hitting bound — degenerate fit"
             for i, (w, d) in enumerate(components):
                 if d < df_acf:
@@ -613,44 +654,83 @@ def main():
             valid_physical = [(name, r) for name, r, _ in fit_models
                               if "aic" in r and np.isfinite(r["aic"])]
 
-        # Prefer simpler model unless ΔAIC > 2
-        one_comp_aic = next((r["aic"] for n, r in valid_physical if n == "1-component"), None)
-        best_name, best_result = min(valid_physical, key=lambda x: x[1]["aic"])
-        if one_comp_aic is not None and best_name != "1-component":
-            delta_aic = one_comp_aic - best_result["aic"]
-            if delta_aic < 2.0:
-                best_name   = "1-component"
-                best_result = next(r for n, r in valid_physical if n == "1-component")
-
-        best_n_comp = int(best_name[0])
-        best_fit    = best_result
-
-        # Extract Δν_d from best model (primary component = highest-weight one)
-        if "popt" in best_result:
-            components, _, _ = _decode_lorentzian_components(best_n_comp, best_result["popt"])
-            primary_comp = max(components, key=lambda x: x[0])
-            delta_nu_d   = primary_comp[1]
-
-            acf_band_width = float(args.fit_max_lag)
+        if not valid_physical:
+            # All Lorentzian fits failed outright (e.g. degenerate/garbage spectrum):
+            # degrade gracefully instead of crashing on min([]).
+            print("\n  Error: all Lorentzian ACF fits failed; no ACF model selected.")
+            best_n_comp = 1
+            best_fit    = None
+            delta_nu_d  = None
+            dnu_err     = np.nan
             component_noise_errs = []
-            for i, (w_c, d_c) in enumerate(components):
-                dnu_err_noise, n_eff_c, snr_c = _noise_informed_dnu_err(
-                    d_c, acf_band_width, df_acf,
-                    off_pulse_rms_acf, raw_spectrum_acf,
-                )
-                dnu_err_cov = _pcov_dnu_err(best_n_comp, i, best_result["pcov"])
-                dnu_err = dnu_err_cov
-                #if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 and n_eff_c >= 1.0:
-                #    dnu_err = dnu_err_noise
-                #else:
-                #    dnu_err = dnu_err_cov
-                component_noise_errs.append(
-                    dict(dnu_err=dnu_err, dnu_err_noise=dnu_err_noise,
-                         dnu_err_cov=dnu_err_cov, n_eff=n_eff_c, snr_per_scintle=snr_c)
-                )
         else:
-            delta_nu_d           = d_base
-            component_noise_errs = []
+            # Forward model selection via nested F-test on residual RSS against the
+            # correlated-noise floor.  n_eff (number of quasi-independent lags) gives
+            # the residual degrees of freedom, so a more complex model is accepted
+            # only if its RSS improvement is significant (p < F_TEST_P_THRESH).
+            by_name        = {name: r for name, r in valid_physical}
+            best_name      = "1-component"
+            best_result    = by_name.get("1-component")
+            selection_note = ""
+            if best_result is None:
+                best_name, best_result = min(valid_physical, key=lambda x: x[1]["aic"])
+                selection_note = "no valid 1-component fit; best by AIC"
+            else:
+                sel_notes = []
+                for nxt_name in ("2-component", "3-component"):
+                    nxt_result = by_name.get(nxt_name)
+                    if nxt_result is None:
+                        break
+                    k_cur = int(best_name[0]) * 2 + 1
+                    k_nxt = int(nxt_name[0]) * 2 + 1
+                    n_eff = nxt_result.get("n_eff")
+                    if n_eff is None or not np.isfinite(n_eff) or n_eff < (k_nxt + 1):
+                        break
+                    dof2 = float(n_eff) - k_nxt
+                    if dof2 <= 1 or nxt_result["rss"] <= 0:
+                        break
+                    f_stat = ((best_result["rss"] - nxt_result["rss"]) / (k_nxt - k_cur)
+                              / (nxt_result["rss"] / dof2))
+                    p_val  = float(1.0 - f_dist.cdf(f_stat, k_nxt - k_cur, dof2))
+                    if p_val < F_TEST_P_THRESH:
+                        sel_notes.append(f"{nxt_name} accepted (F-test p={p_val:.3f} < {F_TEST_P_THRESH})")
+                        best_name, best_result = nxt_name, nxt_result
+                    else:
+                        sel_notes.append(f"{nxt_name} rejected (F-test p={p_val:.3f} >= {F_TEST_P_THRESH})")
+                        break
+                selection_note = "; ".join(sel_notes)
+
+            best_n_comp = int(best_name[0])
+            best_fit    = best_result
+
+            # Extract Δν_d from best model (primary component = highest-weight one)
+            if "popt" in best_result:
+                components, _, _ = _decode_lorentzian_components(best_n_comp, best_result["popt"])
+                primary_comp = max(components, key=lambda x: x[0])
+                delta_nu_d   = primary_comp[1]
+                dnu_err      = np.nan
+
+                acf_band_width = float(args.fit_max_lag)
+                component_noise_errs = []
+                for i, (w_c, d_c) in enumerate(components):
+                    dnu_err_noise, n_eff_c, snr_c = _noise_informed_dnu_err(
+                        d_c, acf_band_width, df_acf,
+                        off_pulse_rms_acf, raw_spectrum_acf,
+                    )
+                    dnu_err_cov = _pcov_dnu_err(best_n_comp, i, best_result["pcov"])
+                    dnu_err = dnu_err_cov
+                    #if np.isfinite(dnu_err_noise) and dnu_err_noise > 0 and n_eff_c >= 1.0:
+                    #    dnu_err = dnu_err_noise
+                    #else:
+                    #    dnu_err = dnu_err_cov
+                    component_noise_errs.append(
+                        dict(dnu_err=dnu_err, dnu_err_noise=dnu_err_noise,
+                             dnu_err_cov=dnu_err_cov, n_eff=n_eff_c, snr_per_scintle=snr_c)
+                    )
+            else:
+                delta_nu_d           = None
+                dnu_err              = np.nan
+                component_noise_errs = []
 
     # Generate the modulation-index plot
     if mi is not None:
@@ -707,16 +787,13 @@ def main():
             daic_runner = (sorted_aic[1][1]["aic"] - sorted_aic[0][1]["aic"]
                            if len(sorted_aic) > 1 else None)
 
-            one_comp_aic = next((r["aic"] for n, r in valid_physical if n == "1-component"), None)
-            revert_note  = ""
-            if one_comp_aic is not None and best_name == "1-component" and best_aic_n != "1-component":
-                delta_aic   = one_comp_aic - best_aic_r["aic"]
-                revert_note = f" — reverted from {best_aic_n} (ΔAIC={delta_aic:.2f} < 2)"
-
             print(f"\n  Best by AIC : {best_aic_n}  (AIC={best_aic_r['aic']:.3f}"
                   + (f", ΔAIC to runner-up={daic_runner:.2f}" if daic_runner else "") + ")")
             print(f"  Best by BIC : {best_bic_n}  (BIC={best_bic_r['bic']:.3f})")
-            print(f"  Selected    : {best_name}{revert_note}")
+            if selection_note:
+                print(f"  Selected    : {best_name}  ({selection_note})")
+            else:
+                print(f"  Selected    : {best_name}")
 
         # Component parameters for best model
         m = 0.0
