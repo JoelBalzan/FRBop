@@ -627,17 +627,21 @@ class PlottingMixin:
 			seg_col = seg_colours[seg % len(seg_colours)]
 
 			n_time_out = res['dedispersed'].shape[1]
-			if len(self.time_ms) > 1:
-				dt_val = float(np.nanmedian(np.diff(self.time_ms)))
+			stored_time = res.get('time_ms')
+			if stored_time is not None and len(stored_time) == n_time_out:
+				time_disp = np.asarray(stored_time, dtype=float)
 			else:
-				dt_val = 1.0
-			delay_samples = self._get_delay_samples(res['dm'])
-			if self.dedisp_mode == 'crop':
-				start_shift = int(np.max(delay_samples))
-			else:
-				start_shift = int(np.min(delay_samples))
-			base_start = self.time_ms[min(r0, len(self.time_ms) - 1)]
-			time_disp = base_start + start_shift * dt_val + np.arange(n_time_out) * dt_val
+				if len(self.time_ms) > 1:
+					dt_val = float(np.nanmedian(np.diff(self.time_ms)))
+				else:
+					dt_val = 1.0
+				delay_samples = self._get_delay_samples(res['dm'])
+				if self.dedisp_mode == 'crop':
+					start_shift = int(np.max(delay_samples))
+				else:
+					start_shift = int(np.min(delay_samples))
+				base_start = self.time_ms[min(r0, len(self.time_ms) - 1)]
+				time_disp = base_start + start_shift * dt_val + np.arange(n_time_out) * dt_val
 
 			display_slice = slice(None)
 			if self.dedisp_mode == 'expand_zero':
@@ -673,7 +677,16 @@ class PlottingMixin:
 			iax = axes[row, 1]
 			prof = np.nansum(plot_dedisp, axis=0)
 			iax.plot(time_disp, prof, 'k-', linewidth=1)
-			iax.set_title(rf"Optimal DM={self._format_dm(res['dm'], 3)} $\mathrm{{pc\,cm^{{-3}}}}$")
+			dm_val = self._format_dm(res['dm'], 3)
+			minus = res.get('uncertainty_minus')
+			plus = res.get('uncertainty_plus')
+			if minus is not None or plus is not None:
+				sup = f"+{self._format_dm(plus, 2)}" if plus is not None else ""
+				sub = f"-{self._format_dm(minus, 2)}" if minus is not None else ""
+				dm_label = f"DM = {dm_val}" + rf"$^{{{sup}}}_{{{sub}}}$"
+			else:
+				dm_label = f"DM = {dm_val}"
+			iax.set_title(rf"{dm_label} $\mathrm{{pc\,cm^{{-3}}}}$")
 			iax.set_ylabel(r'S [arb.]')
 			iax.set_xlabel('Time [ms]')
 			iax.grid(True, alpha=0.3)

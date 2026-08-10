@@ -5,11 +5,81 @@ from pathlib import Path
 from typing import Tuple
 
 import numpy as np
+from astropy import units as u
 
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.plotting import set_pub_col, set_pub_style
 
 from .optimiser import DMOptimiser
+
+
+def tscrunch_arrays(arr, factor: int, axis: int = -1) -> np.ndarray:
+    """Average ``arr`` along ``axis`` in groups of ``factor`` consecutive bins.
+
+    Trailing bins beyond a whole number of factors are dropped. NaN entries
+    are ignored (NaN-safe mean), matching the optimiser's NaN handling.
+    """
+    n = arr.shape[axis]
+    axis_norm = axis % arr.ndim
+    n_keep = n // factor
+    kept = np.take(arr, np.arange(n_keep * factor), axis=axis)
+    new_shape = (
+        kept.shape[:axis_norm]
+        + (n_keep, factor)
+        + kept.shape[axis_norm + 1:]
+    )
+    scrunched = np.nanmean(kept.reshape(new_shape), axis=axis_norm + 1)
+    return scrunched
+
+
+def build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, args) -> DMOptimiser:
+	"""Construct a DMOptimiser from CLI arguments and (possibly scrunched) data."""
+	return DMOptimiser(
+		stokes_i,
+		freq_mhz,
+		time_ms,
+		stokes_q=stokes_q,
+		stokes_u=stokes_u,
+		stokes_v=stokes_v,
+		reference_freq=args.ref_freq,
+		input_dm=args.input_dm,
+		dedisp_mode=args.dedisp_mode,
+		pa_fit_degree=args.pa_fit_degree,
+		pa_min_run=args.pa_min_run,
+		pa_weight_strength=args.pa_weight_strength,
+		pa_fit_post_peak_only=args.pa_fit_post_peak_only,
+		nonshrine_kc_smooth=args.nonshrine_kc_smooth,
+		nonshrine_shrine_like_errors=args.nonshrine_shrine_like_errors,
+		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
+		nonshrine_kc=args.nonshrine_kc,
+		shrine_kc=args.shrine_kc,
+		sync_kc=args.sync_kc,
+		li_i_sigma_cut=args.li_sig,
+		random_seed=args.seed,
+	)
+
+
+def rescale_peak_indices(indices, factor: int) -> list:
+    """Map original-resolution start/end peak index pairs to scrunched bins.
+
+    Original bin ``i`` falls into scrunched bin ``i // factor``, so a region
+    ``[start, end)`` covers the same time span as ``[start // factor, ceil(end / factor))``.
+    Returns the input unchanged for ``factor <= 1`` or empty input.
+    """
+    if factor <= 1 or not indices:
+        return indices
+    values = list(indices)
+    if len(values) % 2 != 0:
+        raise ValueError(
+            "--peak-indices requires an even number of values (pairs of start/end indices)"
+        )
+    scaled = []
+    for i in range(0, len(values), 2):
+        start = int(values[i])
+        end = int(values[i + 1])
+        scaled.append(start // factor)
+        scaled.append(-(-end // factor))
+    return scaled
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +120,16 @@ def parse_args() -> argparse.Namespace:
 		"--time",
 		default="time.npy",
 		help="Path to time array numpy file [ms]",
+	)
+	parser.add_argument(
+		"--tscrunch",
+		nargs="*",
+		type=int,
+		default=None,
+		help="Time scrunch factor(s) applied before optimisation: average every N time bins. "
+		"Give one value for a global scrunch of the full dataset (default: 1 = none), or one "
+		"value per component (must equal the number of peak regions) to apply different factors. "
+		"--peak-indices are in the original time resolution and are scaled automatically.",
 	)
 	parser.add_argument(
 		"--dm-min",
@@ -102,7 +182,8 @@ def parse_args() -> argparse.Namespace:
 		nargs="*",
 		type=int,
 		default=None,
-		help="Manually specify peak indices as pairs: start1 end1 start2 end2 ...",
+		help="Manually specify peak indices as pairs: start1 end1 start2 end2 ... "
+		"(indices in the original time resolution; scaled to the scrunched axis when --tscrunch is used)",
 	)
 	parser.add_argument(
 		"--dedisp-mode",
@@ -282,6 +363,12 @@ def main():
 
 	args = parse_args()
 
+	factors = [1] if not args.tscrunch else [int(f) for f in args.tscrunch]
+	for f in factors:
+		if f < 1:
+			raise ValueError(f"--tscrunch values must be >= 1, got {f}")
+	per_component_scrunch = len(factors) > 1
+
 	all_error_plot_targets = {
 		"comparison-summary",
 		"comparison-scan",
@@ -322,6 +409,10 @@ def main():
 		print(f"  - Reference frequency override: {args.ref_freq} MHz")
 	if args.input_dm:
 		print(f"  - Input data already dedispersed at DM: {args.input_dm} pc cm⁻³")
+	if per_component_scrunch:
+		print(f"  - Time scrunch factors (per component): {factors}")
+	elif factors[0] > 1:
+		print(f"  - Time scrunch factor: {factors[0]}")
 	print(f"  - PA weight strength: {args.pa_weight_strength}")
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
 	print(f"  - PA min run: {args.pa_min_run}")
@@ -400,6 +491,23 @@ def main():
 		stokes_q = None
 		stokes_u = None
 
+	if not per_component_scrunch and factors[0] > 1:
+		print(f"\nScrunching in time by factor {factors[0]} (pre-optimisation)...")
+		n_time_orig = time_ms.size
+		stokes_i = tscrunch_arrays(stokes_i, factors[0])
+		if stokes_q is not None:
+			stokes_q = tscrunch_arrays(stokes_q, factors[0])
+		if stokes_u is not None:
+			stokes_u = tscrunch_arrays(stokes_u, factors[0])
+		if stokes_v is not None:
+			stokes_v = tscrunch_arrays(stokes_v, factors[0])
+		time_ms = tscrunch_arrays(time_ms, factors[0])
+		print(f"  Time samples: {n_time_orig} -> {time_ms.size}")
+		if args.peak_indices is not None:
+			orig_indices = list(args.peak_indices)
+			args.peak_indices = rescale_peak_indices(orig_indices, factors[0])
+			print(f"  Peak indices scaled {orig_indices} -> {args.peak_indices} (scrunched axis)")
+
 	method_alias_to_key = {
 		'structure': 'structure',
 		'structure-l': 'structure_L',
@@ -465,29 +573,7 @@ def main():
 		
 	
 	# Initialize optimiser
-	optimiser = DMOptimiser(
-		stokes_i,
-		freq_mhz,
-		time_ms,
-		stokes_q=stokes_q,
-		stokes_u=stokes_u,
-		stokes_v=stokes_v,
-		reference_freq=args.ref_freq,
-		input_dm=args.input_dm,
-		dedisp_mode=args.dedisp_mode,
-		pa_fit_degree=args.pa_fit_degree,
-		pa_min_run=args.pa_min_run,
-		pa_weight_strength=args.pa_weight_strength,
-		pa_fit_post_peak_only=args.pa_fit_post_peak_only,
-		nonshrine_kc_smooth=args.nonshrine_kc_smooth,
-		nonshrine_shrine_like_errors=args.nonshrine_shrine_like_errors,
-		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
-		nonshrine_kc=args.nonshrine_kc,
-		shrine_kc=args.shrine_kc,
-		sync_kc=args.sync_kc,
-		li_i_sigma_cut=args.li_sig,
-		random_seed=args.seed,
-	)
+	optimiser = build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, args)
 
 	# Inform final reference frequency used
 	print(f"  Using reference frequency: {optimiser.reference_freq:.3f} MHz")
@@ -543,7 +629,14 @@ def main():
 	else:
 		print("Skipping peak separation (processing full dataset).")
 		peak_regions = [(0, stokes_i.shape[1])]
-	
+
+	if per_component_scrunch and len(factors) != len(peak_regions):
+		raise ValueError(
+			f"--tscrunch provides {len(factors)} scrunch factor(s) but "
+			f"{len(peak_regions)} peak region(s) were found; "
+			f"provide one factor per component."
+		)
+
 	label = "Peak" if args.separate_peaks else "Segment"
 	fig_ext = args.ext.strip().lower().lstrip('.') or 'png'
 
@@ -560,13 +653,44 @@ def main():
 		print(f"Analyzing {label} {i+1}")
 		print("="*70)
 		segment_tag = f"{label.lower()}{i+1}"
-		
+
+		# Per-component scrunch: build a dedicated optimiser for this component.
+		if per_component_scrunch:
+			f = factors[i]
+			if f > 1:
+				seg_stokes_i = tscrunch_arrays(stokes_i, f)
+				seg_stokes_q = None if stokes_q is None else tscrunch_arrays(stokes_q, f)
+				seg_stokes_u = None if stokes_u is None else tscrunch_arrays(stokes_u, f)
+				seg_stokes_v = None if stokes_v is None else tscrunch_arrays(stokes_v, f)
+				seg_time = tscrunch_arrays(time_ms, f)
+				seg_opt = build_optimiser(seg_stokes_i, freq_mhz, seg_time,
+										  seg_stokes_q, seg_stokes_u, seg_stokes_v, args)
+				seg_region = (peak_region[0] // f, -(-peak_region[1] // f))
+				print(f"  Time scrunch factor {f}: region {peak_region} -> {seg_region}")
+			else:
+				seg_opt, seg_region = optimiser, peak_region
+		else:
+			seg_opt, seg_region = optimiser, peak_region
+
 		# Compare methods
-		results = optimiser.compare_methods(dm_range, peak_region, n_points=grid_n_points, dm_step=args.dm_step, 
+		results = seg_opt.compare_methods(dm_range, seg_region, n_points=grid_n_points, dm_step=args.dm_step, 
 										segment_tag=segment_tag,
 											label=args.label,
 											selected_methods=selected_method_keys,
 											segment_index=i)
+		if per_component_scrunch and factors[i] > 1:
+			dt_seg = float(np.nanmedian(np.diff(seg_opt.time_ms)))
+			for mkey, mres in results.items():
+				if mres.get('dedispersed') is None:
+					continue
+				n_time_out = mres['dedispersed'].shape[1]
+				delay_samples = seg_opt._get_delay_samples(mres['dm'])
+				if seg_opt.dedisp_mode == 'crop':
+					start_shift = int(np.max(delay_samples))
+				else:
+					start_shift = int(np.min(delay_samples))
+				base_start = seg_opt.time_ms[min(seg_region[0], len(seg_opt.time_ms) - 1)]
+				mres['time_ms'] = base_start + start_shift * dt_seg + np.arange(n_time_out) * dt_seg
 		all_results.append(results)
 		
 		# Print results
@@ -575,7 +699,7 @@ def main():
 			print(f"  {result['method']}:")
 			print(
 				"    Optimal DM: "
-				+ optimiser._format_uncertainty(
+				+ seg_opt._format_uncertainty(
 					result['dm'],
 					result.get('uncertainty_minus'),
 					result.get('uncertainty_plus'),
@@ -592,10 +716,10 @@ def main():
 		# generated after the segment loop).
 		if args.single_method is None:
 			print(f"\nGenerating comparison plot for {label} {i+1}...")
-			optimiser.plot_comparison(
+			seg_opt.plot_comparison(
 				results,
 				dm_range,
-				peak_region,
+				seg_region,
 				label=args.label,
 				save_path=f'{args.label}_dm_comparison_{label.lower()}{i+1}.{fig_ext}',
 				show_summary_errors=show_comparison_summary_errors,
@@ -606,14 +730,14 @@ def main():
 
 		if args.plot_range and 'structure' in results:
 			range_path = f'{args.label}_dm_range_{segment_tag}.{fig_ext}'
-			optimiser.plot_range(
+			seg_opt.plot_range(
 				results['structure'],
-				peak_region=peak_region,
+				peak_region=seg_region,
 				label=args.label,
 				save_path=range_path,
 			)
 
-		optimiser.save_nonshrine_L_dm_diagnostics(
+		seg_opt.save_nonshrine_L_dm_diagnostics(
 			label=args.label,
 			segment_tag=segment_tag,
 		)
@@ -632,16 +756,16 @@ def main():
 				print(f"  - Saved structure-max freq: {freq_out}")
 				if dedisp_i is not None:
 					n_time_out = dedisp_i.shape[1]
-					dt = float(np.median(np.diff(time_ms)))
-					delay_samples = optimiser._get_delay_samples(structure_result['dm'])
+					dt = float(np.median(np.diff(seg_opt.time_ms)))
+					delay_samples = seg_opt._get_delay_samples(structure_result['dm'])
 					dedisp_mode = args.dedisp_mode
 					if dedisp_mode == 'crop':
 						start_idx = int(np.max(delay_samples))
-						end_idx = int(peak_region[1] - peak_region[0] + np.min(delay_samples))
-						time_out = time_ms[peak_region[0] + start_idx : peak_region[0] + start_idx + n_time_out]
+						end_idx = int(seg_region[1] - seg_region[0] + np.min(delay_samples))
+						time_out = seg_opt.time_ms[seg_region[0] + start_idx : seg_region[0] + start_idx + n_time_out]
 					else:
 						min_shift = int(np.min(delay_samples))
-						time_out = time_ms[peak_region[0]] + (np.arange(n_time_out) + min_shift) * dt
+						time_out = seg_opt.time_ms[seg_region[0]] + (np.arange(n_time_out) + min_shift) * dt
 					time_path = output_dir / f"{args.label}_{segment_tag}_structure_max_time.npy"
 					np.save(time_path, np.asarray(time_out, dtype=float))
 					print(f"  - Saved structure-max time: {time_path}")
@@ -742,6 +866,7 @@ def main():
 		for i, pair_label in enumerate(dne_diag['pair_labels']):
 			sep_pc = float(dne_diag['pair_separations_pc'][i])
 			print(f"  {pair_label}: L = {sep_pc:.6e} pc")
+			print(f"  {pair_label}: L = {(sep_pc * u.pc).to(u.km).value:.6e} km")
 			for method_name, method_vals in dne_diag['methods'].items():
 				delta_dm = float(method_vals['delta_dm'][i])
 				dm_err_minus = float(method_vals['delta_dm_sigma_minus'][i])
