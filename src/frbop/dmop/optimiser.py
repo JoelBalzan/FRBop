@@ -80,7 +80,7 @@ class DMOptimiser(
         self.n_freq, self.n_time = stokes_i.shape
         self.reference_freq = reference_freq if reference_freq is not None else np.max(freq_mhz)
         self.input_dm = float(input_dm)
-        valid_dedisp_modes = {'expand', 'expand_zero', 'crop'}
+        valid_dedisp_modes = {'expand', 'expand_zero', 'expand_nan', 'crop'}
         if dedisp_mode not in valid_dedisp_modes:
             raise ValueError(f"dedisp_mode must be one of {sorted(valid_dedisp_modes)}, got {dedisp_mode!r}")
         self.dedisp_mode = dedisp_mode

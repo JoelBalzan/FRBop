@@ -188,9 +188,9 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--dedisp-mode",
 		type=str,
-		choices=["expand", "expand_zero", "crop"],
+		choices=["expand", "expand_zero", "expand_nan", "crop"],
 		default="expand",
-		help="Dedispersion mode: 'expand' (fill edges with noise), 'expand_zero' (zero-fill new bins), or 'crop' (trim to common valid region)",
+		help="Dedispersion mode: 'expand' (fill edges with noise), 'expand_zero' (zero-fill new bins), 'expand_nan' (NaN-fill new bins), or 'crop' (trim to common valid region)",
 	)
 	parser.add_argument(
 		"--fast",

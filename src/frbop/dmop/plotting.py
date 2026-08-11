@@ -11,6 +11,22 @@ from frbop.utils.plotting import (colour_manager, pub_figsize,
 
 
 class PlottingMixin:
+	def _style_imshow_ticks(self, ax, labelsize: Optional[float] = None,
+						   always_white: bool = False) -> None:
+		"""
+		White inward major+minor ticks for imshow axes (visible over the dark
+		waterfall). In expand_nan mode the NaN-padded edges are transparent, so
+		the y-axis ticks fall on the white figure background and are drawn black,
+		unless ``always_white`` (e.g. the original dspec, which is never NaN-filled).
+		"""
+		kw = {'axis': 'both', 'which': 'both', 'direction': 'in',
+			  'color': 'white', 'labelcolor': 'black'}
+		if labelsize is not None:
+			kw['labelsize'] = labelsize
+		ax.tick_params(**kw)
+		if self.dedisp_mode == 'expand_nan' and not always_white:
+			ax.tick_params(axis='y', which='both', color='black', labelcolor='black')
+
 	def plot_comparison(self, results: Dict, dm_range: Tuple[float, float],
 					   peak_region: Optional[Tuple[int, int]] = None,
 					   label: str = "frb",
@@ -129,7 +145,7 @@ class PlottingMixin:
 		axes[0, 0].yaxis.label.set_size(fs_label)
 		axes[0, 0].xaxis.labelpad = fs_labelpad
 		axes[0, 0].yaxis.labelpad = fs_labelpad
-		axes[0, 0].tick_params(axis='both', labelsize=fs_tick)
+		self._style_imshow_ticks(axes[0, 0], fs_tick, always_white=True)
 
 		# Original time series
 		time_series_orig = np.nansum(original_data, axis=0)
@@ -250,9 +266,10 @@ class PlottingMixin:
 				start_shift = int(np.min(delay_samples))
 			time_range_dedisp = time_range[0] + start_shift * dt + np.arange(n_time_dedisp) * dt
 
-			# In expand_zero mode, trim all-zero padding from the display only.
+			# In expand_zero / expand_nan mode, trim all-padding columns from the
+			# display only (zeros are excluded via the != 0.0 check; NaN via isfinite).
 			display_slice = slice(None)
-			if self.dedisp_mode == 'expand_zero':
+			if self.dedisp_mode in ('expand_zero', 'expand_nan'):
 				nonzero_cols = np.any(np.isfinite(result['dedispersed']) & (result['dedispersed'] != 0.0), axis=0)
 				if np.any(nonzero_cols):
 					first_valid = int(np.argmax(nonzero_cols))
@@ -279,7 +296,7 @@ class PlottingMixin:
 			axes[idx, 0].yaxis.label.set_size(fs_label)
 			axes[idx, 0].xaxis.labelpad = fs_labelpad
 			axes[idx, 0].yaxis.labelpad = fs_labelpad
-			axes[idx, 0].tick_params(axis='both', labelsize=fs_tick)
+			self._style_imshow_ticks(axes[idx, 0], fs_tick)
 			show_overlay_for_method = show_overlay_uncertainty and (method_name not in disabled)
 			if show_overlay_for_method:
 				dm_text = self._format_uncertainty(
@@ -551,7 +568,7 @@ class PlottingMixin:
 		dax.yaxis.label.set_size(fs_label)
 		dax.xaxis.labelpad = fs_labelpad
 		dax.yaxis.labelpad = fs_labelpad
-		dax.tick_params(axis='both', labelsize=fs_tick)
+		self._style_imshow_ticks(dax, fs_tick, always_white=True)
 
 		pax = axes[0, 1]
 		max_series = np.nansum(max_dspec, axis=0)
@@ -644,7 +661,7 @@ class PlottingMixin:
 				time_disp = base_start + start_shift * dt_val + np.arange(n_time_out) * dt_val
 
 			display_slice = slice(None)
-			if self.dedisp_mode == 'expand_zero':
+			if self.dedisp_mode in ('expand_zero', 'expand_nan'):
 				nonzero = np.any(np.isfinite(res['dedispersed']) & (res['dedispersed'] != 0.0), axis=0)
 				if np.any(nonzero):
 					first_valid = int(np.argmax(nonzero))
@@ -672,7 +689,7 @@ class PlottingMixin:
 			sax.yaxis.label.set_size(fs_label)
 			sax.xaxis.labelpad = fs_labelpad
 			sax.yaxis.labelpad = fs_labelpad
-			sax.tick_params(axis='both', labelsize=fs_tick)
+			self._style_imshow_ticks(sax, fs_tick)
 
 			iax = axes[row, 1]
 			prof = np.nansum(plot_dedisp, axis=0)
@@ -987,6 +1004,37 @@ class PlottingMixin:
 			[d.ravel() for d in dedispersed_list]
 		))
 
+		# Leading edge of the pulse in the optimised DM panel, measured from the
+		# top quarter of the band (highest-frequency channels).
+		opt_idx = 1
+		fmin_b = float(self.freq_mhz[0])
+		fmax_b = float(self.freq_mhz[-1])
+		fmin_top = fmin_b + 0.75 * (fmax_b - fmin_b)
+		top_mask = self.freq_mhz >= fmin_top
+		if np.count_nonzero(top_mask) < 3:
+			top_mask = np.zeros_like(top_mask, dtype=bool)
+			top_mask[-max(3, len(self.freq_mhz) // 4):] = True
+		f_top = float(np.mean(self.freq_mhz[top_mask]))
+
+		prof_opt = np.nansum(dedispersed_list[opt_idx][top_mask], axis=0)
+		kernel = np.ones(5) / 5.0
+		smoothed = np.convolve(prof_opt, kernel, mode='same')
+		peak = float(np.max(smoothed))
+		thresh = 0.1 * peak
+		peak_idx = int(np.argmax(smoothed))
+		left_idx = peak_idx
+		while left_idx > 0 and smoothed[left_idx - 1] >= thresh:
+			left_idx -= 1
+		t_left_ms = float(time_axes[opt_idx][left_idx])
+
+		# Residual dispersion delay of the top band relative to the optimised DM:
+		# the reference channel anchors absolute time, so the panel-to-panel shift is
+		# K * (dm_opt - dm_panel) * (1/f_top^2 - 1/f_ref^2).
+		def _topband_shift(dm: float) -> float:
+			return self.DM_CONSTANT * (float(dm_opt) - float(dm)) * (
+				1.0 / f_top**2 - 1.0 / float(self.reference_freq)**2
+			)
+
 		fig, axes = plt.subplots(
 			1, 3,
 			figsize=pub_figsize(ncol=1, height_ratio=0.3),
@@ -1005,6 +1053,9 @@ class PlottingMixin:
 				vmin=vmin,
 				vmax=vmax,
 			)
+			self._style_imshow_ticks(ax)
+			ax.axvline(t_left_ms + _topband_shift(dm), color='white',
+					   linewidth=.7, alpha=0.8)
 			#ax.set_title(title)
 			dm_text = self._format_dm(dm, 3)
 			ax.text(

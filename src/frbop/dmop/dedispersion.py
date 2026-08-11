@@ -98,7 +98,8 @@ class DedispersionMixin:
 			Desired output time axis size. If None, calculated based on mode.
 		mode : str, optional
 			Dedispersion mode: 'expand' (fill edges with noise, default),
-			'expand_zero' (expand with zero fill), or 'crop' (trim to common valid region)
+			'expand_zero' (expand with zero fill), 'expand_nan' (expand with
+			NaN fill), or 'crop' (trim to common valid region)
 			
 		Returns:
 		--------
@@ -109,7 +110,7 @@ class DedispersionMixin:
 			reference_freq = self.reference_freq if self.reference_freq is not None else np.max(self.freq_mhz)
 		
 		delay_samples = self._get_delay_samples(dm, reference_freq=reference_freq)
-		valid_modes = {'expand', 'expand_zero', 'crop'}
+		valid_modes = {'expand', 'expand_zero', 'expand_nan', 'crop'}
 		if mode not in valid_modes:
 			raise ValueError(f"Unknown dedispersion mode '{mode}'. Expected one of {sorted(valid_modes)}")
 		
@@ -141,8 +142,8 @@ class DedispersionMixin:
 						if 0 <= t_out < n_time_out:
 							dedispersed[i, t_out] = data[i, t]
 		else:
-			# Expand-like modes: extend time axis and fill with noise (expand)
-			# or zeros (expand_zero).
+			# Expand-like modes: extend time axis and fill with noise (expand),
+			# zeros (expand_zero), or NaN (expand_nan).
 			min_shift = int(np.min(delay_samples))
 			max_shift = int(np.max(delay_samples))
 			if output_size is None:
@@ -152,6 +153,8 @@ class DedispersionMixin:
 
 			if mode == 'expand_zero':
 				noise_fill = np.zeros((data.shape[0], n_time_out), dtype=float)
+			elif mode == 'expand_nan':
+				noise_fill = np.full((data.shape[0], n_time_out), np.nan)
 			else:
 				# Use per-channel mean/std from the early (off-pulse) samples to generate noise
 				noise_ref = self._full_noise_reference_data(data)
