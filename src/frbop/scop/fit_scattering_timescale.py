@@ -6,17 +6,51 @@ from scipy.optimize import curve_fit
 
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
-from frbop.scop.plotting import (
-    plot_pa_summary,
-    plot_subband_diagnostic,
-    plot_subband_pa,
-)
+from frbop.scop.plotting import (plot_pa_summary, plot_subband_diagnostic,
+                                 plot_subband_pa)
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
-from frbop.utils.plotting import (pub_figsize, savefig_rasterized,
-                                  set_pub_col, set_pub_style)
+from frbop.utils.plotting import (pub_figsize, savefig_rasterized, set_pub_col,
+                                  set_pub_style)
+
+
+def tscrunch_array(arr: np.ndarray, factor: int, axis: int = -1) -> np.ndarray:
+    """Average an array along one axis in groups of ``factor`` samples."""
+    if factor <= 1:
+        return np.asarray(arr)
+
+    arr = np.asarray(arr)
+    if arr.shape[axis] < factor:
+        raise ValueError(f"--tscrunch factor {factor} is larger than the time axis length {arr.shape[axis]}")
+
+    axis_norm = axis % arr.ndim
+    n_keep = arr.shape[axis] // factor
+    if n_keep <= 0:
+        raise ValueError(f"--tscrunch factor {factor} leaves no complete time bins to analyse")
+
+    kept = np.take(arr, np.arange(n_keep * factor), axis=axis)
+    new_shape = kept.shape[:axis_norm] + (n_keep, factor) + kept.shape[axis_norm + 1:]
+    return np.nanmean(kept.reshape(new_shape), axis=axis_norm + 1)
+
+
+def rescale_peak_indices(indices, factor: int) -> list[int]:
+    """Map original-resolution peak bounds onto a scrunched time axis."""
+    if factor <= 1 or not indices:
+        return list(indices) if indices is not None else []
+
+    values = list(indices)
+    if len(values) % 2 != 0:
+        raise ValueError("--peak-indices requires an even number of values (pairs of start/end indices)")
+
+    scaled = []
+    for i in range(0, len(values), 2):
+        start = int(values[i])
+        end = int(values[i + 1])
+        scaled.append(start // factor)
+        scaled.append(-(-end // factor))
+    return scaled
 
 
 def main():
@@ -54,6 +88,12 @@ def main():
         help="Divide the spectrum into N contiguous bands with equal total S/N for scattering index fitting (requires --fit-index).",
     )
     parser.add_argument("--smooth", type=int, default=5, help="Smoothing window for time series (bins)")
+    parser.add_argument(
+        "-tscr", "--tscrunch",
+        type=int,
+        default=1,
+        help="Time scrunch factor applied before burst finding and scattering fits (average every N time bins)",
+    )
     parser.add_argument("--manual-peaks", action="store_true", help="Manually select one or more on-pulse regions by clicking start/end bounds")
     parser.add_argument("--peak-indices", nargs="*", type=int, default=None, help="Manually specify peak indices as pairs: start1 end1 start2 end2 ...")
     parser.add_argument("--threshold-sigma", "--threshold", type=float, default=3.0, help="Threshold in robust sigmas for pulse gating")
@@ -81,6 +121,9 @@ def main():
         ds_q_full = None
         ds_u_full = None
 
+    if args.tscrunch < 1:
+        raise ValueError(f"--tscrunch must be >= 1, got {args.tscrunch}")
+
     ref_freq = float(args.ref_freq) if args.ref_freq is not None else float(np.nanmedian(freq))
     band_center_freq = float(np.nanmean(freq))
     scattering_index = float(args.scattering_index)
@@ -101,6 +144,20 @@ def main():
         if has_stokes and ds_q_full is not None:
             ds_q_full = ds_q_full[::-1, :]
             ds_u_full = ds_u_full[::-1, :]
+
+    if args.tscrunch > 1:
+        print(f"Applying time scrunch factor {args.tscrunch} before gating/fitting")
+        if args.peak_indices is not None:
+            original_peak_indices = list(args.peak_indices)
+            args.peak_indices = rescale_peak_indices(original_peak_indices, args.tscrunch)
+            print(f"Peak indices scaled {original_peak_indices} -> {args.peak_indices}")
+        n_time_original = time.size
+        ds = tscrunch_array(ds, args.tscrunch, axis=1)
+        time = tscrunch_array(time, args.tscrunch, axis=0)
+        if has_stokes and ds_q_full is not None:
+            ds_q_full = tscrunch_array(ds_q_full, args.tscrunch, axis=1)
+            ds_u_full = tscrunch_array(ds_u_full, args.tscrunch, axis=1)
+        print(f"Time samples: {n_time_original} -> {time.size}")
 
     nfreq, ntime = ds.shape
 
@@ -187,32 +244,32 @@ def main():
     # Per-channel off-pulse RMS for SNR weighting
     off_pulse_rms = np.nanstd(off_pulse, axis=1) if off_pulse.size > 0 else None
 
+    # Optional frequency banding for scattering-index fitting and/or PA plotting
+    band_regions = None
+    if args.freq_bands_snr is not None:
+        band_snr_weights = None
+        if off_pulse_rms is not None:
+            raw_spectrum = np.nanmean(burst_ds, axis=1)
+            band_snr_weights = np.zeros_like(freq, dtype=float)
+            valid = np.isfinite(raw_spectrum) & np.isfinite(off_pulse_rms) & (off_pulse_rms > 0)
+            band_snr_weights[valid] = np.maximum(raw_spectrum[valid] / off_pulse_rms[valid], 0.0)
+        else:
+            print("Equal-SNR banding requested but off-pulse RMS is unavailable; falling back to equal-width bands.")
+        band_regions = split_frequency_bands_equal_snr(freq, band_snr_weights, args.freq_bands_snr)
+        print(f"\nSubband PA / scattering-index frequency bands: {len(band_regions)} equal-SNR bands")
+        for i, (start, stop) in enumerate(band_regions, start=1):
+            print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
+    elif args.freq_bands is not None:
+        band_regions = split_frequency_bands_equal(freq, args.freq_bands)
+        print(f"\nSubband PA / scattering-index frequency bands: {len(band_regions)} equal frequency bands")
+        for i, (start, stop) in enumerate(band_regions, start=1):
+            print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
+
     # Optionally fit scattering index from per-frequency (or per-band) tau measurements
     fitted_index = None
     fitted_index_err = None
     tau_at_ref = None
     if fit_index_mode:
-        # Build frequency-band regions if requested
-        band_regions = None
-        if args.freq_bands_snr is not None:
-            band_snr_weights = None
-            if off_pulse_rms is not None:
-                raw_spectrum = np.nanmean(burst_ds, axis=1)
-                band_snr_weights = np.zeros_like(freq, dtype=float)
-                valid = np.isfinite(raw_spectrum) & np.isfinite(off_pulse_rms) & (off_pulse_rms > 0)
-                band_snr_weights[valid] = np.maximum(raw_spectrum[valid] / off_pulse_rms[valid], 0.0)
-            elif off_pulse_rms is None:
-                print("Equal-SNR banding requested but off-pulse RMS is unavailable; falling back to equal-width bands.")
-            band_regions = split_frequency_bands_equal_snr(freq, band_snr_weights, args.freq_bands_snr)
-            print(f"\nScattering index: {len(band_regions)} equal-SNR frequency bands")
-            for i, (start, stop) in enumerate(band_regions, start=1):
-                print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
-        elif args.freq_bands is not None:
-            band_regions = split_frequency_bands_equal(freq, args.freq_bands)
-            print(f"\nScattering index: {len(band_regions)} equal frequency bands")
-            for i, (start, stop) in enumerate(band_regions, start=1):
-                print(f"  Band {i}: {freq[start]:.3f}–{freq[stop - 1]:.3f} MHz ({stop - start} channels)")
-
         fit_details = None
         if band_regions is not None:
             fitted_index, tau_at_ref, fitted_index_err, n_freq_fitted, fit_details = \
@@ -263,6 +320,20 @@ def main():
             pa_band_info = plot_subband_pa(
                 sorted_bands, burst_ds, burst_ds_q, burst_ds_u,
                 t_burst_plot, fit_details, freq, fig_width, ds, ntime, args.output,
+                ds_q_full=ds_q_full,
+                ds_u_full=ds_u_full,
+            )
+            plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
+        elif band_regions is not None and has_stokes and burst_ds_q is not None and burst_ds_u is not None:
+            sorted_bands = sorted(
+                [(float(np.nanmean(freq[lo:hi])), lo, hi) for lo, hi in band_regions if hi > lo],
+                key=lambda x: -x[0],
+            )
+            pa_band_info = plot_subband_pa(
+                sorted_bands, burst_ds, burst_ds_q, burst_ds_u,
+                t_burst_plot, None, freq, fig_width, ds, ntime, args.output,
+                ds_q_full=ds_q_full,
+                ds_u_full=ds_u_full,
             )
             plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
 

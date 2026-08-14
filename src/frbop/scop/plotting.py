@@ -461,9 +461,30 @@ def plot_subband_pa(
     ds,
     ntime,
     output,
+    ds_q_full=None,
+    ds_u_full=None,
 ):
     """Single-column subband PA overplot. Returns pa_band_info for summary use."""
-    n_bands = len(sorted_bands)
+    band_rows = [band for band in sorted_bands if band[2] > band[1]]
+    fit_rows = []
+    if fit_details is not None:
+        fit_rows = sorted(
+            zip(
+                fit_details["freq"],
+                fit_details["popt"],
+                fit_details["tau"],
+                fit_details["tau_err"],
+            ),
+            key=lambda row: -row[0],
+        )
+
+    if fit_rows and len(band_rows) != len(fit_rows):
+        print(
+            "Warning: subband PA band count does not match fitted profile count "
+            f"({len(band_rows)} bands vs {len(fit_rows)} fits)"
+        )
+
+    n_bands = len(band_rows)
     fig = plt.figure(figsize=(fig_width, max(4, n_bands * 1.5)), constrained_layout=False)
     gs = plt.GridSpec(n_bands, 1, hspace=0)
     ax_share = None
@@ -471,7 +492,8 @@ def plot_subband_pa(
     pa_smoothed = []
     pa_band_info = []
 
-    for i, (freq_val, lo, hi) in enumerate(sorted_bands):
+    for i, (freq_val, lo, hi) in enumerate(band_rows):
+        fit_info = fit_rows[i] if i < len(fit_rows) else None
         prof_i = np.nanmean(burst_ds[lo:hi, :], axis=0)
         q_prof = np.nanmean(burst_ds_q[lo:hi, :], axis=0)
         u_prof = np.nanmean(burst_ds_u[lo:hi, :], axis=0)
@@ -485,25 +507,48 @@ def plot_subband_pa(
         pa_masked = pa_smooth.copy()
         pa_masked[prof_i < I_mean_off + 0.5 * sigma_I] = np.nan
         pa_smoothed.append(pa_masked)
-        pa_band_info.append((freq_val, pa_masked))
+
+        if ds_q_full is not None and ds_u_full is not None:
+            off_n = max(1, ntime // 10)
+            q_off_band = np.nanmean(ds_q_full[lo:hi, :off_n], axis=0)
+            u_off_band = np.nanmean(ds_u_full[lo:hi, :off_n], axis=0)
+            sigma_q = float(np.nanstd(q_off_band))
+            sigma_u = float(np.nanstd(u_off_band))
+            denom = np.square(q_prof) + np.square(u_prof)
+            pa_err_rad = np.full_like(pa_smooth, np.nan, dtype=float)
+            valid = np.isfinite(denom) & (denom > 0) & np.isfinite(q_prof) & np.isfinite(u_prof)
+            pa_err_rad[valid] = 0.5 * np.sqrt(
+                (np.square(u_prof[valid]) * sigma_q ** 2 + np.square(q_prof[valid]) * sigma_u ** 2)
+            ) / denom[valid]
+            pa_err_deg = np.degrees(pa_err_rad)
+            pa_err_deg[~np.isfinite(pa_masked)] = np.nan
+        else:
+            finite_pa = np.isfinite(pa_masked)
+            scatter = float(np.nanstd(pa_masked[finite_pa])) if np.any(finite_pa) else np.nan
+            pa_err_deg = np.full_like(pa_masked, scatter, dtype=float)
+
+        pa_band_info.append((freq_val, pa_masked, pa_err_deg))
 
         ax = fig.add_subplot(gs[i, 0], sharex=ax_share)
         if ax_share is None:
             ax_share = ax
         ax.plot(t_burst, prof_i, "k-", linewidth=1.0)
 
-        for j, fv in enumerate(fit_details["freq"]):
-            if abs(fv - freq_val) < 0.01:
-                popt_j = fit_details["popt"][j]
-                tau_j = fit_details["tau"][j]
-                tau_label = (
-                    f"$\\tau={tau_j:.3f}\\pm{fit_details['tau_err'][j]:.3f}$ ms"
-                    if np.isfinite(fit_details["tau_err"][j]) and fit_details["tau_err"][j] > 0
-                    else f"$\\tau={tau_j:.3f}$ ms"
+        if fit_info is not None:
+            fit_freq, popt_j, tau_j, tau_err_j = fit_info
+            if not np.isclose(freq_val, fit_freq, atol=1e-3, rtol=1e-6):
+                print(
+                    "Warning: subband PA frequency mismatch between band and fit "
+                    f"({freq_val:.6f} vs {fit_freq:.6f} MHz)"
                 )
-                fit_curve = scattered_gaussian(t_burst, *popt_j)
-                ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
-                break
+
+            tau_label = (
+                f"$\\tau={tau_j:.3f}\\pm{tau_err_j:.3f}$ ms"
+                if np.isfinite(tau_err_j) and tau_err_j > 0
+                else f"$\\tau={tau_j:.3f}$ ms"
+            )
+            fit_curve = scattered_gaussian(t_burst, *popt_j)
+            ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
 
         ax_twin = ax.twinx()
         ax_twin.scatter(t_burst, pa_masked, color=IBM_PALETTE[0], s=2)
@@ -551,8 +596,23 @@ def plot_pa_summary(pa_band_info, t_burst, fig_width, output):
     fig = plt.figure(figsize=(fig_width, fig_width * 0.6))
     ax = fig.add_subplot(111)
     cmap = plt.get_cmap("plasma", len(pa_band_info_sorted))
-    for k, (fv, pa_vals) in enumerate(pa_band_info_sorted):
-        ax.plot(t_burst, pa_vals, color=cmap(k), linewidth=1.0, label=f"{fv:.0f} MHz")
+    for k, band_info in enumerate(pa_band_info_sorted):
+        if len(band_info) == 3:
+            fv, pa_vals, pa_errs = band_info
+            ax.errorbar(
+                t_burst,
+                pa_vals,
+                yerr=pa_errs,
+                color=cmap(k),
+                linewidth=1.0,
+                elinewidth=0.7,
+                capsize=1.5,
+                alpha=0.9,
+                label=f"{fv:.0f} MHz",
+            )
+        else:
+            fv, pa_vals = band_info
+            ax.plot(t_burst, pa_vals, color=cmap(k), linewidth=1.0, label=f"{fv:.0f} MHz")
     ax.set_xlabel("Time [ms]")
     ax.set_ylabel("PA [deg.]")
     ax.legend(loc="best", ncol=2, fontsize=8)
