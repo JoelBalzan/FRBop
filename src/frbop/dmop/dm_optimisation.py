@@ -1,6 +1,7 @@
 """Command-line interface for dm_optimisation."""
 
 import argparse
+import re
 from pathlib import Path
 from typing import Tuple
 
@@ -30,6 +31,133 @@ def tscrunch_arrays(arr, factor: int, axis: int = -1) -> np.ndarray:
     )
     scrunched = np.nanmean(kept.reshape(new_shape), axis=axis_norm + 1)
     return scrunched
+
+
+def _normalize_pol_order(pol_order) -> str:
+	"""Convert an archive ``pol_order`` value to a compact uppercase label string."""
+	if pol_order is None:
+		return ""
+	value = pol_order
+	if isinstance(value, np.ndarray):
+		if value.shape == ():
+			value = value.item()
+		elif value.dtype.kind in {"S", "U", "O"}:
+			parts = []
+			for item in value.ravel():
+				if isinstance(item, (bytes, np.bytes_)):
+					parts.append(item.decode())
+				else:
+					parts.append(str(item))
+			value = "".join(parts)
+		else:
+			value = "".join(str(item) for item in value.ravel())
+	elif isinstance(value, (bytes, np.bytes_)):
+		value = value.decode()
+	else:
+		value = str(value)
+	return re.sub(r"[^A-Z0-9]", "", value.upper())
+
+
+def _load_stokes_cube_from_npz(npz_path: Path):
+	"""Load a candidate archive and return the Stokes cube plus metadata."""
+	with np.load(npz_path, allow_pickle=True) as archive:
+		if "stokes" not in archive.files:
+			raise ValueError(f"{npz_path} does not contain a 'stokes' array")
+		cube = np.asarray(archive["stokes"])
+		metadata = {key: archive[key] for key in archive.files if key != "stokes"}
+	return cube, metadata
+
+
+def _extract_stokes_components(cube: np.ndarray, pol_order=None, nchan=None, nsamp=None):
+	"""Split a Stokes cube into I/Q/U/V arrays using archive metadata when available."""
+	cube = np.asarray(cube)
+	if cube.ndim != 3:
+		raise ValueError(f"Stokes cube must be 3D, got shape {cube.shape}")
+
+	order = _normalize_pol_order(pol_order)
+	if not order:
+		if cube.shape[0] in (3, 4):
+			order = "IQUV"[: cube.shape[0]]
+		elif cube.shape[-1] in (3, 4):
+			order = "IQUV"[: cube.shape[-1]]
+		else:
+			raise ValueError(
+				"Unable to infer polarisation order from the archive; provide a 'pol_order' key"
+			)
+
+	if len(order) not in (3, 4):
+		raise ValueError(f"Unsupported polarisation order {order!r}; expected 3 or 4 components")
+
+	n_stokes = len(order)
+	aligned = None
+	if nchan is not None and nsamp is not None:
+		nchan = int(np.asarray(nchan).reshape(()))
+		nsamp = int(np.asarray(nsamp).reshape(()))
+		for stokes_axis in range(3):
+			if cube.shape[stokes_axis] != n_stokes:
+				continue
+			remaining_axes = [axis for axis in range(3) if axis != stokes_axis]
+			for freq_axis in remaining_axes:
+				for time_axis in remaining_axes:
+					if freq_axis == time_axis:
+						continue
+					if cube.shape[freq_axis] == nchan and cube.shape[time_axis] == nsamp:
+						aligned = np.moveaxis(cube, (stokes_axis, freq_axis, time_axis), (0, 1, 2))
+						break
+				if aligned is not None:
+					break
+			if aligned is not None:
+				break
+
+	if aligned is None:
+		if cube.shape[0] == n_stokes:
+			aligned = cube
+		elif cube.shape[-1] == n_stokes:
+			aligned = np.moveaxis(cube, -1, 0)
+		else:
+			raise ValueError(
+				f"Unable to identify the Stokes axis in cube shape {cube.shape}; expected one axis of length {n_stokes}"
+			)
+
+	component_map = {label: aligned[idx] for idx, label in enumerate(order)}
+	stokes_i = component_map.get("I")
+	stokes_q = component_map.get("Q")
+	stokes_u = component_map.get("U")
+	stokes_v = component_map.get("V")
+	if stokes_i is None:
+		raise ValueError(f"Archive polarisation order {order!r} does not include Stokes I")
+	return stokes_i, stokes_q, stokes_u, stokes_v, aligned, order
+
+
+def _derive_axes_from_metadata(metadata, nchan: int, nsamp: int):
+	"""Build frequency/time axes from archive metadata when standalone files are absent."""
+	freq_mhz = None
+	time_ms = None
+
+	if "freq_mhz" in metadata:
+		freq_mhz = np.asarray(metadata["freq_mhz"], dtype=float)
+	elif "freq" in metadata:
+		freq_mhz = np.asarray(metadata["freq"], dtype=float)
+	elif all(key in metadata for key in ("fch1_mhz", "foff_mhz", "nchan")):
+		fch1_mhz = float(np.asarray(metadata["fch1_mhz"]).reshape(()))
+		foff_mhz = float(np.asarray(metadata["foff_mhz"]).reshape(()))
+		nchan_meta = int(np.asarray(metadata["nchan"]).reshape(()))
+		freq_mhz = fch1_mhz + np.arange(nchan_meta, dtype=float) * foff_mhz
+		if freq_mhz.size != nchan:
+			freq_mhz = fch1_mhz + np.arange(nchan, dtype=float) * foff_mhz
+
+	if "time_ms" in metadata:
+		time_ms = np.asarray(metadata["time_ms"], dtype=float)
+	elif "time" in metadata:
+		time_ms = np.asarray(metadata["time"], dtype=float)
+	elif all(key in metadata for key in ("tsamp_s", "nsamp")):
+		tsamp_s = float(np.asarray(metadata["tsamp_s"]).reshape(()))
+		nsamp_meta = int(np.asarray(metadata["nsamp"]).reshape(()))
+		time_ms = np.arange(nsamp_meta, dtype=float) * tsamp_s * 1_000.0
+		if time_ms.size != nsamp:
+			time_ms = np.arange(nsamp, dtype=float) * tsamp_s * 1_000.0
+
+	return freq_mhz, time_ms
 
 
 def build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, args) -> DMOptimiser:
@@ -89,7 +217,11 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"-d", "--stokes-cube",
 		default=None,
-		help="Optional path to a single numpy file containing Stokes I/Q/U(/V) cube. Accepted shapes: (4,freq,time), (3,freq,time), (freq,time,4) or (freq,time,3)",
+		help=(
+			"Optional path to a single numpy file containing a Stokes I/Q/U(/V) cube. "
+			"Accepted shapes: (4,freq,time), (3,freq,time), (freq,time,4) or (freq,time,3). "
+			".npz archives with a 'stokes' array and 'pol_order' metadata are also supported."
+		),
 	)
 	parser.add_argument(
 		"--stokes-i",
@@ -447,31 +579,55 @@ def main():
 	
 	# Support a combined Stokes cube input if provided
 	if args.stokes_cube:
-		cube = np.load(args.stokes_cube)
-		# Accept a few common layouts: (4, freq, time), (3, freq, time), (freq, time, 4), (freq, time, 3)
-		if cube.ndim != 3:
-			raise ValueError(f"stokes-cube must be a 3D numpy array, got shape {cube.shape}")
-		# (4, freq, time) or (3, freq, time)
-		if cube.shape[0] in (3, 4):
-			stokes_i = cube[0]
-			stokes_q = cube[1]
-			stokes_u = cube[2]
-			stokes_v = cube[3] if cube.shape[0] == 4 else None
-		# (freq, time, 4) or (freq, time, 3)
-		elif cube.shape[2] in (3, 4):
-			stokes_i = cube[..., 0]
-			stokes_q = cube[..., 1]
-			stokes_u = cube[..., 2]
-			stokes_v = cube[..., 3] if cube.shape[2] == 4 else None
+		cube_path = Path(args.stokes_cube)
+		if cube_path.suffix.lower() == ".npz":
+			cube, cube_meta = _load_stokes_cube_from_npz(cube_path)
+			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = _extract_stokes_components(
+				cube,
+				pol_order=cube_meta.get("pol_order"),
+				nchan=cube_meta.get("nchan"),
+				nsamp=cube_meta.get("nsamp"),
+			)
+			derived_freq_mhz, derived_time_ms = _derive_axes_from_metadata(
+				cube_meta,
+				stokes_i.shape[0],
+				stokes_i.shape[1],
+			)
+			print(f"  - Loaded Stokes archive: {cube_path}")
+			print(f"    pol_order: {pol_order!r}")
+			print(f"    cube shape (aligned): {aligned_cube.shape}")
+			if derived_freq_mhz is not None:
+				print(f"    derived frequency axis from archive metadata: {derived_freq_mhz.size} channels")
+			if derived_time_ms is not None:
+				print(f"    derived time axis from archive metadata: {derived_time_ms.size} samples")
 		else:
-			raise ValueError(f"Unrecognized stokes-cube layout: {cube.shape}. Expected first or last axis length 3 or 4.")
+			cube = np.load(cube_path)
+			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = _extract_stokes_components(cube)
+			derived_freq_mhz = None
+			derived_time_ms = None
 	else:
 		stokes_i = np.load(args.stokes_i)
 		stokes_q = np.load(args.stokes_q) if args.stokes_q else None
 		stokes_u = np.load(args.stokes_u) if args.stokes_u else None
 		stokes_v = np.load(args.stokes_v) if args.stokes_v else None
-	freq_mhz = np.load(args.freq)
-	time_ms = np.load(args.time)
+		derived_freq_mhz = None
+		derived_time_ms = None
+
+	freq_path = Path(args.freq) if args.freq is not None else None
+	if freq_path is not None and freq_path.exists():
+		freq_mhz = np.load(freq_path)
+	else:
+		freq_mhz = derived_freq_mhz
+	if freq_mhz is None:
+		raise ValueError("Frequency axis is required. Provide --freq or use an .npz Stokes archive with frequency metadata.")
+
+	time_path = Path(args.time) if args.time is not None else None
+	if time_path is not None and time_path.exists():
+		time_ms = np.load(time_path)
+	else:
+		time_ms = derived_time_ms
+	if time_ms is None:
+		raise ValueError("Time axis is required. Provide --time or use an .npz Stokes archive with time metadata.")
 
 	if freq_mhz.ndim != 1:
 		raise ValueError("Frequency array must be 1D")
