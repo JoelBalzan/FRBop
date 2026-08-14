@@ -551,7 +551,17 @@ def plot_subband_pa(
             ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
 
         ax_twin = ax.twinx()
-        ax_twin.scatter(t_burst, pa_masked, color=IBM_PALETTE[0], s=2)
+        ax_twin.errorbar(
+            t_burst,
+            pa_masked,
+            yerr=pa_err_deg,
+            fmt='.',
+            color=IBM_PALETTE[0],
+            markersize=2,
+            elinewidth=0.6,
+            capsize=0,
+            alpha=0.7,
+        )
         ax_twin.set_ylabel("PA [deg.]")
         twin_axes.append(ax_twin)
 
