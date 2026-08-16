@@ -67,6 +67,66 @@ def _estimate_noise_from_offpulse(q_2d: np.ndarray, u_2d: np.ndarray,
     return sigma_q, sigma_u
 
 
+def _apply_min_run(mask: np.ndarray, min_run: int) -> np.ndarray:
+    """Keep only contiguous True runs with at least *min_run* samples."""
+    valid = np.asarray(mask, dtype=bool).astype(int)
+    dv = np.diff(np.concatenate(([0], valid, [0])))
+    starts = np.where(dv == 1)[0]
+    ends = np.where(dv == -1)[0]
+    keep = np.zeros_like(mask, dtype=bool)
+    for start, end in zip(starts, ends):
+        if (end - start) >= min_run:
+            keep[start:end] = True
+    return keep
+
+
+def _noise_from_series(series: np.ndarray, frac: float = 0.05) -> float:
+    """Estimate noise from the first *frac* of a 1D series."""
+    arr = np.asarray(series, dtype=float).ravel()
+    n_edge = max(1, int(len(arr) * frac))
+    noise = float(np.nanstd(arr[:n_edge]))
+    if not np.isfinite(noise) or noise < 0.0:
+        return 1e-15
+    return max(noise, 1e-15)
+
+
+def _build_pa_mask(stokes_q: np.ndarray, stokes_u: np.ndarray,
+                   stokes_i: np.ndarray | None = None,
+                   li_i_sigma_cut: float = 2.0,
+                   pa_fit_post_peak_only: bool = False,
+                   pa_min_run: int = 3) -> np.ndarray:
+    """Build the same PA significance mask used by the time-series pipeline."""
+    q = np.asarray(stokes_q, dtype=float).ravel()
+    u = np.asarray(stokes_u, dtype=float).ravel()
+    q_rms = _noise_from_series(q)
+    u_rms = _noise_from_series(u)
+
+    l_meas = np.sqrt(q ** 2 + u ** 2)
+    sigma_l = np.sqrt(q ** 2 * q_rms ** 2 + u ** 2 * u_rms ** 2) / np.maximum(l_meas, 1e-12)
+    mask = l_meas / np.maximum(sigma_l, 1e-12) >= 1.57
+
+    if stokes_i is not None:
+        i = np.asarray(stokes_i, dtype=float).ravel()
+        if i.shape != mask.shape:
+            raise ValueError("Stokes I, Q, and U must have matching lengths for PA masking")
+        sigma_i = _noise_from_series(i)
+        med_i = float(np.nanmedian(i))
+        i_mask = i >= (med_i + li_i_sigma_cut * sigma_i)
+        if pa_fit_post_peak_only:
+            finite_i = np.isfinite(i)
+            if np.any(finite_i):
+                peak_idx = int(np.nanargmax(i))
+                peak_mask = np.zeros_like(mask, dtype=bool)
+                peak_mask[peak_idx:] = True
+                i_mask = i_mask & peak_mask
+        mask = mask & i_mask
+
+    if np.any(mask):
+        mask = _apply_min_run(mask, max(1, int(pa_min_run)))
+
+    return mask
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="RVM fitting for Stokes Q/U dynamic spectra",
@@ -93,6 +153,14 @@ def main() -> None:
                         help="Average over time axis (2D → 1D)")
     parser.add_argument("--freq-avg", action="store_true",
                         help="Average over frequency axis (2D → 1D)")
+
+    # PA masking
+    parser.add_argument("--pa-min-run", type=int, default=3,
+                        help="Minimum consecutive PA samples to keep after masking (default: 3)")
+    parser.add_argument("--pa-fit-post-peak-only", action="store_true",
+                        help="Restrict PA masking to samples at or after the Stokes-I peak")
+    parser.add_argument("--li-sigma-cut", type=float, default=2.0,
+                        help="Stokes-I significance cutoff in sigma for PA masking (default: 2.0)")
 
     # Fit configuration
     parser.add_argument("--n-alpha", type=int, default=40,
@@ -225,6 +293,32 @@ def main() -> None:
         burst_dur = 1.0
         print("  No time file — using dummy 0–1 ms")
 
+    # ── PA masking ─────────────────────────────────────────────────
+    pa_mask = _build_pa_mask(
+        stokes_q,
+        stokes_u,
+        stokes_i=stokes_i,
+        li_i_sigma_cut=args.li_sigma_cut,
+        pa_fit_post_peak_only=args.pa_fit_post_peak_only,
+        pa_min_run=args.pa_min_run,
+    )
+    n_masked = int(np.sum(pa_mask))
+    if n_masked < 4:
+        parser.error(
+            f"PA masking left {n_masked} samples; need at least 4 for RVM fitting"
+        )
+    print(
+        f"  PA mask: keeping {n_masked}/{n_pts} samples "
+        f"(L significance, I threshold, min run = {args.pa_min_run})"
+    )
+
+    stokes_q = np.asarray(stokes_q, dtype=float)[pa_mask]
+    stokes_u = np.asarray(stokes_u, dtype=float)[pa_mask]
+    time_vals = np.asarray(time_vals, dtype=float)[pa_mask]
+    if stokes_i is not None:
+        stokes_i = np.asarray(stokes_i, dtype=float)[pa_mask]
+    n_pts = len(stokes_q)
+
     # ── Fit ─────────────────────────────────────────────────────────
     print("\nRunning RVM fit...")
     print(f"  Grid: α = {args.n_alpha} × ζ = {args.n_zeta} "
@@ -252,7 +346,7 @@ def main() -> None:
     zeta = result["best_zeta"]
     beta = result["best_beta"]
     best_k = result.get("best_k", None)
-    delta_phi = best_k * burst_dur if best_k else None
+    delta_phi = best_k * burst_dur if best_k is not None else None
 
     print("\n" + "─" * 40)
     print("BEST-FIT RVM PARAMETERS")
