@@ -13,6 +13,7 @@ from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import set_pub_style
+from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
 
 from .constants import set_pub_col
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
@@ -101,6 +102,12 @@ def main() -> None:
     # Data layout and processing
     parser.add_argument("--time-series", action="store_true", help="Process as time series data")
     parser.add_argument("--time-avg", action="store_true", help="Average over time axis for 2D data")
+    parser.add_argument(
+        "-tscr", "--tscrunch",
+        type=int,
+        default=1,
+        help="Time scrunch factor applied before peak finding and RM fitting (average every N time bins)",
+    )
 
     # RM fitting
     parser.add_argument(
@@ -406,6 +413,8 @@ def main() -> None:
         parser.error("Provide --stokes-cube or all of --stokes-i, --stokes-q, and --stokes-u")
     if args.exclude_edge_bins < 0:
         parser.error("--exclude-edge-bins must be >= 0")
+    if args.tscrunch < 1:
+        parser.error("--tscrunch must be >= 1")
 
     circle_segments: Optional[List[Tuple[int, int]]] = None
     if args.poincare_circle_segments is not None:
@@ -461,6 +470,24 @@ def main() -> None:
     if stokes_i.ndim == 2:
         print(f"\n  Detected 2D data with shape: {stokes_i.shape}")
         print(f"  Time axis: {time_axis}, Frequency axis: {freq_axis}")
+
+        if args.tscrunch > 1:
+            print(f"  Time scrunch factor: {args.tscrunch}")
+            n_time_original = stokes_i.shape[1]
+            stokes_i = tscrunch_array(stokes_i, args.tscrunch, axis=1)
+            stokes_q = tscrunch_array(stokes_q, args.tscrunch, axis=1)
+            stokes_u = tscrunch_array(stokes_u, args.tscrunch, axis=1)
+            if stokes_v is not None:
+                stokes_v = tscrunch_array(stokes_v, args.tscrunch, axis=1)
+            if time_array is not None:
+                time_array = tscrunch_array(time_array, args.tscrunch, axis=0)
+            else:
+                time_array = np.arange(stokes_i.shape[1], dtype=float)
+            if args.peak_indices is not None:
+                original_peak_indices = list(args.peak_indices)
+                args.peak_indices = rescale_peak_indices(original_peak_indices, args.tscrunch)
+                print(f"  Peak indices scaled {original_peak_indices} -> {args.peak_indices}")
+            print(f"  Time samples: {n_time_original} -> {stokes_i.shape[1]}")
 
         n_time_noise = stokes_i.shape[1]
         n_frac_noise = max(1, int(n_time_noise * args.offpulse))
