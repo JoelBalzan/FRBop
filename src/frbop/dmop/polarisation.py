@@ -4,6 +4,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from frbop.utils.linear_pol import debiased_linear_from_qu
+
 
 class PolarisationMixin:
 	@staticmethod
@@ -159,14 +161,7 @@ class PolarisationMixin:
 		"""
 		Debias linear polarisation using propagated sigma_L and detection cutoff.
 		"""
-		L_meas = np.sqrt(data_q**2 + data_u**2)
-		sigma_L = np.sqrt(data_q**2 * q_rms**2 + data_u**2 * u_rms**2) / np.maximum(L_meas, eps)
-		r = L_meas / np.maximum(sigma_L, eps)
-		det = r >= cutoff
-
-		L_out = np.zeros_like(L_meas)
-		L_out[det] = np.sqrt(np.maximum(L_meas[det]**2 - sigma_L[det]**2, 0.0))
-		return L_out, sigma_L, det
+		return debiased_linear_from_qu(data_q, data_u, q_rms, u_rms, cutoff=cutoff, eps=eps)
 
 	def _pa_series_deg(self, data_q: np.ndarray, data_u: np.ndarray, data_i: Optional[np.ndarray] = None) -> np.ndarray:
 		q_ts = np.nansum(data_q, axis=0)

@@ -13,52 +13,11 @@ from RMtools_1D.do_RMclean_1D import run_rmclean
 from RMtools_1D.do_RMsynth_1D import run_rmsynth
 from scipy.optimize import curve_fit
 
+from frbop.utils.linear_pol import debiased_linear_from_qu
+
 from .diagnostics import summarize_posterior
 
 warnings.filterwarnings('ignore')
-
-
-def debiased_linear_from_qu(
-    data_q: np.ndarray,
-    data_u: np.ndarray,
-    noise_q: np.ndarray,
-    noise_u: np.ndarray,
-    cutoff: float = 1.57,
-    eps: float = 1e-12,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute Ricean-debiased linear polarisation L = sqrt(Q² + U²).
-
-    Applies Ricean debiasing and a detection cutoff on L/sigma_L.
-
-    Parameters
-    ----------
-    data_q, data_u : np.ndarray
-        Stokes Q and U arrays.
-    noise_q, noise_u : np.ndarray
-        Per-sample noise estimates for Q and U (same shape as data).
-    cutoff : float
-        Detection threshold on L/sigma_L (default 1.57 ~ 1-sigma).
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    L_out : np.ndarray
-        Debiased linear polarisation.
-    sigma_L : np.ndarray
-        Propagated uncertainty on L.
-    det : np.ndarray (bool)
-        Detection mask where L/sigma_L >= cutoff.
-    """
-    L_meas = np.sqrt(data_q ** 2 + data_u ** 2)
-    sigma_L = np.sqrt(data_q ** 2 * noise_q ** 2 + data_u ** 2 * noise_u ** 2) / np.maximum(L_meas, eps)
-    det = L_meas / np.maximum(sigma_L, eps) >= cutoff
-
-    L_out = np.zeros_like(L_meas)
-    L_out[det] = np.sqrt(np.maximum(L_meas[det] ** 2 - sigma_L[det] ** 2, 0.0))
-
-    return L_out, sigma_L, det
 
 
 def _patch_scipy_bilby_compat() -> None:
@@ -85,7 +44,7 @@ class RMFitter:
                  stokes_q: np.ndarray, stokes_u: np.ndarray,
                  stokes_v: Optional[np.ndarray] = None):
         """
-        Initialize RM Fitter.
+        Initialise RM Fitter.
 
         Parameters:
         -----------
@@ -673,7 +632,7 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
             if stokes_v is not None:
                 stokes_v = stokes_v[n_edge:-n_edge]
 
-        # Initialize fitter
+        # Initialise fitter
         fitter = RMFitter(freq_fit, stokes_i, stokes_q, stokes_u, stokes_v)
 
         # Frequency- and time-averaged Stokes values for this bin

@@ -14,16 +14,16 @@ from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import set_pub_style
 
+from .constants import set_pub_col
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
 from .diagnostics import time_series_sigma_rm_diagnostic
-from .constants import set_pub_col
 from .fitter import RMFitter, debiased_linear_from_qu, fit_rm_time_series
 from .plotting import (plot_burns_law_fits, plot_poincare_projections,
-                       plot_rm_corrected_time_series,
                        plot_poincare_projections_frequency,
                        plot_poincare_sphere, plot_poincare_sphere_frequency,
                        plot_poincare_sphere_subbands,
-                       plot_polarisation_fraction_acf_ccf, plot_rm_results,
+                       plot_polarisation_fraction_acf_ccf,
+                       plot_rm_corrected_time_series, plot_rm_results,
                        plot_rm_time_series)
 
 warnings.filterwarnings("ignore")
@@ -302,7 +302,7 @@ def main() -> None:
     parser.add_argument(
         "--rmnest-gfr",
         action="store_true",
-        help="Use RMNest generalized Faraday rotation model",
+        help="Use RMNest generalised Faraday rotation model",
     )
     parser.add_argument(
         "--rmnest-free-alpha",

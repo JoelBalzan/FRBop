@@ -540,7 +540,7 @@ def parse_peak_index_pairs(
     *,
     label: str = "--peak-indices",
 ) -> List[Tuple[int, int]]:
-    """Normalize a flat list of indices into clipped start/end regions."""
+    """Normalise a flat list of indices into clipped start/end regions."""
     if peak_indices is None:
         return []
 
@@ -550,7 +550,7 @@ def parse_peak_index_pairs(
     if len(values) % 2 != 0:
         raise ValueError(f"{label} requires an even number of values (pairs of start/end indices)")
     if n_time <= 0:
-        raise ValueError("Cannot normalize peak indices for an empty time axis")
+        raise ValueError("Cannot normalise peak indices for an empty time axis")
 
     regions: List[Tuple[int, int]] = []
     for i in range(0, len(values), 2):

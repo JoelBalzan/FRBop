@@ -14,43 +14,7 @@ from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import (pub_figsize, savefig_rasterized, set_pub_col,
                                   set_pub_style)
-
-
-def tscrunch_array(arr: np.ndarray, factor: int, axis: int = -1) -> np.ndarray:
-    """Average an array along one axis in groups of ``factor`` samples."""
-    if factor <= 1:
-        return np.asarray(arr)
-
-    arr = np.asarray(arr)
-    if arr.shape[axis] < factor:
-        raise ValueError(f"--tscrunch factor {factor} is larger than the time axis length {arr.shape[axis]}")
-
-    axis_norm = axis % arr.ndim
-    n_keep = arr.shape[axis] // factor
-    if n_keep <= 0:
-        raise ValueError(f"--tscrunch factor {factor} leaves no complete time bins to analyse")
-
-    kept = np.take(arr, np.arange(n_keep * factor), axis=axis)
-    new_shape = kept.shape[:axis_norm] + (n_keep, factor) + kept.shape[axis_norm + 1:]
-    return np.nanmean(kept.reshape(new_shape), axis=axis_norm + 1)
-
-
-def rescale_peak_indices(indices, factor: int) -> list[int]:
-    """Map original-resolution peak bounds onto a scrunched time axis."""
-    if factor <= 1 or not indices:
-        return list(indices) if indices is not None else []
-
-    values = list(indices)
-    if len(values) % 2 != 0:
-        raise ValueError("--peak-indices requires an even number of values (pairs of start/end indices)")
-
-    scaled = []
-    for i in range(0, len(values), 2):
-        start = int(values[i])
-        end = int(values[i + 1])
-        scaled.append(start // factor)
-        scaled.append(-(-end // factor))
-    return scaled
+from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
 
 
 def main():

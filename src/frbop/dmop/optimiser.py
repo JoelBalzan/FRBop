@@ -57,7 +57,7 @@ class DMOptimiser(
                  n_pol: int = 2,
                  stokes_scale: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)):
         """
-        Initialize the DM optimiser.
+        Initialise the DM optimiser.
         
         Parameters:
         -----------

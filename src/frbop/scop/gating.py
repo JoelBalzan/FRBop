@@ -5,49 +5,7 @@ import numpy as np
 from frbop.utils.peaks import \
     select_peak_fwhm_manual as shared_select_peak_fwhm_manual
 from frbop.utils.peaks import select_peaks_manual as shared_select_peaks_manual
-
-
-def find_burst_window(ts, peak_idx, smooth_win=5, threshold_sigma=3.0, pad=50, fallback_window=200):
-    """Find contiguous burst window around peak using robust thresholding.
-
-    Returns (tmin, tmax) inclusive-exclusive indices.
-    """
-    if smooth_win > 1:
-        kernel = np.ones(smooth_win) / smooth_win
-        ts_smooth = np.convolve(ts, kernel, mode="same")
-    else:
-        ts_smooth = ts
-
-    med = np.median(ts_smooth)
-    mad = np.median(np.abs(ts_smooth - med))
-    sigma_est = 1.4826 * mad if mad > 0 else np.std(ts_smooth)
-    thresh = med + threshold_sigma * sigma_est
-
-    above = np.where(ts_smooth > thresh)[0]
-    if above.size > 0:
-        breaks = np.where(np.diff(above) > 1)[0]
-        segments = []
-        start = 0
-        for b in breaks:
-            segments.append(above[start : b + 1])
-            start = b + 1
-        segments.append(above[start:])
-
-        chosen = None
-        for seg in segments:
-            if peak_idx in seg:
-                chosen = seg
-                break
-        if chosen is None:
-            chosen = max(segments, key=lambda s: s.size)
-
-        tmin = max(0, chosen[0] - pad)
-        tmax = chosen[-1] + 1 + pad
-        return tmin, tmax
-
-    tmin = max(0, peak_idx - fallback_window)
-    tmax = peak_idx + fallback_window
-    return tmin, tmax
+from frbop.utils.windows import find_burst_window
 
 
 def select_peaks_manual(

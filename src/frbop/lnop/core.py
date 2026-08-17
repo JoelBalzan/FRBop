@@ -10,7 +10,7 @@ arXiv:2204.06014).  Five stages:
   5. Apply delay/significance/polarization vetoes to flag candidates.
 
 Inputs are already-dedispersed voltage timestreams.  If your data is still
-channelized baseband (post-PFB), invert the PFB first (App. C of the paper
+channelised baseband (post-PFB), invert the PFB first (App. C of the paper
 / Morrison et al. 2019 for ASKAP's oversampled PFB, e.g. via CELEBI).
 
 Changelog vs. first draft
@@ -24,7 +24,7 @@ Changelog vs. first draft
   environment."
 * FIX: the weighted noise power feeding Gamma (Eq. 6 / A16) is now
   computed directly from off-pulse VOLTAGE (sum_t N^2(t) W^2(t), Eq. A15),
-  not from summing the already-normalized correlation output |C|, which
+  not from summing the already-normalised correlation output |C|, which
   has the wrong units/dependence entirely.
 * ADDED: leave-one-out chi^2 over the off-pulse realizations themselves,
   giving you the off-pulse "null" chi^2 distribution per bin (the
@@ -167,7 +167,7 @@ def off_pulse_noise_power(V, W2, shift_samples, n_realizations, gap_samples=None
     the voltage timestream weighted by the matched filter shape.
 
     OPTIMIZED: W2 is zero everywhere except the (typically narrow)
-    on-pulse support, so there's no reason to materialize a full N-length
+    on-pulse support, so there's no reason to materialise a full N-length
     np.roll(V, shift) copy (previously ~480 MB per realization for a
     complex64 N=6e7 array) just to multiply almost all of it by zero.
     Instead we gather only the samples V[(support - shift) % N] at the

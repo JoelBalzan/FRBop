@@ -1,4 +1,4 @@
-# snop_cli.py - Generalized version
+# snop_cli.py - Generalised version
 import argparse
 import logging
 import os

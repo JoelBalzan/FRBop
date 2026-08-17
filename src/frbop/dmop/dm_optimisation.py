@@ -1,7 +1,6 @@
 """Command-line interface for dm_optimisation."""
 
 import argparse
-import re
 from pathlib import Path
 from typing import Tuple
 
@@ -10,154 +9,12 @@ from astropy import units as u
 
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.plotting import set_pub_col, set_pub_style
+from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
+from frbop.utils.stokes_io import (derive_axes_from_metadata,
+                                   extract_stokes_components,
+                                   load_stokes_cube_from_npz)
 
 from .optimiser import DMOptimiser
-
-
-def tscrunch_arrays(arr, factor: int, axis: int = -1) -> np.ndarray:
-    """Average ``arr`` along ``axis`` in groups of ``factor`` consecutive bins.
-
-    Trailing bins beyond a whole number of factors are dropped. NaN entries
-    are ignored (NaN-safe mean), matching the optimiser's NaN handling.
-    """
-    n = arr.shape[axis]
-    axis_norm = axis % arr.ndim
-    n_keep = n // factor
-    kept = np.take(arr, np.arange(n_keep * factor), axis=axis)
-    new_shape = (
-        kept.shape[:axis_norm]
-        + (n_keep, factor)
-        + kept.shape[axis_norm + 1:]
-    )
-    scrunched = np.nanmean(kept.reshape(new_shape), axis=axis_norm + 1)
-    return scrunched
-
-
-def _normalize_pol_order(pol_order) -> str:
-	"""Convert an archive ``pol_order`` value to a compact uppercase label string."""
-	if pol_order is None:
-		return ""
-	value = pol_order
-	if isinstance(value, np.ndarray):
-		if value.shape == ():
-			value = value.item()
-		elif value.dtype.kind in {"S", "U", "O"}:
-			parts = []
-			for item in value.ravel():
-				if isinstance(item, (bytes, np.bytes_)):
-					parts.append(item.decode())
-				else:
-					parts.append(str(item))
-			value = "".join(parts)
-		else:
-			value = "".join(str(item) for item in value.ravel())
-	elif isinstance(value, (bytes, np.bytes_)):
-		value = value.decode()
-	else:
-		value = str(value)
-	return re.sub(r"[^A-Z0-9]", "", value.upper())
-
-
-def _load_stokes_cube_from_npz(npz_path: Path):
-	"""Load a candidate archive and return the Stokes cube plus metadata."""
-	with np.load(npz_path, allow_pickle=True) as archive:
-		if "stokes" not in archive.files:
-			raise ValueError(f"{npz_path} does not contain a 'stokes' array")
-		cube = np.asarray(archive["stokes"])
-		metadata = {key: archive[key] for key in archive.files if key != "stokes"}
-	return cube, metadata
-
-
-def _extract_stokes_components(cube: np.ndarray, pol_order=None, nchan=None, nsamp=None):
-	"""Split a Stokes cube into I/Q/U/V arrays using archive metadata when available."""
-	cube = np.asarray(cube)
-	if cube.ndim != 3:
-		raise ValueError(f"Stokes cube must be 3D, got shape {cube.shape}")
-
-	order = _normalize_pol_order(pol_order)
-	if not order:
-		if cube.shape[0] in (3, 4):
-			order = "IQUV"[: cube.shape[0]]
-		elif cube.shape[-1] in (3, 4):
-			order = "IQUV"[: cube.shape[-1]]
-		else:
-			raise ValueError(
-				"Unable to infer polarisation order from the archive; provide a 'pol_order' key"
-			)
-
-	if len(order) not in (3, 4):
-		raise ValueError(f"Unsupported polarisation order {order!r}; expected 3 or 4 components")
-
-	n_stokes = len(order)
-	aligned = None
-	if nchan is not None and nsamp is not None:
-		nchan = int(np.asarray(nchan).reshape(()))
-		nsamp = int(np.asarray(nsamp).reshape(()))
-		for stokes_axis in range(3):
-			if cube.shape[stokes_axis] != n_stokes:
-				continue
-			remaining_axes = [axis for axis in range(3) if axis != stokes_axis]
-			for freq_axis in remaining_axes:
-				for time_axis in remaining_axes:
-					if freq_axis == time_axis:
-						continue
-					if cube.shape[freq_axis] == nchan and cube.shape[time_axis] == nsamp:
-						aligned = np.moveaxis(cube, (stokes_axis, freq_axis, time_axis), (0, 1, 2))
-						break
-				if aligned is not None:
-					break
-			if aligned is not None:
-				break
-
-	if aligned is None:
-		if cube.shape[0] == n_stokes:
-			aligned = cube
-		elif cube.shape[-1] == n_stokes:
-			aligned = np.moveaxis(cube, -1, 0)
-		else:
-			raise ValueError(
-				f"Unable to identify the Stokes axis in cube shape {cube.shape}; expected one axis of length {n_stokes}"
-			)
-
-	component_map = {label: aligned[idx] for idx, label in enumerate(order)}
-	stokes_i = component_map.get("I")
-	stokes_q = component_map.get("Q")
-	stokes_u = component_map.get("U")
-	stokes_v = component_map.get("V")
-	if stokes_i is None:
-		raise ValueError(f"Archive polarisation order {order!r} does not include Stokes I")
-	return stokes_i, stokes_q, stokes_u, stokes_v, aligned, order
-
-
-def _derive_axes_from_metadata(metadata, nchan: int, nsamp: int):
-	"""Build frequency/time axes from archive metadata when standalone files are absent."""
-	freq_mhz = None
-	time_ms = None
-
-	if "freq_mhz" in metadata:
-		freq_mhz = np.asarray(metadata["freq_mhz"], dtype=float)
-	elif "freq" in metadata:
-		freq_mhz = np.asarray(metadata["freq"], dtype=float)
-	elif all(key in metadata for key in ("fch1_mhz", "foff_mhz", "nchan")):
-		fch1_mhz = float(np.asarray(metadata["fch1_mhz"]).reshape(()))
-		foff_mhz = float(np.asarray(metadata["foff_mhz"]).reshape(()))
-		nchan_meta = int(np.asarray(metadata["nchan"]).reshape(()))
-		freq_mhz = fch1_mhz + np.arange(nchan_meta, dtype=float) * foff_mhz
-		if freq_mhz.size != nchan:
-			freq_mhz = fch1_mhz + np.arange(nchan, dtype=float) * foff_mhz
-
-	if "time_ms" in metadata:
-		time_ms = np.asarray(metadata["time_ms"], dtype=float)
-	elif "time" in metadata:
-		time_ms = np.asarray(metadata["time"], dtype=float)
-	elif all(key in metadata for key in ("tsamp_s", "nsamp")):
-		tsamp_s = float(np.asarray(metadata["tsamp_s"]).reshape(()))
-		nsamp_meta = int(np.asarray(metadata["nsamp"]).reshape(()))
-		time_ms = np.arange(nsamp_meta, dtype=float) * tsamp_s * 1_000.0
-		if time_ms.size != nsamp:
-			time_ms = np.arange(nsamp, dtype=float) * tsamp_s * 1_000.0
-
-	return freq_mhz, time_ms
 
 
 def build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, args) -> DMOptimiser:
@@ -185,29 +42,6 @@ def build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, a
 		li_i_sigma_cut=args.li_sig,
 		random_seed=args.seed,
 	)
-
-
-def rescale_peak_indices(indices, factor: int) -> list:
-    """Map original-resolution start/end peak index pairs to scrunched bins.
-
-    Original bin ``i`` falls into scrunched bin ``i // factor``, so a region
-    ``[start, end)`` covers the same time span as ``[start // factor, ceil(end / factor))``.
-    Returns the input unchanged for ``factor <= 1`` or empty input.
-    """
-    if factor <= 1 or not indices:
-        return indices
-    values = list(indices)
-    if len(values) % 2 != 0:
-        raise ValueError(
-            "--peak-indices requires an even number of values (pairs of start/end indices)"
-        )
-    scaled = []
-    for i in range(0, len(values), 2):
-        start = int(values[i])
-        end = int(values[i + 1])
-        scaled.append(start // factor)
-        scaled.append(-(-end // factor))
-    return scaled
 
 
 def parse_args() -> argparse.Namespace:
@@ -581,14 +415,14 @@ def main():
 	if args.stokes_cube:
 		cube_path = Path(args.stokes_cube)
 		if cube_path.suffix.lower() == ".npz":
-			cube, cube_meta = _load_stokes_cube_from_npz(cube_path)
-			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = _extract_stokes_components(
+			cube, cube_meta = load_stokes_cube_from_npz(cube_path)
+			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = extract_stokes_components(
 				cube,
 				pol_order=cube_meta.get("pol_order"),
 				nchan=cube_meta.get("nchan"),
 				nsamp=cube_meta.get("nsamp"),
 			)
-			derived_freq_mhz, derived_time_ms = _derive_axes_from_metadata(
+			derived_freq_mhz, derived_time_ms = derive_axes_from_metadata(
 				cube_meta,
 				stokes_i.shape[0],
 				stokes_i.shape[1],
@@ -602,7 +436,7 @@ def main():
 				print(f"    derived time axis from archive metadata: {derived_time_ms.size} samples")
 		else:
 			cube = np.load(cube_path)
-			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = _extract_stokes_components(cube)
+			stokes_i, stokes_q, stokes_u, stokes_v, aligned_cube, pol_order = extract_stokes_components(cube)
 			derived_freq_mhz = None
 			derived_time_ms = None
 	else:
@@ -650,14 +484,14 @@ def main():
 	if not per_component_scrunch and factors[0] > 1:
 		print(f"\nScrunching in time by factor {factors[0]} (pre-optimisation)...")
 		n_time_orig = time_ms.size
-		stokes_i = tscrunch_arrays(stokes_i, factors[0])
+		stokes_i = tscrunch_array(stokes_i, factors[0])
 		if stokes_q is not None:
-			stokes_q = tscrunch_arrays(stokes_q, factors[0])
+			stokes_q = tscrunch_array(stokes_q, factors[0])
 		if stokes_u is not None:
-			stokes_u = tscrunch_arrays(stokes_u, factors[0])
+			stokes_u = tscrunch_array(stokes_u, factors[0])
 		if stokes_v is not None:
-			stokes_v = tscrunch_arrays(stokes_v, factors[0])
-		time_ms = tscrunch_arrays(time_ms, factors[0])
+			stokes_v = tscrunch_array(stokes_v, factors[0])
+		time_ms = tscrunch_array(time_ms, factors[0])
 		print(f"  Time samples: {n_time_orig} -> {time_ms.size}")
 		if args.peak_indices is not None:
 			orig_indices = list(args.peak_indices)
@@ -728,7 +562,7 @@ def main():
 	print(f"  Time range: {time_ms[0]:.3f} - {time_ms[-1]:.3f} ms")
 		
 	
-	# Initialize optimiser
+	# Initialise optimiser
 	optimiser = build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, args)
 
 	# Inform final reference frequency used
@@ -814,11 +648,11 @@ def main():
 		if per_component_scrunch:
 			f = factors[i]
 			if f > 1:
-				seg_stokes_i = tscrunch_arrays(stokes_i, f)
-				seg_stokes_q = None if stokes_q is None else tscrunch_arrays(stokes_q, f)
-				seg_stokes_u = None if stokes_u is None else tscrunch_arrays(stokes_u, f)
-				seg_stokes_v = None if stokes_v is None else tscrunch_arrays(stokes_v, f)
-				seg_time = tscrunch_arrays(time_ms, f)
+				seg_stokes_i = tscrunch_array(stokes_i, f)
+				seg_stokes_q = None if stokes_q is None else tscrunch_array(stokes_q, f)
+				seg_stokes_u = None if stokes_u is None else tscrunch_array(stokes_u, f)
+				seg_stokes_v = None if stokes_v is None else tscrunch_array(stokes_v, f)
+				seg_time = tscrunch_array(time_ms, f)
 				seg_opt = build_optimiser(seg_stokes_i, freq_mhz, seg_time,
 										  seg_stokes_q, seg_stokes_u, seg_stokes_v, args)
 				seg_region = (peak_region[0] // f, -(-peak_region[1] // f))

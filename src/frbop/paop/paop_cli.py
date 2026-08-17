@@ -31,6 +31,9 @@ import warnings
 
 import numpy as np
 
+from frbop.utils.linear_pol import debiased_linear_from_qu
+from frbop.utils.scrunch import tscrunch_array
+
 from .rvm_fitter import fit_rvm
 from .rvm_plotting import plot_grid_chi2, plot_rvm_corner, plot_rvm_fit
 
@@ -101,9 +104,8 @@ def _build_pa_mask(stokes_q: np.ndarray, stokes_u: np.ndarray,
     q_rms = _noise_from_series(q)
     u_rms = _noise_from_series(u)
 
-    l_meas = np.sqrt(q ** 2 + u ** 2)
-    sigma_l = np.sqrt(q ** 2 * q_rms ** 2 + u ** 2 * u_rms ** 2) / np.maximum(l_meas, 1e-12)
-    mask = l_meas / np.maximum(sigma_l, 1e-12) >= 1.57
+    l_debias, sigma_l, _ = debiased_linear_from_qu(q, u, q_rms, u_rms)
+    mask = l_debias >= (2.0 * sigma_l)
 
     if stokes_i is not None:
         i = np.asarray(stokes_i, dtype=float).ravel()
@@ -153,6 +155,8 @@ def main() -> None:
                         help="Average over time axis (2D → 1D)")
     parser.add_argument("--freq-avg", action="store_true",
                         help="Average over frequency axis (2D → 1D)")
+    parser.add_argument("-tscr", "--tscrunch", type=int, default=1,
+                        help="Time scrunch factor applied before PA masking and fitting (average every N time bins)")
 
     # PA masking
     parser.add_argument("--pa-min-run", type=int, default=3,
@@ -292,6 +296,23 @@ def main() -> None:
         time_vals = np.linspace(0, 1.0, n_pts)
         burst_dur = 1.0
         print("  No time file — using dummy 0–1 ms")
+
+    if args.tscrunch < 1:
+        parser.error(f"--tscrunch must be >= 1, got {args.tscrunch}")
+    if args.tscrunch > 1:
+        print(f"  Time scrunch factor: {args.tscrunch}")
+        n_pts_orig = n_pts
+        stokes_q = tscrunch_array(stokes_q, args.tscrunch)
+        stokes_u = tscrunch_array(stokes_u, args.tscrunch)
+        time_vals = tscrunch_array(time_vals, args.tscrunch)
+        if stokes_i is not None:
+            stokes_i = tscrunch_array(stokes_i, args.tscrunch)
+        n_pts = len(stokes_q)
+        if n_pts < 4:
+            parser.error(
+                f"Time scrunching reduced the data from {n_pts_orig} to {n_pts} samples; need at least 4 for RVM fitting"
+            )
+        print(f"  Time samples: {n_pts_orig} -> {n_pts}")
 
     # ── PA masking ─────────────────────────────────────────────────
     pa_mask = _build_pa_mask(

@@ -134,7 +134,17 @@ def plot_rvm_corner(result: dict,
         return None
 
     flat = mcmc["flatchain"]
+    ndim = int(mcmc.get("ndim", flat.shape[1]))
     labels = [r"$\phi_0$", r"$\psi_0$", r"$\alpha$", r"$\zeta$"]
+    truths = [
+        result.get("best_phi0"),
+        result.get("best_psi0"),
+        result.get("best_alpha"),
+        result.get("best_zeta"),
+    ]
+    if ndim == 5:
+        labels.append(r"$k$")
+        truths.append(result.get("best_k"))
 
     defaults = dict(
         quantiles=[0.16, 0.5, 0.84],
@@ -142,10 +152,9 @@ def plot_rvm_corner(result: dict,
         title_fmt=".3f",
         title_kwargs={"fontsize": 10},
         label_kwargs={"fontsize": 11},
-        truths=(result.get("best_phi0"), result.get("best_psi0"),
-                result.get("best_alpha"), result.get("best_zeta")),
+        truths=truths,
         truth_color="C3",
-        range=[0.999] * 4,
+        range=[0.999] * ndim,
     )
     defaults.update(corner_kw)
 
