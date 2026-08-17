@@ -32,7 +32,9 @@ import warnings
 import numpy as np
 
 from frbop.utils.linear_pol import debiased_linear_from_qu
+from frbop.utils.noise import noise_from_first_fraction
 from frbop.utils.scrunch import tscrunch_array
+from frbop.utils.significance import build_pa_mask
 
 from .rvm_fitter import fit_rvm
 from .rvm_plotting import plot_grid_chi2, plot_rvm_corner, plot_rvm_fit
@@ -70,29 +72,6 @@ def _estimate_noise_from_offpulse(q_2d: np.ndarray, u_2d: np.ndarray,
     return sigma_q, sigma_u
 
 
-def _apply_min_run(mask: np.ndarray, min_run: int) -> np.ndarray:
-    """Keep only contiguous True runs with at least *min_run* samples."""
-    valid = np.asarray(mask, dtype=bool).astype(int)
-    dv = np.diff(np.concatenate(([0], valid, [0])))
-    starts = np.where(dv == 1)[0]
-    ends = np.where(dv == -1)[0]
-    keep = np.zeros_like(mask, dtype=bool)
-    for start, end in zip(starts, ends):
-        if (end - start) >= min_run:
-            keep[start:end] = True
-    return keep
-
-
-def _noise_from_series(series: np.ndarray, frac: float = 0.05) -> float:
-    """Estimate noise from the first *frac* of a 1D series."""
-    arr = np.asarray(series, dtype=float).ravel()
-    n_edge = max(1, int(len(arr) * frac))
-    noise = float(np.nanstd(arr[:n_edge]))
-    if not np.isfinite(noise) or noise < 0.0:
-        return 1e-15
-    return max(noise, 1e-15)
-
-
 def _build_pa_mask(stokes_q: np.ndarray, stokes_u: np.ndarray,
                    stokes_i: np.ndarray | None = None,
                    li_i_sigma_cut: float = 2.0,
@@ -101,32 +80,28 @@ def _build_pa_mask(stokes_q: np.ndarray, stokes_u: np.ndarray,
     """Build the same PA significance mask used by the time-series pipeline."""
     q = np.asarray(stokes_q, dtype=float).ravel()
     u = np.asarray(stokes_u, dtype=float).ravel()
-    q_rms = _noise_from_series(q)
-    u_rms = _noise_from_series(u)
+    q_rms = float(noise_from_first_fraction(q, frac=0.05))
+    u_rms = float(noise_from_first_fraction(u, frac=0.05))
 
     l_debias, sigma_l, _ = debiased_linear_from_qu(q, u, q_rms, u_rms)
-    mask = l_debias >= (2.0 * sigma_l)
 
+    i_ts = None
+    sigma_i = med_i = None
     if stokes_i is not None:
         i = np.asarray(stokes_i, dtype=float).ravel()
-        if i.shape != mask.shape:
+        if i.shape != l_debias.shape:
             raise ValueError("Stokes I, Q, and U must have matching lengths for PA masking")
-        sigma_i = _noise_from_series(i)
+        i_ts = i
+        sigma_i = float(noise_from_first_fraction(i, frac=0.05))
         med_i = float(np.nanmedian(i))
-        i_mask = i >= (med_i + li_i_sigma_cut * sigma_i)
-        if pa_fit_post_peak_only:
-            finite_i = np.isfinite(i)
-            if np.any(finite_i):
-                peak_idx = int(np.nanargmax(i))
-                peak_mask = np.zeros_like(mask, dtype=bool)
-                peak_mask[peak_idx:] = True
-                i_mask = i_mask & peak_mask
-        mask = mask & i_mask
 
-    if np.any(mask):
-        mask = _apply_min_run(mask, max(1, int(pa_min_run)))
-
-    return mask
+    return build_pa_mask(
+        l_debias, sigma_l,
+        i_ts=i_ts, sigma_i=sigma_i, med_i=med_i,
+        li_i_sigma_cut=li_i_sigma_cut,
+        post_peak_only=pa_fit_post_peak_only,
+        min_run=pa_min_run,
+    )
 
 
 def main() -> None:

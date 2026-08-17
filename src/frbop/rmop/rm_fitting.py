@@ -14,6 +14,7 @@ from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import set_pub_style
 from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
+from frbop.utils.significance import stokes_i_snr_mask
 
 from .constants import set_pub_col
 from .data_io import find_onpulse_window, load_stokes_data, select_peaks_manual
@@ -786,8 +787,7 @@ def main() -> None:
                 + ((l_val * sigma_i_chan) / ((i_val + 1e-10) ** 2)) ** 2
             )
 
-            i_snr_chan = i_val / (sigma_i_chan + 1e-10)
-            burn_valid_mask = i_snr_chan >= 2.0
+            burn_valid_mask = stokes_i_snr_mask(i_val, sigma_i_chan, threshold=2.0)
             burn_pol_frac_err[~burn_valid_mask] = np.nan
             burn_circ_valid_mask = burn_valid_mask.copy()
 
@@ -1234,7 +1234,7 @@ def main() -> None:
                     (sigma_l_pk / (stokes_i_pk + 1e-10)) ** 2
                     + ((l_pk * sigma_i_pk) / ((stokes_i_pk + 1e-10) ** 2)) ** 2
                 )
-                burn_mask_pk = (stokes_i_pk / (sigma_i_pk + 1e-10)) >= 2.0
+                burn_mask_pk = stokes_i_snr_mask(stokes_i_pk, sigma_i_pk, threshold=2.0)
                 burn_err_pk[~burn_mask_pk] = np.nan
                 burn_err_pk = np.where(
                     np.isfinite(burn_err_pk) & (burn_err_pk > 0), burn_err_pk, np.nan

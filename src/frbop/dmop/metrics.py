@@ -4,6 +4,9 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from frbop.utils.linear_pol import pa_degrees_from_qu
+from frbop.utils.significance import build_pa_mask, longest_true_run
+
 class MetricsMixin:
 	@staticmethod
 	def _fwhm_window(profile: np.ndarray, width_factor: float = 1.0) -> tuple:
@@ -120,31 +123,22 @@ class MetricsMixin:
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
-		pa = 0.5 * np.arctan2(u_ts, q_ts)
-		pa = 0.5 * np.unwrap(2.0 * pa)
-		pa_deg = np.degrees(pa)
-		pa_deg = ((pa_deg + 90.0) % 180.0) - 90.0
+		pa_deg = pa_degrees_from_qu(q_ts, u_ts)
 
-		mask = L_debias >= (2.0 * sigma_L)
-		min_run = 5
-		if np.any(mask):
-			mask = self._apply_min_run(mask, min_run)
-
+		i_ts = None
+		sigma_i = med_i = None
 		if data_i is not None:
 			i_ts = np.nansum(data_i, axis=0)
-			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.nanstd(i_ts)
-			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.nanmedian(i_ts)
-			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
-			i_mask = i_ts >= threshold_i
-			if self.pa_fit_post_peak_only:
-				if np.any(np.isfinite(i_ts)):
-					peak_idx = int(np.nanargmax(i_ts))
-				else:
-					peak_idx = 0
-				peak_mask = np.zeros_like(mask, dtype=bool)
-				peak_mask[peak_idx:] = True
-				i_mask = i_mask & peak_mask
-			mask = mask & i_mask
+			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else float(np.nanstd(i_ts))
+			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else float(np.nanmedian(i_ts))
+
+		mask = build_pa_mask(
+			L_debias, sigma_L,
+			i_ts=i_ts, sigma_i=sigma_i, med_i=med_i,
+			li_i_sigma_cut=self.li_i_sigma_cut,
+			post_peak_only=self.pa_fit_post_peak_only,
+			min_run=5,
+		)
 
 		valid = mask & np.isfinite(pa_deg)
 		if time_ms is None or len(time_ms) != len(pa_deg):
@@ -158,7 +152,7 @@ class MetricsMixin:
 			return (0.0, 0.0) if return_error else 0.0
 
 		min_contiguous = max(12, min_points)
-		if self._longest_true_run(valid) < min_contiguous:
+		if longest_true_run(valid) < min_contiguous:
 			return (0.0, 0.0) if return_error else 0.0
 
 		weights = self._pa_fit_weights(L_debias, sigma_L, data_i, valid)

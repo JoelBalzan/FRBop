@@ -4,7 +4,14 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from frbop.utils.linear_pol import debiased_linear_from_qu
+from frbop.utils.linear_pol import debiased_linear_from_qu, pa_degrees_from_qu
+from frbop.utils.noise import noise_from_first_fraction
+from frbop.utils.significance import (
+	apply_min_run,
+	build_pa_mask,
+	l_significance_mask,
+	longest_true_run,
+)
 
 
 class PolarisationMixin:
@@ -13,28 +20,6 @@ class PolarisationMixin:
 		n_edge = max(1, int(0.05 * len(series)))
 		noise_region = series[:n_edge]
 		return float(np.median(noise_region)), float(np.std(noise_region))
-
-	@staticmethod
-	def _apply_min_run(mask: np.ndarray, min_run: int) -> np.ndarray:
-		valid = mask.astype(int)
-		dv = np.diff(np.concatenate(([0], valid, [0])))
-		starts = np.where(dv == 1)[0]
-		ends = np.where(dv == -1)[0]
-		keep = np.zeros_like(mask, dtype=bool)
-		for s, e in zip(starts, ends):
-			if (e - s) >= min_run:
-				keep[s:e] = True
-		return keep
-
-	@staticmethod
-	def _longest_true_run(mask: np.ndarray) -> int:
-		valid = mask.astype(int)
-		dv = np.diff(np.concatenate(([0], valid, [0])))
-		starts = np.where(dv == 1)[0]
-		ends = np.where(dv == -1)[0]
-		if len(starts) == 0:
-			return 0
-		return int(np.max(ends - starts))
 
 	def _pa_slope_metric_shrine(self, data_q: np.ndarray, data_u: np.ndarray,
 								  time_ms: Optional[np.ndarray] = None,
@@ -130,16 +115,14 @@ class PolarisationMixin:
 		Estimate Q/U RMS from the first 5% of time samples.
 		"""
 		if data_q.ndim == 1:
-			n_edge = max(1, int(0.05 * len(data_q)))
-			q_rms = float(np.std(data_q[:n_edge]))
-			u_rms = float(np.std(data_u[:n_edge]))
-			return q_rms, u_rms
+			q_rms = noise_from_first_fraction(data_q, frac=0.05)
+			u_rms = noise_from_first_fraction(data_u, frac=0.05)
+			return float(q_rms), float(u_rms)
 
 		# Expect shape (freq, time)
-		n_edge = max(1, int(0.05 * data_q.shape[1]))
-		q_rms = np.std(data_q[:, :n_edge], axis=1, keepdims=True)
-		u_rms = np.std(data_u[:, :n_edge], axis=1, keepdims=True)
-		return q_rms, u_rms
+		q_rms = noise_from_first_fraction(data_q, frac=0.05, axis=1)
+		u_rms = noise_from_first_fraction(data_u, frac=0.05, axis=1)
+		return np.atleast_2d(q_rms), np.atleast_2d(u_rms)
 
 	def _linear_dspec_from_qu(self, data_q: np.ndarray, data_u: np.ndarray) -> np.ndarray:
 		"""
@@ -168,33 +151,24 @@ class PolarisationMixin:
 		u_ts = np.nansum(data_u, axis=0)
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
-		pa = 0.5 * np.arctan2(u_ts, q_ts)
-		pa = 0.5 * np.unwrap(2.0 * pa)
-		pa_deg = np.degrees(pa)
-		pa_deg = ((pa_deg + 90.0) % 180.0) - 90.0
-		mask = L_debias >= (2.0 * sigma_L)
-		
-		# Apply Stokes I significance cutoff; optionally also restrict to >= peak
+		pa_deg = pa_degrees_from_qu(q_ts, u_ts)
+
+		i_ts = None
+		sigma_i = med_i = None
 		if data_i is not None:
 			i_ts = np.nansum(data_i, axis=0)
-			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
-			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
-			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
-			i_mask = i_ts >= threshold_i
-			if self.pa_fit_post_peak_only:
-				peak_idx = int(np.argmax(i_ts))
-				peak_mask = np.zeros_like(mask, dtype=bool)
-				peak_mask[peak_idx:] = True
-				i_mask = i_mask & peak_mask
-			mask = mask & i_mask
+			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else float(np.std(i_ts))
+			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else float(np.median(i_ts))
+
+		mask = build_pa_mask(
+			L_debias, sigma_L,
+			i_ts=i_ts, sigma_i=sigma_i, med_i=med_i,
+			li_i_sigma_cut=self.li_i_sigma_cut,
+			post_peak_only=self.pa_fit_post_peak_only,
+			min_run=int(getattr(self, "pa_min_run", 3)),
+		)
 		
 		pa_deg = np.where(mask, pa_deg, np.nan)
-
-		# Drop short valid runs
-		min_run = int(getattr(self, "pa_min_run", 3))
-		if np.any(mask):
-			keep_run = self._apply_min_run(mask, min_run)
-			pa_deg = np.where(keep_run, pa_deg, np.nan)
 
 		return pa_deg
 	
@@ -227,31 +201,22 @@ class PolarisationMixin:
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 		
-		pa = 0.5 * np.arctan2(u_ts, q_ts)
-		pa = 0.5 * np.unwrap(2.0 * pa)
-		pa_deg = np.degrees(pa)
-		pa_deg = ((pa_deg + 90.0) % 180.0) - 90.0
-		
-		# Mask based on L significance
-		mask = L_debias >= (2.0 * sigma_L)
-		
-		# Apply Stokes I significance cutoff; optionally also restrict to >= peak
+		pa_deg = pa_degrees_from_qu(q_ts, u_ts)
+
+		i_ts = None
+		sigma_i = med_i = None
 		if data_i is not None:
 			i_ts = np.nansum(data_i, axis=0)
-			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
-			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
-			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
-			i_mask = i_ts >= threshold_i
-			if self.pa_fit_post_peak_only:
-				peak_idx = int(np.argmax(i_ts))
-				peak_mask = np.zeros_like(mask, dtype=bool)
-				peak_mask[peak_idx:] = True
-				i_mask = i_mask & peak_mask
-			mask = mask & i_mask
-		
-		min_run = int(getattr(self, "pa_min_run", 3))
-		if np.any(mask):
-			mask = self._apply_min_run(mask, min_run)
+			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else float(np.std(i_ts))
+			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else float(np.median(i_ts))
+
+		mask = build_pa_mask(
+			L_debias, sigma_L,
+			i_ts=i_ts, sigma_i=sigma_i, med_i=med_i,
+			li_i_sigma_cut=self.li_i_sigma_cut,
+			post_peak_only=self.pa_fit_post_peak_only,
+			min_run=int(getattr(self, "pa_min_run", 3)),
+		)
 		
 		valid = mask & np.isfinite(pa_deg)
 		
@@ -295,28 +260,22 @@ class PolarisationMixin:
 		q_rms, u_rms = self._qu_noise_rms_from_full(q_ts, u_ts)
 		L_debias, sigma_L, _ = self._debiased_linear_from_qu(q_ts, u_ts, q_rms, u_rms)
 
-		pa = 0.5 * np.arctan2(u_ts, q_ts)
-		pa = 0.5 * np.unwrap(2.0 * pa)
-		pa_deg = np.degrees(pa)
-		pa_deg = ((pa_deg + 90.0) % 180.0) - 90.0
+		pa_deg = pa_degrees_from_qu(q_ts, u_ts)
 
-		mask = L_debias >= (2.0 * sigma_L)
+		i_ts = None
+		sigma_i = med_i = None
 		if data_i is not None:
 			i_ts = np.nansum(data_i, axis=0)
-			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else np.std(i_ts)
-			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else np.median(i_ts)
-			threshold_i = med_i + self.li_i_sigma_cut * sigma_i
-			i_mask = i_ts >= threshold_i
-			if self.pa_fit_post_peak_only:
-				peak_idx = int(np.argmax(i_ts))
-				peak_mask = np.zeros_like(mask, dtype=bool)
-				peak_mask[peak_idx:] = True
-				i_mask = i_mask & peak_mask
-			mask = mask & i_mask
+			sigma_i = self.full_i_noise_std if self.full_i_noise_std is not None else float(np.std(i_ts))
+			med_i = self.full_i_noise_median if self.full_i_noise_median is not None else float(np.median(i_ts))
 
-		min_run = int(getattr(self, "pa_min_run", 3))
-		if np.any(mask):
-			mask = self._apply_min_run(mask, min_run)
+		mask = build_pa_mask(
+			L_debias, sigma_L,
+			i_ts=i_ts, sigma_i=sigma_i, med_i=med_i,
+			li_i_sigma_cut=self.li_i_sigma_cut,
+			post_peak_only=self.pa_fit_post_peak_only,
+			min_run=int(getattr(self, "pa_min_run", 3)),
+		)
 
 		valid = mask & np.isfinite(pa_deg)
 
@@ -327,7 +286,7 @@ class PolarisationMixin:
 			time_axis = time_ms
 
 		pa_deg_masked = np.where(mask, pa_deg, np.nan)
-		kc_source_mask = (L_debias >= (2.0 * sigma_L)) & np.isfinite(pa_deg)
+		kc_source_mask = l_significance_mask(L_debias, sigma_L) & np.isfinite(pa_deg)
 		pa_deg_for_kc = np.where(kc_source_mask, pa_deg, np.nan)
 		if np.sum(np.isfinite(pa_deg_for_kc)) < 2:
 			pa_deg_for_kc = np.where(np.isfinite(pa_deg), pa_deg, np.nan)

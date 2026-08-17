@@ -25,6 +25,7 @@ from frbop.utils.peaks import (select_frequency_bands_manual,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import (FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize,
                                   savefig_rasterized)
+from frbop.utils.significance import l_significance_mask, snr_mask_with_fallback
 
 from .constants import plot_style
 from .fitter import RMFitter
@@ -501,11 +502,7 @@ def plot_poincare_sphere(
 	if rm_results is not None and 'valid_bins' in rm_results:
 		mask = np.ones(q_norm.shape[0], dtype=bool)
 	else:
-		mask = snr > snr_threshold
-		if np.nansum(mask) < 2:
-			print(f"Warning: Only {np.nansum(mask)} points above SNR threshold "
-				  f"{snr_threshold:.1f}. Lowering to 2.0.")
-			mask = snr > 2.0
+		mask = snr_mask_with_fallback(snr, primary_threshold=snr_threshold, fallback_threshold=2.0, min_points=2)
 		if np.nansum(mask) < 2:
 			print("Error: fewer than 2 points survive SNR cut. Cannot plot.")
 			return
@@ -1494,9 +1491,7 @@ def plot_poincare_sphere_subbands(
 		sigma_pol = np.nanstd(pol_arr[:n_frac])
 		sigma_pol = sigma_pol if (np.isfinite(sigma_pol) and sigma_pol > 0) else 1e-10
 		snr = pol_arr / (sigma_pol + 1e-10)
-		mask = snr > 5.0
-		if np.nansum(mask) < 2:
-			mask = snr > 2.0
+		mask = snr_mask_with_fallback(snr, primary_threshold=5.0, fallback_threshold=2.0, min_points=2)
 		if np.nansum(mask) < 2:
 			print(f"Warning: band {band_idx + 1} has too few SNR points; skipping.")
 			continue
@@ -1850,9 +1845,7 @@ def plot_poincare_projections(
 	if rm_results is not None and 'valid_bins' in rm_results:
 		mask = np.ones(q_norm.shape[0], dtype=bool)
 	else:
-		mask = snr > snr_threshold
-		if np.nansum(mask) < 2:
-			mask = snr > 2.0
+		mask = snr_mask_with_fallback(snr, primary_threshold=snr_threshold, fallback_threshold=2.0, min_points=2)
 		if np.nansum(mask) < 2:
 			print("Error: fewer than 2 points survive SNR cut in projections.")
 			return
@@ -3083,7 +3076,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 
 	pa_mask = np.isfinite(pol_angle_deg) & np.isfinite(pa_sigma_deg)
 	pa_mask &= np.isfinite(l_meas) & np.isfinite(sigma_l) & (sigma_l > 0)
-	pa_mask &= l_meas >= (2.0 * sigma_l)
+	pa_mask &= l_significance_mask(l_meas, sigma_l)
 	if valid_mask_arr is not None and valid_mask_arr.shape == i_vals.shape:
 		pa_mask &= valid_mask_arr
 	else:
