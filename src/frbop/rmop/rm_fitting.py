@@ -104,7 +104,7 @@ def main() -> None:
     parser.add_argument("--time-series", action="store_true", help="Process as time series data")
     parser.add_argument("--time-avg", action="store_true", help="Average over time axis for 2D data")
     parser.add_argument(
-        "-tscr", "--tscrunch",
+        "-tscr", "--tscrunch", "-ts",
         type=int,
         default=1,
         help="Time scrunch factor applied before peak finding and RM fitting (average every N time bins)",

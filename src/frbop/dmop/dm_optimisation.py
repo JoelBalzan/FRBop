@@ -9,7 +9,8 @@ from astropy import units as u
 
 from frbop.utils.peaks import parse_peak_index_pairs
 from frbop.utils.plotting import set_pub_col, set_pub_style
-from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
+from frbop.utils.scrunch import (fscrunch_array, fscrunch_freq,
+                                 rescale_peak_indices, tscrunch_array)
 from frbop.utils.stokes_io import (derive_axes_from_metadata,
                                    extract_stokes_components,
                                    load_stokes_cube_from_npz)
@@ -88,7 +89,7 @@ def parse_args() -> argparse.Namespace:
 		help="Path to time array numpy file [ms]",
 	)
 	parser.add_argument(
-		"--tscrunch",
+		"--tscrunch", "-ts",
 		nargs="*",
 		type=int,
 		default=None,
@@ -96,6 +97,13 @@ def parse_args() -> argparse.Namespace:
 		"Give one value for a global scrunch of the full dataset (default: 1 = none), or one "
 		"value per component (must equal the number of peak regions) to apply different factors. "
 		"--peak-indices are in the original time resolution and are scaled automatically.",
+	)
+	parser.add_argument(
+		"--fscrunch", "-fs",
+		type=int,
+		default=None,
+		help="Frequency scrunch factor applied before optimisation: average every N frequency channels. "
+		"The frequency axis is averaged accordingly. (default: 1 = none)",
 	)
 	parser.add_argument(
 		"--dm-min",
@@ -335,6 +343,10 @@ def main():
 			raise ValueError(f"--tscrunch values must be >= 1, got {f}")
 	per_component_scrunch = len(factors) > 1
 
+	if args.fscrunch is not None:
+		if args.fscrunch < 1:
+			raise ValueError(f"--fscrunch must be >= 1, got {args.fscrunch}")
+
 	all_error_plot_targets = {
 		"comparison-summary",
 		"comparison-scan",
@@ -379,6 +391,8 @@ def main():
 		print(f"  - Time scrunch factors (per component): {factors}")
 	elif factors[0] > 1:
 		print(f"  - Time scrunch factor: {factors[0]}")
+	if args.fscrunch and args.fscrunch > 1:
+		print(f"  - Frequency scrunch factor: {args.fscrunch}")
 	print(f"  - PA weight strength: {args.pa_weight_strength}")
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
 	print(f"  - PA min run: {args.pa_min_run}")
@@ -480,6 +494,20 @@ def main():
 		print("\nWarning: both --stokes-q and --stokes-u are required to run Q/U-based metrics. Skipping them.")
 		stokes_q = None
 		stokes_u = None
+
+	fs_factor = int(args.fscrunch) if args.fscrunch else 1
+	if fs_factor > 1:
+		print(f"\nScrunching in frequency by factor {fs_factor}...")
+		n_freq_orig = freq_mhz.size
+		stokes_i = fscrunch_array(stokes_i, fs_factor)
+		if stokes_q is not None:
+			stokes_q = fscrunch_array(stokes_q, fs_factor)
+		if stokes_u is not None:
+			stokes_u = fscrunch_array(stokes_u, fs_factor)
+		if stokes_v is not None:
+			stokes_v = fscrunch_array(stokes_v, fs_factor)
+		freq_mhz = fscrunch_freq(freq_mhz, fs_factor)
+		print(f"  Frequency channels: {n_freq_orig} -> {freq_mhz.size}")
 
 	if not per_component_scrunch and factors[0] > 1:
 		print(f"\nScrunching in time by factor {factors[0]} (pre-optimisation)...")

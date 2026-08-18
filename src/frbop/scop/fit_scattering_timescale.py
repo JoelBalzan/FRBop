@@ -53,7 +53,7 @@ def main():
     )
     parser.add_argument("--smooth", type=int, default=5, help="Smoothing window for time series (bins)")
     parser.add_argument(
-        "-tscr", "--tscrunch",
+        "-tscr", "--tscrunch", "-ts",
         type=int,
         default=1,
         help="Time scrunch factor applied before burst finding and scattering fits (average every N time bins)",
