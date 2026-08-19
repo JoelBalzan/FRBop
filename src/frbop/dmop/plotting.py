@@ -395,7 +395,45 @@ class PlottingMixin:
 			scan_ax = axes[idx, 2]
 			dm_vals = result.get('dm_values')
 			metric_vals = result.get('metric_values')
-			if dm_vals is not None and metric_vals is not None:
+			kc_vals = result.get('kc_values')
+			if method_name == 'min_uncertainty' and kc_vals is not None and metric_vals is not None:
+				kc_low = result.get('kc_uncertainty_low')
+				kc_high = result.get('kc_uncertainty_high')
+				kc_opt_idx = result.get('kc_optimal_idx')
+				if kc_low is not None and kc_high is not None:
+					kc_low = np.asarray(kc_low, dtype=float)
+					kc_high = np.asarray(kc_high, dtype=float)
+					scan_ax.fill_between(
+						kc_vals, kc_low, kc_high,
+						color='tab:orange', alpha=0.18,
+						label=r'$\delta$ DM' if show_scan_legend else None,
+					)
+					scan_ax.plot(kc_vals, kc_low, '--', color='tab:orange', linewidth=1.0, alpha=0.7)
+					scan_ax.plot(kc_vals, kc_high, '--', color='tab:orange', linewidth=1.0, alpha=0.7)
+				scan_ax.plot(
+					kc_vals, dm_vals,
+					linewidth=2.0, color='black',
+					label='Best DM' if show_scan_legend else None,
+				)
+				if kc_opt_idx is not None:
+					scan_ax.axvline(
+						kc_vals[int(kc_opt_idx)], color='red', linestyle='--', linewidth=1.4, alpha=0.9,
+						label='Optimal kc' if show_scan_legend else None,
+					)
+				scan_ax.set_xlabel(r'$k_c$')
+				scan_ax.set_ylabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
+				scan_ax.set_xlim(kc_vals[0], kc_vals[-1])
+				scan_ax.grid(True, alpha=0.3)
+				scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+				scan_ax.xaxis.label.set_size(fs_label)
+				scan_ax.yaxis.label.set_size(fs_label)
+				scan_ax.xaxis.labelpad = fs_labelpad
+				scan_ax.yaxis.labelpad = fs_labelpad
+				scan_ax.tick_params(axis='both', labelsize=fs_tick)
+				if show_scan_legend:
+					scan_ax.legend(loc='upper left', fontsize=fs_legend)
+					show_scan_legend = False
+			elif dm_vals is not None and metric_vals is not None:
 				show_scan_for_method = show_scan_uncertainty and (method_name not in disabled)
 				if show_scan_for_method:
 					low_dm = result.get('uncertainty_low_dm')
@@ -718,7 +756,29 @@ class PlottingMixin:
 			m_ax = axes[row, 2]
 			dm_vals = res.get('dm_values')
 			met_vals = res.get('metric_values')
-			if dm_vals is not None and met_vals is not None and len(met_vals) > 0:
+			kc_vals = res.get('kc_values')
+			if method_key == 'min_uncertainty' and kc_vals is not None and met_vals is not None and len(met_vals) > 0:
+				kc_low = res.get('kc_uncertainty_low')
+				kc_high = res.get('kc_uncertainty_high')
+				kc_opt_idx = res.get('kc_optimal_idx')
+				if kc_low is not None and kc_high is not None:
+					kc_low = np.asarray(kc_low, dtype=float)
+					kc_high = np.asarray(kc_high, dtype=float)
+					m_ax.fill_between(kc_vals, kc_low, kc_high, color='tab:orange', alpha=0.18, label=r'$\delta$ DM')
+					m_ax.plot(kc_vals, kc_low, '--', color='tab:orange', linewidth=1.0, alpha=0.7)
+					m_ax.plot(kc_vals, kc_high, '--', color='tab:orange', linewidth=1.0, alpha=0.7)
+				m_ax.plot(kc_vals, dm_vals, linewidth=2.0, color='black', label='Best DM')
+				if kc_opt_idx is not None:
+					m_ax.axvline(kc_vals[int(kc_opt_idx)], color='red', linestyle='--', linewidth=1.4,
+								 alpha=0.9, label='Optimal kc')
+				m_ax.set_xlabel(r'$k_c$')
+				m_ax.set_ylabel(r'DM [$\mathrm{pc\,cm}^{{-3}}$]')
+				m_ax.set_xlim(kc_vals[0], kc_vals[-1])
+				m_ax.grid(True, alpha=0.3)
+				m_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+				if seg == 0:
+					m_ax.legend(loc='best', fontsize=fs_legend)
+			elif dm_vals is not None and met_vals is not None and len(met_vals) > 0:
 				if show_errors:
 					low_dm = res.get('uncertainty_low_dm')
 					high_dm = res.get('uncertainty_high_dm')

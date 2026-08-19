@@ -290,6 +290,12 @@ class ComparisonMixin:
 				'uncertainty_high_dm': unc_high_dm,
 				'uncertainty_minus': unc_minus,
 				'uncertainty_plus': unc_plus,
+				'dm_values': np.asarray(best_dm, dtype=float).copy(),
+				'metric_values': np.asarray(unc_ranges, dtype=float).copy(),
+				'kc_values': np.asarray(kc_vals, dtype=float).copy(),
+				'kc_uncertainty_low': np.asarray(low_dm, dtype=float).copy(),
+				'kc_uncertainty_high': np.asarray(high_dm, dtype=float).copy(),
+				'kc_optimal_idx': best_idx,
 			}
 			if has_qu:
 				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
