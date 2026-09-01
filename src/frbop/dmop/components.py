@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from frbop.dmop.common import add_asym
-from frbop.utils.plotting import colour_manager, savefig_rasterized, pub_figsize
+from frbop.utils.plotting import colour_manager, pub_figsize, savefig
 
 
 class ComponentsMixin:
@@ -166,7 +166,7 @@ class ComponentsMixin:
 
 		plt.tight_layout(rect=[0.0, 0.0, 1.0, 0.93])
 		if save_path:
-			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig(save_path, dpi=600, bbox_inches='tight')
 			print(f"Component DM diagnostics saved to: {save_path}")
 		else:
 			plt.show()
@@ -434,7 +434,7 @@ class ComponentsMixin:
 
 		plt.tight_layout()
 		if save_path:
-			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig(save_path, dpi=600, bbox_inches='tight')
 			print(f"Component dn_e diagnostics saved to: {save_path}")
 		else:
 			plt.show()

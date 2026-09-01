@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from itertools import cycle
 from typing import Optional
 
@@ -147,15 +146,10 @@ def set_pub_style(use_latex=False):
     mpl.rcParams.update(rc)
 
 
-def savefig_rasterized(save_path: str,
-                       dpi: int = 300,
+def savefig(save_path: str,
+                       dpi: int = 600,
                        bbox_inches: str = "tight",
                        fig: Optional[plt.Figure] = None) -> None:
-    """Save figure with artists rasterized to keep vector outputs lightweight."""
+    """Save figure as-is (vector) at the requested dpi, without rasterization."""
     out_fig = fig if fig is not None else plt.gcf()
-    for ax in out_fig.axes:
-        for artist in ax.get_children():
-            if hasattr(artist, "set_rasterized"):
-                with contextlib.suppress(Exception):
-                    artist.set_rasterized(True)
     out_fig.savefig(save_path, dpi=dpi, bbox_inches=bbox_inches)

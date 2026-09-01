@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 
 from frbop.utils.plotting import (colour_manager, pub_figsize,
-                                  pub_grid_figsize, savefig_rasterized)
+                                  pub_grid_figsize, savefig)
 
 
 class PlottingMixin:
@@ -501,7 +501,7 @@ class PlottingMixin:
 		fig.subplots_adjust(wspace=0.04, hspace=0.5)
 		
 		if save_path:
-			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig(save_path, dpi=600, bbox_inches='tight')
 			print(f"\nFigure saved to: {save_path}")
 		else:
 			plt.show()
@@ -814,7 +814,7 @@ class PlottingMixin:
 		fig.subplots_adjust(wspace=0.04, hspace=0.5)
 
 		if save_path:
-			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig(save_path, dpi=600, bbox_inches='tight')
 			print(f"\nFigure saved to: {save_path}")
 		else:
 			plt.show()
@@ -999,7 +999,7 @@ class PlottingMixin:
 		plt.tight_layout()
 		
 		if save_path:
-			savefig_rasterized(save_path, dpi=150, bbox_inches='tight')
+			savefig(save_path, dpi=150, bbox_inches='tight')
 			print(f"DM scan plot saved to: {save_path}")
 		else:
 			plt.show()
@@ -1134,7 +1134,7 @@ class PlottingMixin:
 		#fig.suptitle(f'{label} — Structure method')
 		plt.tight_layout()
 		if save_path:
-			savefig_rasterized(save_path, dpi=600, bbox_inches='tight')
+			savefig(save_path, dpi=600, bbox_inches='tight')
 			print(f"Range plot saved to: {save_path}")
 		else:
 			plt.show()

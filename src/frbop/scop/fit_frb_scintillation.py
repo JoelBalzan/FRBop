@@ -28,8 +28,7 @@ from frbop.scop.ne2025 import (estimate_lg_kpc_from_ne2025,
 from frbop.scop.physics import (estimate_ds_kpc_from_redshift,
                                 radec_to_galactic_deg,
                                 scale_scintillation_bandwidth)
-from frbop.scop.plotting import (compute_modulation_index,
-                                 plot_acf_fit,
+from frbop.scop.plotting import (compute_modulation_index, plot_acf_fit,
                                  plot_lorentzian_diagnostics,
                                  plot_modulation_index,
                                  plot_scintillation_band_power_law,
@@ -39,8 +38,7 @@ from frbop.scop.two_screen import print_two_screen_results, two_screen_estimate
 from frbop.utils.peaks import (measure_fwhm_region, parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
-from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
-                                  set_pub_col, set_pub_style)
+from frbop.utils.plotting import (set_pub_col, set_pub_style)
 
 # ---------------------------------------------------------------------------
 # Main

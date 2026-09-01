@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
 from frbop.utils.peaks import select_peaks_manual
-from frbop.utils.plotting import pub_figsize, savefig_rasterized
+from frbop.utils.plotting import pub_figsize, savefig
 
 
 class PeaksMixin:
@@ -51,7 +51,7 @@ class PeaksMixin:
 			plt.grid(True, alpha=0.3)
 			plt.legend()
 			plt.tight_layout()
-			savefig_rasterized(diagnostics_path, dpi=150, bbox_inches='tight')
+			savefig(diagnostics_path, dpi=150, bbox_inches='tight')
 			plt.close()
 		
 		if len(peaks) == 0:

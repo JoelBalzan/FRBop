@@ -11,9 +11,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.fftpack import dct
 
-from frbop.utils.plotting import pub_figsize, savefig_rasterized
+from frbop.utils.plotting import pub_figsize, savefig
 
 from .common import shrine_get_kc, shrine_lowpass_smooth
+
 
 class ShrineMixin:
 	def apply_kc_lowpass_2d(self, data_2d: np.ndarray, kc: int) -> np.ndarray:
@@ -273,7 +274,7 @@ class ShrineMixin:
 		plt.grid(True, alpha=0.3)
 		plt.legend(loc='best')
 		plt.tight_layout()
-		savefig_rasterized(run_dir / f"{run_prefix}_{metric_name}_v_DM.png", dpi=150, bbox_inches='tight')
+		savefig(run_dir / f"{run_prefix}_{metric_name}_v_DM.png", dpi=150, bbox_inches='tight')
 		plt.close()
 
 		# I profile at best DM
@@ -285,7 +286,7 @@ class ShrineMixin:
 		plt.title(f"{method_label}: I at best DM")
 		plt.grid(True, alpha=0.3)
 		plt.tight_layout()
-		savefig_rasterized(run_dir / f"{run_prefix}_I_at_max.png", dpi=150, bbox_inches='tight')
+		savefig(run_dir / f"{run_prefix}_I_at_max.png", dpi=150, bbox_inches='tight')
 		plt.close()
 
 		with open(run_dir / f"{run_prefix}_summaryfile.txt", "w") as summary_file:

@@ -1,9 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
-                                   set_pub_col)
 from frbop.utils.peaks import parse_peak_index_pairs
+from frbop.utils.plotting import IBM_PALETTE, pub_figsize, savefig, set_pub_col
 
 
 def plot_time_lag_correlation(lags_seconds, Cx, Cy, lags_seconds_y=None,
@@ -19,7 +18,7 @@ def plot_time_lag_correlation(lags_seconds, Cx, Cy, lags_seconds_y=None,
     ax.set_ylabel("C(τ)")
     ax.legend(fontsize=8)
     if output:
-        savefig_rasterized(f"{output}_time_lag_correlation.{ext}")
+        savefig(f"{output}_time_lag_correlation.{ext}")
     plt.close(fig)
 
 
@@ -36,7 +35,7 @@ def plot_epsilon(lags_seconds, eps_x, eps_y, candidates=None,
     ax.set_ylabel("ε(τ)")
     ax.legend(fontsize=8)
     if output:
-        savefig_rasterized(f"{output}_epsilon.{ext}")
+        savefig(f"{output}_epsilon.{ext}")
     plt.close(fig)
 
 
@@ -61,7 +60,7 @@ def plot_bin_summary(candidates, edges, output=None, ext="png"):
                          fontsize=7, ha="center", va="bottom")
 
     if output:
-        savefig_rasterized(f"{output}_bin_summary.{ext}")
+        savefig(f"{output}_bin_summary.{ext}")
     plt.close(fig)
 
 
@@ -80,7 +79,7 @@ def plot_polarization_scatter(eps_x, eps_y, candidates=None,
     ax.set_aspect("equal")
     ax.legend(fontsize=8)
     if output:
-        savefig_rasterized(f"{output}_polarization_scatter.{ext}")
+        savefig(f"{output}_polarization_scatter.{ext}")
     plt.close(fig)
 
 
@@ -101,5 +100,5 @@ def plot_chi2_vs_lag(lags_seconds, chi2, edges, bin_idx,
     ax.set_ylabel("χ²")
     ax.legend(fontsize=7, ncol=2)
     if output:
-        savefig_rasterized(f"{output}_chi2_vs_lag.{ext}")
+        savefig(f"{output}_chi2_vs_lag.{ext}")
     plt.close(fig)

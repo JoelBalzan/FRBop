@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
-from frbop.utils.plotting import (pub_grid_figsize, savefig_rasterized,
-                                  set_pub_col, set_pub_style)
+from frbop.utils.plotting import (pub_grid_figsize, savefig, set_pub_col,
+                                  set_pub_style)
 
 
 def plot_stokes_cube_summary(
@@ -261,7 +261,7 @@ def plot_stokes_cube_summary(
             ax_spec.spines[spine].set_visible(False)
 
     if output_file:
-        savefig_rasterized(output_file, dpi=300, fig=fig)
+        savefig(output_file, dpi=600, fig=fig)
 
     if show:
         plt.show()

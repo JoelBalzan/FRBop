@@ -7,13 +7,12 @@ from scipy.optimize import curve_fit
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
 from frbop.scop.plotting import (plot_pa_summary, plot_subband_diagnostic,
-                                  plot_subband_diagnostic_pa,
-                                  plot_subband_pa)
+                                 plot_subband_diagnostic_pa, plot_subband_pa)
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
-from frbop.utils.plotting import (pub_figsize, savefig_rasterized, set_pub_col,
+from frbop.utils.plotting import (pub_figsize, savefig, set_pub_col,
                                   set_pub_style)
 from frbop.utils.scrunch import rescale_peak_indices, tscrunch_array
 
@@ -271,12 +270,16 @@ def main():
         # Combined subband diagnostic + PA plot (when Stokes data is available)
         pa_band_info = None
         if band_regions is not None and fit_details is not None and len(fit_details['freq']) > 0 and has_stokes and burst_ds_q is not None and burst_ds_u is not None:
+            plot_subband_diagnostic(
+                fit_details, t_burst_plot, args.output,
+                scattering_index, fitted_index_err, tau_at_ref, ref_freq,
+            )
             sorted_bands = sorted(
                 [(float(np.nanmean(freq[lo:hi])), lo, hi) for lo, hi in band_regions if hi > lo],
                 key=lambda x: -x[0],
             )
             pa_band_info = plot_subband_diagnostic_pa(
-                fit_details, t_burst_plot, fig_width, args.output,
+                fit_details, t_burst_plot, args.output,
                 scattering_index, fitted_index_err, tau_at_ref, ref_freq,
                 sorted_bands, burst_ds, burst_ds_q, burst_ds_u,
                 freq, ds, ntime,
@@ -286,7 +289,7 @@ def main():
             plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
         elif band_regions is not None and fit_details is not None and len(fit_details['freq']) > 0:
             plot_subband_diagnostic(
-                fit_details, t_burst_plot, fig_width, args.output,
+                fit_details, t_burst_plot, args.output,
                 scattering_index, fitted_index_err, tau_at_ref, ref_freq,
             )
         elif band_regions is not None and has_stokes and burst_ds_q is not None and burst_ds_u is not None:
@@ -401,7 +404,7 @@ def main():
                 ax.legend(loc='best')
                 ax.grid(True, alpha=0.3)
                 plt.tight_layout()
-                savefig_rasterized(args.output, dpi=300, fig=fig)
+                savefig(args.output, dpi=600, fig=fig)
                 print(f"Plot saved to {args.output}")
 
         except Exception as e:

@@ -11,8 +11,25 @@ from frbop.scop.fit_utils import _decode_lorentzian_components
 from frbop.scop.models import (lorentzian, lorentzian_2c, lorentzian_3c,
                                scattered_gaussian)
 from frbop.scop.power import correct_spectrum_powerlaw
-from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, savefig_rasterized,
+from frbop.utils.plotting import (IBM_PALETTE, pub_figsize, pub_width, savefig,
                                   set_pub_col, set_pub_style)
+
+PA_PROFILE_COLOR = "#009e73"
+
+
+def _pa_profile_colour(n_bands: int):
+    """Return the PA profile colour, offset from the IBM band palette when <=4 bands."""
+    if n_bands <= 4:
+        return IBM_PALETTE[n_bands % len(IBM_PALETTE)]
+    return PA_PROFILE_COLOR
+
+
+def _band_colours(n_bands: int):
+    """Return a per-band colour list using the IBM palette for <=4 bands."""
+    if n_bands <= 4:
+        return [IBM_PALETTE[i % len(IBM_PALETTE)] for i in range(n_bands)]
+    cmap = plt.get_cmap("tab10" if n_bands <= 10 else "viridis", n_bands)
+    return [cmap(i) for i in range(n_bands)]
 
 
 def _apply_publication_style() -> dict:
@@ -78,8 +95,8 @@ def plot_spectrum_powerlaw_fit(
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + '_spectrum_powerlaw' + (ext if ext else '.png')
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + '_spectrum_powerlaw' + (ext if ext else '.pdf')
+        savefig(out, dpi=600, fig=fig)
         print(f"Saved spectrum power-law plot to {out}")
     else:
         plt.show()
@@ -192,7 +209,7 @@ def plot_lorentzian_diagnostics(
     if output:
         base, ext = os.path.splitext(output)
         out = base + '_lorentzian_diagnostics' + (ext if ext else '.pdf')
-        savefig_rasterized(out, dpi=300, fig=fig)
+        savefig(out, dpi=600, fig=fig)
         print(f"Saved Lorentzian diagnostics plot to {out}")
     else:
         plt.show()
@@ -368,8 +385,8 @@ def plot_scintillation_band_power_law(
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + '_scint_bw_powerlaw' + (ext if ext else '.png')
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + '_scint_bw_powerlaw' + (ext if ext else '.pdf')
+        savefig(out, dpi=600, fig=fig)
         print(f"Saved scintillation bandwidth power-law plot to {out}")
     else:
         plt.show()
@@ -379,7 +396,6 @@ def plot_scintillation_band_power_law(
 def plot_subband_diagnostic(
     fit_details,
     t_burst,
-    fig_width,
     output,
     scattering_index,
     fitted_index_err,
@@ -388,8 +404,10 @@ def plot_subband_diagnostic(
 ):
     """Two-column subband diagnostic: per-band profiles (left) and τ vs frequency (right)."""
     n_bands = len(fit_details["freq"])
-    fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
+    fig = plt.figure(figsize=(pub_width(ncol=1), max(4, n_bands * 1.5)))
     gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
+
+    colours = _band_colours(n_bands)
 
     ax_left = None
     for i in range(n_bands):
@@ -404,6 +422,7 @@ def plot_subband_diagnostic(
         tau_err = fit_details["tau_err"][i]
         freq_val = fit_details["freq"][i]
         fit_curve = scattered_gaussian(t_burst, *popt)
+        band_color = colours[i]
 
         tau_label = (
             f"$\\tau={tau_val:.3f}\\pm{tau_err:.3f}$ ms"
@@ -411,7 +430,7 @@ def plot_subband_diagnostic(
             else f"$\\tau={tau_val:.3f}$ ms"
         )
         ax.plot(t_burst, profile, "k-", linewidth=1.0)
-        ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
+        ax.plot(t_burst, fit_curve, color=band_color, linewidth=1.5, label=tau_label)
         ax.set_ylabel(r"S [arb.]")
         ax.set_yticklabels([])
         ax.set_ylim(bottom=np.nanmin(profile) * 1.1, top=np.nanmax(profile) * 1.3)
@@ -426,33 +445,34 @@ def plot_subband_diagnostic(
     ax_tau = fig.add_subplot(gs[:, 1])
     band_freqs = np.array(fit_details["freq"])
     band_taus = np.array(fit_details["tau"])
-    ax_tau.plot(band_freqs, band_taus, "ko", markersize=4, label="Measured $\\tau$")
+    for i in range(n_bands):
+        ax_tau.plot(band_freqs[i], band_taus[i], "o", color=colours[i], markersize=4,
+                    label=f"{band_freqs[i]:.1f} MHz")
     freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
     tau_grid = tau_at_ref * (freq_grid / ref_freq) ** scattering_index
     ax_tau.plot(
         freq_grid,
         tau_grid,
-        "b-",
+        "k-",
         linewidth=1.5,
         label=f"α={scattering_index:.2f}±{fitted_index_err:.2f}",
     )
     ax_tau.set_xlabel("Frequency [MHz]")
     ax_tau.set_ylabel("τ [ms]")
-    ax_tau.legend()
+    ax_tau.legend(fontsize=7, ncol=2)
     ax_tau.grid(True, alpha=0.3)
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + "_subbands" + (ext if ext else ".png")
-        savefig_rasterized(out, dpi=300, fig=fig)
-        print(f"Subband diagnostic plot saved to {out}")
+        out = base + "_subbands" + (ext if ext else ".pdf")
+        savefig(out, dpi=600, fig=fig)
+        print(f"Scattering fit subband diagnostic plot saved to {out}")
     plt.close(fig)
 
 
 def plot_subband_diagnostic_pa(
     fit_details,
     t_burst,
-    fig_width,
     output,
     scattering_index,
     fitted_index_err,
@@ -483,8 +503,10 @@ def plot_subband_diagnostic_pa(
         )
 
     n_bands = len(band_rows)
-    fig = plt.figure(figsize=(fig_width * 2, max(4, n_bands * 1.5)))
+    fig = plt.figure(figsize=(pub_width(ncol=1), max(4, n_bands * 1.5)))
     gs = plt.GridSpec(n_bands, 2, width_ratios=[1, 1], hspace=0.3, wspace=0.35)
+
+    colours = _band_colours(n_bands)
 
     ax_share = None
     twin_axes = []
@@ -493,6 +515,7 @@ def plot_subband_diagnostic_pa(
 
     for i, (freq_val, lo, hi) in enumerate(band_rows):
         fit_info = fit_rows[i] if i < len(fit_rows) else None
+        band_color = colours[i]
         prof_i = np.nanmean(burst_ds[lo:hi, :], axis=0)
         q_prof = np.nanmean(burst_ds_q[lo:hi, :], axis=0)
         u_prof = np.nanmean(burst_ds_u[lo:hi, :], axis=0)
@@ -541,19 +564,20 @@ def plot_subband_diagnostic_pa(
                 else f"$\\tau={tau_j:.3f}$ ms"
             )
             fit_curve = scattered_gaussian(t_burst, *popt_j)
-            ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
+            ax.plot(t_burst, fit_curve, color=band_color, linewidth=1.5, label=tau_label)
 
         ax_twin = ax.twinx()
-        ax_twin.errorbar(
-            t_burst,
-            pa_masked,
-            yerr=pa_err_deg,
-            fmt='.',
-            color=IBM_PALETTE[0],
-            markersize=2,
-            elinewidth=0.6,
-            capsize=0,
-            alpha=0.7,
+        pa_colour = _pa_profile_colour(n_bands)
+        pa_finite = np.isfinite(pa_masked) & np.isfinite(pa_err_deg)
+        ax_twin.plot(t_burst[pa_finite], pa_masked[pa_finite], color=pa_colour,
+                     linewidth=1.0, alpha=0.9)
+        ax_twin.fill_between(
+            t_burst[pa_finite],
+            pa_masked[pa_finite] - pa_err_deg[pa_finite],
+            pa_masked[pa_finite] + pa_err_deg[pa_finite],
+            color=pa_colour,
+            alpha=0.25,
+            linewidth=0,
         )
         ax_twin.set_ylabel("PA [deg.]")
         twin_axes.append(ax_twin)
@@ -585,25 +609,27 @@ def plot_subband_diagnostic_pa(
     ax_tau = fig.add_subplot(gs[:, 1])
     band_freqs = np.array(fit_details["freq"])
     band_taus = np.array(fit_details["tau"])
-    ax_tau.plot(band_freqs, band_taus, "ko", markersize=4, label="Measured $\\tau$")
+    for i in range(n_bands):
+        ax_tau.plot(band_freqs[i], band_taus[i], "o", color=colours[i], markersize=4,
+                    label=f"{band_freqs[i]:.1f} MHz")
     freq_grid = np.linspace(band_freqs.min(), band_freqs.max(), 200)
     tau_grid = tau_at_ref * (freq_grid / ref_freq) ** scattering_index
     ax_tau.plot(
         freq_grid,
         tau_grid,
-        "b-",
+        "k-",
         linewidth=1.5,
         label=f"α={scattering_index:.2f}±{fitted_index_err:.2f}",
     )
     ax_tau.set_xlabel("Frequency [MHz]")
     ax_tau.set_ylabel("τ [ms]")
-    ax_tau.legend()
+    ax_tau.legend(fontsize=7, ncol=2)
     ax_tau.grid(True, alpha=0.3)
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + "_subbands_diagnostic_pa" + (ext if ext else ".png")
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + "_subbands_diagnostic_pa" + (ext if ext else ".pdf")
+        savefig(out, dpi=600, fig=fig)
         print(f"Subband diagnostic PA plot saved to {out}")
     plt.close(fig)
     return pa_band_info
@@ -645,15 +671,18 @@ def plot_subband_pa(
         )
 
     n_bands = len(band_rows)
-    fig = plt.figure(figsize=(fig_width, max(4, n_bands * 1.5)), constrained_layout=False)
+    fig = plt.figure(figsize=(fig_width * 0.85, max(4, n_bands * 2.0)), constrained_layout=False)
     gs = plt.GridSpec(n_bands, 1, hspace=0)
     ax_share = None
     twin_axes = []
     pa_smoothed = []
     pa_band_info = []
 
+    cmap = _band_colours(n_bands)
+
     for i, (freq_val, lo, hi) in enumerate(band_rows):
         fit_info = fit_rows[i] if i < len(fit_rows) else None
+        band_color = cmap[i]
         prof_i = np.nanmean(burst_ds[lo:hi, :], axis=0)
         q_prof = np.nanmean(burst_ds_q[lo:hi, :], axis=0)
         u_prof = np.nanmean(burst_ds_u[lo:hi, :], axis=0)
@@ -708,19 +737,20 @@ def plot_subband_pa(
                 else f"$\\tau={tau_j:.3f}$ ms"
             )
             fit_curve = scattered_gaussian(t_burst, *popt_j)
-            ax.plot(t_burst, fit_curve, color=IBM_PALETTE[2], linewidth=1.5, label=tau_label)
+            ax.plot(t_burst, fit_curve, color=band_color, linewidth=1.5, label=tau_label)
 
         ax_twin = ax.twinx()
-        ax_twin.errorbar(
-            t_burst,
-            pa_masked,
-            yerr=pa_err_deg,
-            fmt='.',
-            color=IBM_PALETTE[0],
-            markersize=2,
-            elinewidth=0.6,
-            capsize=0,
-            alpha=0.7,
+        pa_colour = _pa_profile_colour(n_bands)
+        pa_finite = np.isfinite(pa_masked) & np.isfinite(pa_err_deg)
+        ax_twin.plot(t_burst[pa_finite], pa_masked[pa_finite], color=pa_colour,
+                     linewidth=1.0, alpha=0.9)
+        ax_twin.fill_between(
+            t_burst[pa_finite],
+            pa_masked[pa_finite] - pa_err_deg[pa_finite],
+            pa_masked[pa_finite] + pa_err_deg[pa_finite],
+            color=pa_colour,
+            alpha=0.25,
+            linewidth=0,
         )
         ax_twin.set_ylabel("PA [deg.]")
         twin_axes.append(ax_twin)
@@ -751,8 +781,8 @@ def plot_subband_pa(
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + "_subbands_pa" + (ext if ext else ".png")
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + "_subbands_pa" + (ext if ext else ".pdf")
+        savefig(out, dpi=600, fig=fig)
         print(f"Subband PA plot saved to {out}")
     plt.close(fig)
     return pa_band_info
@@ -763,34 +793,36 @@ def plot_pa_summary(pa_band_info, t_burst, fig_width, output):
     if not pa_band_info:
         return
     pa_band_info_sorted = sorted(pa_band_info, key=lambda x: -x[0])
-    fig = plt.figure(figsize=(fig_width, fig_width * 0.6))
+    fig = plt.figure(figsize=(fig_width, fig_width))
     ax = fig.add_subplot(111)
-    cmap = plt.get_cmap("plasma", len(pa_band_info_sorted))
+    colours = _band_colours(len(pa_band_info_sorted))
     for k, band_info in enumerate(pa_band_info_sorted):
+        color = colours[k]
         if len(band_info) == 3:
             fv, pa_vals, pa_errs = band_info
-            ax.errorbar(
-                t_burst,
-                pa_vals,
-                yerr=pa_errs,
-                color=cmap(k),
-                linewidth=1.0,
-                elinewidth=0.7,
-                capsize=1.5,
-                alpha=0.9,
-                label=f"{fv:.0f} MHz",
-            )
+            finite = np.isfinite(pa_vals) & np.isfinite(pa_errs)
+            if np.any(finite):
+                ax.plot(t_burst[finite], pa_vals[finite], color=color, linewidth=1.0,
+                        label=f"{fv:.1f} MHz")
+                ax.fill_between(
+                    t_burst[finite],
+                    pa_vals[finite] - pa_errs[finite],
+                    pa_vals[finite] + pa_errs[finite],
+                    color=color,
+                    alpha=0.25,
+                    linewidth=0,
+                )
         else:
             fv, pa_vals = band_info
-            ax.plot(t_burst, pa_vals, color=cmap(k), linewidth=1.0, label=f"{fv:.0f} MHz")
+            ax.plot(t_burst, pa_vals, color=color, linewidth=1.0, label=f"{fv:.1f} MHz")
     ax.set_xlabel("Time [ms]")
     ax.set_ylabel("PA [deg.]")
     ax.legend(loc="best", ncol=2, fontsize=8)
     ax.grid(True, alpha=0.3)
     if output:
         base, ext = os.path.splitext(output)
-        out = base + "_pa_summary" + (ext if ext else ".png")
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + "_pa_summary" + (ext if ext else ".pdf")
+        savefig(out, dpi=600, fig=fig)
         print(f"PA summary plot saved to {out}")
     plt.close(fig)
 
@@ -824,7 +856,7 @@ def plot_cn2_profile(s, cn2, ldeg, bdeg, lg_peak, lg_eff_kpc, output=None):
     if output:
         base, ext = os.path.splitext(output)
         out = base + "_Cn2" + (ext if ext else ".pdf")
-        savefig_rasterized(out, dpi=300, fig=fig)
+        savefig(out, dpi=600, fig=fig)
         print(f"Saved Cn2 profile plot to {out}")
     else:
         plt.show()
@@ -890,7 +922,7 @@ def plot_acf_fit(
     ax.legend(fontsize=8, loc="upper right")
     plt.tight_layout()
     if output:
-        savefig_rasterized(output, dpi=300, fig=fig)
+        savefig(output, dpi=600, fig=fig)
         print(f"\nSaved spectrum+ACF plot to {output}")
     else:
         plt.show()
@@ -1181,8 +1213,8 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
 
     if output:
         base, ext = os.path.splitext(output)
-        out = base + '_modulation' + (ext if ext else '.png')
-        savefig_rasterized(out, dpi=300, fig=fig)
+        out = base + '_modulation' + (ext if ext else '.pdf')
+        savefig(out, dpi=600, fig=fig)
         print(f"Modulation index plot saved to {out}")
     else:
         plt.show()

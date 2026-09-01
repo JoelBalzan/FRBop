@@ -24,8 +24,9 @@ from frbop.utils.peaks import (select_frequency_bands_manual,
                                split_frequency_bands_equal,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import (FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize,
-                                  savefig_rasterized)
-from frbop.utils.significance import l_significance_mask, snr_mask_with_fallback
+                                  savefig)
+from frbop.utils.significance import (l_significance_mask,
+                                      snr_mask_with_fallback)
 
 from .constants import plot_style
 from .fitter import RMFitter
@@ -37,11 +38,11 @@ from .physics import (depolarising_medium_delta_ne_b_parallel,
 # Internal save wrapper
 # ---------------------------------------------------------------------------
 
-def _savefig_rasterized(save_path: str,
+def _savefig(save_path: str,
 						dpi: int = 300,
 						bbox_inches: str = 'tight') -> None:
 	"""Compatibility wrapper for rasterized plot saving used in RM plotting."""
-	savefig_rasterized(save_path, dpi=dpi, bbox_inches=bbox_inches)
+	savefig(save_path, dpi=dpi, bbox_inches=bbox_inches)
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +668,7 @@ def plot_poincare_sphere(
 	plt.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
 	if interactive:
 		plt.show()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Poincaré sphere plot saved to {output_file}")
 	plt.close()
 
@@ -902,7 +903,7 @@ def plot_poincare_sphere_frequency(
 
 	plt.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
 	fig.canvas.draw()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	if interactive:
 		plt.show()
 	print(f"Poincare frequency sphere plot saved to {output_file}")
@@ -1313,7 +1314,7 @@ def plot_poincare_projections_frequency(
 	cb.set_label("Frequency [MHz]", fontsize=style['label'])
 	cb.ax.tick_params(labelsize=style['tick'])
 
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Poincare frequency projection panel saved to {output_file}")
 	plt.close()
 
@@ -1697,7 +1698,7 @@ def plot_poincare_sphere_subbands(
 	plt.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
 	if interactive:
 		plt.show()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Poincaré subband sphere plot saved to {output_file}")
 	plt.close()
 
@@ -2116,7 +2117,7 @@ def plot_poincare_projections(
 	cb.set_label(color_label, fontsize=style['label'])
 	cb.ax.tick_params(labelsize=style['tick'])
 
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Poincaré projection panel saved to {output_file}")
 	plt.close()
 
@@ -2709,7 +2710,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 		for col in range(n_peaks):
 			axes[0, col].set_xlim(tlo, thi)
 
-	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
+	_savefig(output_file, dpi=600, bbox_inches=None)
 	print(f"Time series plot saved to {output_file}")
 	plt.close()
 
@@ -2970,7 +2971,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	if show_full_time and full_time is not None and len(full_time) > 1:
 		ax_pa.set_xlim(full_time[0] * 1e3, full_time[-1] * 1e3)
 
-	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
+	_savefig(output_file, dpi=600, bbox_inches=None)
 	print(f"Corrected time series plot saved to {output_file}")
 	plt.close()
 
@@ -3198,7 +3199,7 @@ def plot_rm_results(fitter: RMFitter, rm_synthesis_result: Dict,
 		ax3.grid(True, alpha=0.3)
 		ax3.tick_params(axis='both', labelsize=style['tick'])
 
-	_savefig_rasterized(output_file, dpi=600, bbox_inches=None)
+	_savefig(output_file, dpi=600, bbox_inches=None)
 	print(f"Plot saved to {output_file}")
 	plt.close()
 
@@ -3695,7 +3696,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 	ax.tick_params(axis='both', labelsize=style['tick'])
 
 	plt.tight_layout()
-	_savefig_rasterized(output_file, dpi=600, bbox_inches='tight')
+	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Burn-law fit plot saved to {output_file}")
 	plt.close()
 
@@ -3845,6 +3846,6 @@ def plot_polarisation_fraction_acf_ccf(
 	import os as _os
 	stem, ext = _os.path.splitext(output_file)
 	out_file = output_file if ext else f"{output_file}.png"
-	_savefig_rasterized(out_file, dpi=600, bbox_inches='tight')
+	_savefig(out_file, dpi=600, bbox_inches='tight')
 	print(f"Polarisation fraction correlation plot saved to {out_file}")
 	plt.close()
