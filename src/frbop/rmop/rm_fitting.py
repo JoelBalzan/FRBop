@@ -27,6 +27,7 @@ from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_polarisation_fraction_acf_ccf,
                        plot_rm_corrected_time_series, plot_rm_results,
                        plot_rm_time_series)
+from .rm_tau_correlation import plot_rm_tau_correlation
 
 warnings.filterwarnings("ignore")
 
@@ -74,6 +75,10 @@ def main() -> None:
             "  python -m frbop.rmop.cli -i stokes_i.txt -q stokes_q.txt -u stokes_u.txt --freq freq.txt\n\n"
             "  # Fit from .npy files with time averaging\n"
             "  python -m frbop.rmop.cli -i stokes_i.npy -q stokes_q.npy -u stokes_u.npy --time-avg\n\n"
+            "  # Time-avg plus auto-generated RM-tau correlation plot (sigma_RM passed automatically, RM supplied via --rm)\n"
+            "  python -m frbop.rmop.cli -i stokes_i.npy -q stokes_q.npy -u stokes_u.npy --time-avg --rm 81542 --tau 0.5 --tau-err 0.05\n\n"
+            "  # RM-tau plot with tau rescaled from 919.5 MHz to 1300 MHz using the scattering index\n"
+            "  python -m frbop.rmop.cli -i stokes_i.npy -q stokes_q.npy -u stokes_u.npy --time-avg --rm 81542 --tau 0.5 --tau-freq 919.5 --scattering-index -4.19 --scattering-index-err 0.16\n\n"
             "  # Fit with custom RM range\n"
             "  python -m frbop.rmop.cli -i stokes_i.txt -q stokes_q.txt -u stokes_u.txt --rm-range -500 500\n\n"
             "  # Process 2D data as time series\n"
@@ -383,6 +388,63 @@ def main() -> None:
         help="Fraction of Stokes I samples used for offpulse noise estimation (default: 0.10)",
     )
 
+    # RM-tau correlation plot (auto-generated in --time-avg mode)
+    parser.add_argument(
+        "--rm",
+        type=float,
+        default=None,
+        help="Measured rotation measure RM (rad/m^2) for the auto-generated RM-tau correlation plot "
+        "(data is assumed already RM-corrected, so the measured RM is supplied here)",
+    )
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=None,
+        help="Scattering timescale tau (ms) for the auto-generated RM-tau correlation plot",
+    )
+    parser.add_argument(
+        "--tau-err",
+        type=float,
+        default=None,
+        help="Uncertainty on tau (ms) for the RM-tau correlation plot",
+    )
+    parser.add_argument(
+        "--tau-freq",
+        type=float,
+        default=919.5,
+        help="Observing frequency (MHz) of the tau measurement; if given, tau is "
+             "rescaled to --ref-freq (Feng et al. 2022 convention) for the RM-tau plot",
+    )
+    parser.add_argument(
+        "--ref-freq",
+        type=float,
+        default=1300.0,
+        help="Reference frequency (MHz) for tau rescaling (default: 1300)",
+    )
+    parser.add_argument(
+        "--scattering-index",
+        type=float,
+        default=None,
+        help="Scattering index alpha in tau ~ nu**alpha for tau rescaling "
+             "(default: -4)",
+    )
+    parser.add_argument(
+        "--scattering-index-err",
+        type=float,
+        default=None,
+        help="Uncertainty on the scattering index (for error propagation)",
+    )
+    parser.add_argument(
+        "--tau-name",
+        default="This work",
+        help="Legend label for this burst in the RM-tau correlation plot (default: 'This work')",
+    )
+    parser.add_argument(
+        "--no-rm-tau",
+        action="store_true",
+        help="Disable the auto-generated RM-tau correlation plot in --time-avg mode",
+    )
+
     # Physics helpers
     parser.add_argument(
         "--turbulent-radius-pc",
@@ -495,14 +557,17 @@ def main() -> None:
         i_off = stokes_i[:, :n_frac_noise]
         q_off = stokes_q[:, :n_frac_noise]
         u_off = stokes_u[:, :n_frac_noise]
-        v_off = stokes_v[:, :n_frac_noise]
+        v_off = stokes_v[:, :n_frac_noise] if stokes_v is not None else None
 
         sigma_i_chan = np.nanstd(i_off, axis=1)
         sigma_q_chan = np.nanstd(q_off, axis=1)
         sigma_u_chan = np.nanstd(u_off, axis=1)
-        sigma_v_chan = np.nanstd(v_off, axis=1)
+        sigma_v_chan = np.nanstd(v_off, axis=1) if v_off is not None else None
 
-        off_std = np.array([sigma_i_chan, sigma_q_chan, sigma_u_chan, sigma_v_chan])
+        off_std = np.array([
+            sigma_i_chan, sigma_q_chan, sigma_u_chan,
+            sigma_v_chan if sigma_v_chan is not None else np.full_like(sigma_i_chan, np.nan),
+        ])
 
         # Save full 2D arrays for later use by extra peaks
         stokes_i_full_noise = stokes_i
@@ -968,7 +1033,7 @@ def main() -> None:
 
         if args.time_avg and not args.no_plot:
             burn_out = f"{args.output}_burns_law.{args.ext}"
-            plot_burns_law_fits(
+            burn_fit = plot_burns_law_fits(
                 fitter,
                 burn_out,
                 pol_frac_err=burn_pol_frac_err,
@@ -978,6 +1043,33 @@ def main() -> None:
                 turbulent_radius_pc=args.turbulent_radius_pc,
                 screen_scale_cm=args.screen_scale_cm,
             )
+
+            if not args.no_rm_tau and args.tau is not None and args.rm is not None:
+                sigma_rm = burn_fit.get("sigma_rm") if burn_fit is not None else None
+                sigma_rm_err = burn_fit.get("sigma_rm_err") if burn_fit is not None else None
+                if sigma_rm is None or sigma_rm_err is None:
+                    print("  RM-tau correlation plot skipped: Burn-law sigma_RM fit unavailable.")
+                elif not np.isfinite(args.rm) or args.rm == 0.0:
+                    print("  RM-tau correlation plot skipped: no valid RM provided (--rm).")
+                else:
+                    try:
+                        plot_rm_tau_correlation(
+                            sigma_rm=sigma_rm,
+                            sigma_rm_err=sigma_rm_err,
+                            rm=args.rm,
+                            tau=args.tau,
+                            tau_err=args.tau_err,
+                            output_file=f"{args.output}_rm_tau.{args.ext}",
+                            name=args.tau_name,
+                            freq_mhz=args.tau_freq,
+                            ref_freq_mhz=args.ref_freq,
+                            scattering_index=args.scattering_index,
+                            scattering_index_err=args.scattering_index_err,
+                        )
+                    except Exception as exc:
+                        print(f"  RM-tau correlation plot skipped: {exc}")
+            elif not args.no_rm_tau:
+                print("  Provide --rm (measured RM, rad/m^2) and --tau (scattering timescale in ms) to auto-generate the RM-tau correlation plot.")
 
             plot_polarisation_fraction_acf_ccf(
                 fitter,

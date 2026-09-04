@@ -3220,6 +3220,10 @@ def plot_burns_law_fits(fitter: RMFitter,
 	- P_mod-Burn(λ)   = P_i * exp(-2 * sigma_RM'^2 * λ^4)
 	- P_const(λ)      = P_i
 	where P is the linear polarisation fraction (L/I).
+
+	Returns a dict with the P_Burn sigma_RM fit and its uncertainty
+	(``sigma_rm``, ``sigma_rm_err``) in rad/m^2, or ``None`` if the fit
+	could not be performed.
 	"""
 	from scipy.constants import c as _c  # avoid shadowing the module-level name
 
@@ -3243,7 +3247,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 		valid &= np.isfinite(pol_frac_err_arr) & (pol_frac_err_arr > 0)
 	if np.nansum(valid) < 5:
 		print("Warning: insufficient valid points for Burn-law fitting; skipping plot.")
-		return
+		return None
 
 	sigma_rm_thresh = None
 	sigma_rm_thresh_snr = None
@@ -3699,6 +3703,15 @@ def plot_burns_law_fits(fitter: RMFitter,
 	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Burn-law fit plot saved to {output_file}")
 	plt.close()
+
+	return {
+		"sigma_rm": float(burn_popt[0]) if burn_popt is not None else None,
+		"sigma_rm_err": (
+			float(burn_perr[0])
+			if (burn_perr is not None and burn_perr.size == 1 and np.isfinite(burn_perr[0]))
+			else None
+		),
+	}
 
 
 def plot_polarisation_fraction_acf_ccf(
