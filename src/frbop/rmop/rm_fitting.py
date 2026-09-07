@@ -222,11 +222,41 @@ def main() -> None:
         nargs="?",
         const="all",
         default=None,
-        choices=["all", "gnom", "stere", "aeqd", "ortho", "equirect", "robin"],
+        choices=["all", "gnom", "stere", "aeqd", "ortho", "equirect", "robin", "rect"],
         help=(
             "Generate Poincare projections. Use 'all' (default when flag is present) "
-            "for a panel, or a single projection type: gnom, stere, aeqd, ortho, equirect, robin. "
+            "for a panel, or a single projection type: gnom, stere, aeqd, ortho, equirect, robin, rect. "
             "Requires --poincare."
+        ),
+    )
+    parser.add_argument(
+        "--pcrop",
+        action="store_true",
+        help=(
+            "Crop the latitude range of the Robinson projection panel to the "
+            "data's lat extent plus 10%% wiggle room."
+        ),
+    )
+    parser.add_argument(
+        "--pcrop-lat",
+        type=float,
+        nargs=2,
+        metavar=("LO", "HI"),
+        default=None,
+        help=(
+            "Explicit latitude crop band [deg] for the projection panel "
+            "(overrides --pcrop auto-fit). "
+        ),
+    )
+    parser.add_argument(
+        "--pcrop-lon",
+        type=float,
+        nargs=2,
+        metavar=("LO", "HI"),
+        default=None,
+        help=(
+            "Explicit longitude crop band [deg] for the projection panel "
+            "(overrides --pcrop auto-fit). "
         ),
     )
     parser.add_argument(
@@ -346,10 +376,10 @@ def main() -> None:
         help="Number of time bins to fit in time-series mode (default: no binning)",
     )
     parser.add_argument(
-        "--pa-bins",
+        "-pscr", "--pa-scrunch",
         type=int,
-        default=0,
-        help="Number of PA/EA/pol fraction bins in lower panel of time-series plot (default: 50)",
+        default=1,
+        help="PA/EA scrunch factor applied in the lower panel of the time-series plot (average every N PA samples)",
     )
     parser.add_argument(
         "--freq-bins",
@@ -478,6 +508,8 @@ def main() -> None:
         parser.error("--exclude-edge-bins must be >= 0")
     if args.tscrunch < 1:
         parser.error("--tscrunch must be >= 1")
+    if args.pa_scrunch < 1:
+        parser.error("--pa-scrunch must be >= 1")
 
     circle_segments: Optional[List[Tuple[int, int]]] = None
     if args.poincare_circle_segments is not None:
@@ -1157,6 +1189,11 @@ def main() -> None:
                         center=tuple(args.poincare_proj_center)
                         if args.poincare_proj_center is not None
                         else None,
+                        pcrop=args.pcrop,
+                        pcrop_lat=tuple(args.pcrop_lat)
+                        if args.pcrop_lat is not None else None,
+                        pcrop_lon=tuple(args.pcrop_lon)
+                        if args.pcrop_lon is not None else None,
                     )
 
                 if freq_band_ranges is not None:
@@ -1204,7 +1241,12 @@ def main() -> None:
                                 center=tuple(args.poincare_proj_center)
                                 if args.poincare_proj_center is not None
                                 else None,
-                            )
+                        pcrop=args.pcrop,
+                        pcrop_lat=tuple(args.pcrop_lat)
+                        if args.pcrop_lat is not None else None,
+                        pcrop_lon=tuple(args.pcrop_lon)
+                        if args.pcrop_lon is not None else None,
+                    )
 
         if args.time_avg and len(time_avg_extra_regions) > 0 and stokes_i is not None:
             for i_extra, (pk_start, pk_end) in enumerate(time_avg_extra_regions, start=2):
@@ -1622,7 +1664,7 @@ def main() -> None:
                 time_series_data=full_time_series_data,
                 freq_hz=freq_hz,
                 n_rm_bins=args.time_bins if args.time_bins and args.time_bins > 0 else None,
-                n_pa_bins=args.pa_bins,
+                pa_scrunch=args.pa_scrunch,
                 noise_fraction=args.offpulse,
                 offpulse_std=off_std,
                 full_time_series=full_time_series_data.get('time') if 'time' in full_time_series_data else None,
@@ -1639,7 +1681,7 @@ def main() -> None:
                     f"{args.output}_corrected_time_series.{args.ext}",
                     time_series_data=full_time_series_data,
                     full_res_time=full_res_time,
-                    n_pa_bins=args.pa_bins,
+                    pa_scrunch=args.pa_scrunch,
                     show_full_time=args.full_time,
                     show_legends=args.legends,
                 )
@@ -1693,6 +1735,7 @@ def main() -> None:
                         center=tuple(args.poincare_proj_center)
                         if args.poincare_proj_center is not None
                         else None,
+                        pcrop=args.pcrop,
                     )
 
     print("\n" + "=" * 60)

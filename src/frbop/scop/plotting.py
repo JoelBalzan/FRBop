@@ -74,7 +74,7 @@ def plot_spectrum_powerlaw_fit(
     #axs[0].set_title('Spectrum power-law fit', fontsize=styles['title'])
     axs[0].set_xlabel('Frequency [MHz]', fontsize=styles['label'])
     axs[0].set_ylabel(r'S [arb.]', fontsize=styles['label'])
-    axs[0].tick_params(labelsize=styles['tick'])
+    axs[0].tick_params(labelsize=styles['tick'], labelleft=False)
     axs[0].grid(alpha=0.25)
     axs[0].legend(fontsize=styles['legend'])
 
@@ -89,7 +89,7 @@ def plot_spectrum_powerlaw_fit(
     #axs[1].set_title('Corrected spectrum', fontsize=styles['title'])
     axs[1].set_xlabel('Frequency [MHz]', fontsize=styles['label'])
     axs[1].set_ylabel('Corrected '+r'S [arb.]', fontsize=styles['label'])
-    axs[1].tick_params(labelsize=styles['tick'])
+    axs[1].tick_params(labelsize=styles['tick'], labelleft=False)
     axs[1].grid(alpha=0.25)
     plt.tight_layout()
 

@@ -25,6 +25,7 @@ from frbop.utils.peaks import (select_frequency_bands_manual,
                                split_frequency_bands_equal_snr)
 from frbop.utils.plotting import (FULL_PAGE_WIDTH_IN, IBM_PALETTE, pub_figsize,
                                   savefig)
+from frbop.utils.scrunch import tscrunch_array
 from frbop.utils.significance import (l_significance_mask,
                                       snr_mask_with_fallback)
 
@@ -304,9 +305,36 @@ def _fit_circle_on_sphere(points_xyz: np.ndarray,
 	arc_r[arc_r == 0] = 1.0
 	arc = arc / arc_r[:, None]
 
+	# Goodness of fit: perpendicular plane deviation r_i = n.X_i - d for the
+	# (unit) data points.  RMS residual is reported in degrees (small-angle
+	# approx. on the unit sphere); chi2 uses the input weights as 1/var.
+	r_fit = np.asarray(X @ n, dtype=float) - d
+	x_fin = X[np.isfinite(r_fit)]
+	r_fin = r_fit[np.isfinite(r_fit)]
+	n_data = int(x_fin.shape[0])
+	rms_rad = float(np.sqrt(np.nanmean(r_fin ** 2)))
+	rms_deg = float(np.degrees(rms_rad)) if np.isfinite(rms_rad) else float('nan')
+	n_fit = 2 if fit_type == 'great' else 3
+	if w is not None and n_data > n_fit:
+		w_data = np.asarray(w, dtype=float)
+		if x_fin.shape[0] == w_data.shape[0]:
+			chi2 = float(np.nansum(w_data * r_fin ** 2))
+			chi2_red = float(chi2 / (n_data - n_fit))
+		else:
+			chi2 = float('nan')
+			chi2_red = float('nan')
+	else:
+		chi2 = float('nan')
+		chi2_red = float('nan')
+
 	return {
 		'arc_xyz': arc,
 		'fit_type': np.array([fit_type]),
+		'n_data': n_data,
+		'n_fit': n_fit,
+		'rms_deg': rms_deg,
+		'chi2': chi2,
+		'chi2_red': chi2_red,
 	}
 
 
@@ -328,6 +356,22 @@ def _poincare_circle_weights(sigma_q: np.ndarray,
 	w = 1.0 / (var + 1e-12)
 	w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
 	return w
+
+
+def _report_circle_fit(fit: Dict, i_seg: int) -> None:
+	"""Print a short goodness-of-fit summary for a fitted circle segment."""
+	ft = str(np.asarray(fit['fit_type']).flat[0])
+	rms = float(fit.get('rms_deg', float('nan')))
+	chi2 = float(fit.get('chi2', float('nan')))
+	chi2_red = float(fit.get('chi2_red', float('nan')))
+	n_data = int(fit.get('n_data', 0))
+	n_fit = int(fit.get('n_fit', 0))
+	fit_str = ("chi2/dof = %.2f" % chi2_red) if np.isfinite(chi2_red) else "chi2/dof = n/a"
+	rms_str = ("%.2f" % rms) if np.isfinite(rms) else "n/a"
+	dof = max(n_data - n_fit, 0)
+	chi2s = ("%.1f" % chi2) if np.isfinite(chi2) else "n/a"
+	print(f"  circle fit seg {i_seg + 1} [{ft}]: rms = {rms_str} deg, "
+		  f"{fit_str} (chi2 = {chi2s}, dof = {dof}, n = {n_data})")
 
 
 def _split_lon_lat_segments(lon_deg: np.ndarray,
@@ -631,6 +675,7 @@ def plot_poincare_sphere(
 			)
 			if fit is None:
 				continue
+			_report_circle_fit(fit, i_seg)
 			arc = fit['arc_xyz']
 			ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
 					linestyle='-', linewidth=style['line'], alpha=0.95,
@@ -867,6 +912,7 @@ def plot_poincare_sphere_frequency(
 			)
 			if fit is None:
 				continue
+			_report_circle_fit(fit, i_seg)
 			arc = fit['arc_xyz']
 			ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
 					linestyle='-', linewidth=style['line'], alpha=0.95,
@@ -927,7 +973,14 @@ def plot_poincare_projections_frequency(
 		force_surface: bool = False,
 		center: Optional[Tuple[float, float, float]] = None,
 		circle_fit_mode: Optional[str] = None,
-		circle_fit_segments: Optional[List[Tuple[int, int]]] = None) -> None:
+		circle_fit_segments: Optional[List[Tuple[int, int]]] = None,
+		pcrop: bool = False,
+		pcrop_lat: Optional[Tuple[float, float]] = None,
+		pcrop_lon: Optional[Tuple[float, float]] = None,
+		zoom_pad: float = 1.20,
+		min_half_deg: Optional[float] = None,
+		rect_xlim: Optional[Tuple[float, float]] = None,
+		rect_ylim: Optional[Tuple[float, float]] = None) -> None:
 	"""Project a time-averaged Poincare track as a function of frequency."""
 	style = plot_style()
 
@@ -1040,6 +1093,8 @@ def plot_poincare_projections_frequency(
 		sigma_lon_deg = sigma_lon_deg[err_mask]
 		sigma_lat_deg = sigma_lat_deg[err_mask]
 		filtered_idx = filtered_idx[err_mask]
+		lon_f = lon_f[err_mask]
+		lat_f = lat_f[err_mask]
 		if q_f.size < 2:
 			print("Warning: too few points remain after error-bar masking; skipping projections.")
 			return
@@ -1050,9 +1105,9 @@ def plot_poincare_projections_frequency(
 		points_xyz = np.column_stack([q_f, u_f, v_f])
 		for i_seg, (s_idx, e_idx) in enumerate(segments):
 			weights = _poincare_circle_weights(
-				sigma_q[s_idx:e_idx + 1],
-				sigma_u[s_idx:e_idx + 1],
-				sigma_v[s_idx:e_idx + 1],
+				sigma_q_f[s_idx:e_idx + 1],
+				sigma_u_f[s_idx:e_idx + 1],
+				sigma_v_f[s_idx:e_idx + 1],
 			)
 			fit = _fit_circle_on_sphere(
 				points_xyz[s_idx:e_idx + 1],
@@ -1061,6 +1116,7 @@ def plot_poincare_projections_frequency(
 			)
 			if fit is None:
 				continue
+			#_report_circle_fit(fit, i_seg)
 			arc = fit['arc_xyz']
 			lon_arc = np.degrees(np.arctan2(arc[:, 1], arc[:, 0]))
 			lat_arc = np.degrees(np.arcsin(np.clip(arc[:, 2], -1.0, 1.0)))
@@ -1076,26 +1132,41 @@ def plot_poincare_projections_frequency(
 	lon0 = np.degrees(np.arctan2(cy, cx))
 	lat0 = np.degrees(np.arcsin(np.clip(cz, -1.0, 1.0)))
 
-	try:
-		from mpl_toolkits.basemap import Basemap as _Basemap
-	except ImportError:
-		print("Warning: mpl_toolkits.basemap not available; skipping projection panel.")
-		return
+	proj_key_check = str(projection_type).lower()
+	needs_basemap = proj_key_check != 'rect'
 
-	_btest = _Basemap(projection='gnom', lat_0=lat0, lon_0=lon0,
-					  width=2e7, height=2e7, rsphere=1.0)
-	mx_f, my_f = _btest(lon_f, lat_f)
-	mx_f = np.array(mx_f, dtype=float); my_f = np.array(my_f, dtype=float)
-	fin = np.isfinite(mx_f) & np.isfinite(my_f)
-	if not np.any(fin):
-		print("Warning: no finite projected points; skipping projection panel.")
-		return
-	span = max(np.ptp(mx_f[fin]), np.ptp(my_f[fin]))
-	half = max(span * 0.5 * 1.20, 0.05)
-	half = max(half, np.tan(np.radians(30)))
+	_Basemap = None
+	if needs_basemap:
+		try:
+			from mpl_toolkits.basemap import Basemap as _Basemap
+		except ImportError:
+			print("Warning: mpl_toolkits.basemap not available; skipping projection panel.")
+			return
 
-	ang_half = np.degrees(np.arctan(half))
-	grid_step = 60
+	if needs_basemap:
+		_btest = _Basemap(projection='gnom', lat_0=lat0, lon_0=lon0,
+						  width=2e7, height=2e7, rsphere=1.0)
+		mx_f, my_f = _btest(lon_f, lat_f)
+		mx_f = np.array(mx_f, dtype=float); my_f = np.array(my_f, dtype=float)
+		fin = np.isfinite(mx_f) & np.isfinite(my_f)
+		if not np.any(fin):
+			print("Warning: no finite projected points; skipping projection panel.")
+			return
+		span = max(np.ptp(mx_f[fin]), np.ptp(my_f[fin]))
+		half = max(span * 0.5 * zoom_pad, 1e-4)
+		if min_half_deg is not None and min_half_deg > 0:
+			half = max(half, np.tan(np.radians(min_half_deg)))
+
+		ang_half = np.degrees(np.arctan(half))
+		# Scale the parallel/meridian grid spacing to the zoom level so a tight
+		# zoom on a small circle doesn't just show one 60 deg wedge of blank sky.
+		_nice_steps = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 20, 30, 60]
+		_target = max(ang_half * 2.0 / 4.0, 1e-3)
+		grid_step = min(_nice_steps, key=lambda s: abs(s - _target))
+	else:
+		half = None
+		ang_half = None
+		grid_step = None
 
 	projection_map = {
 		'gnom': ('gnom', 'Gnomonic\n(great circles → straight lines)'),
@@ -1104,6 +1175,7 @@ def plot_poincare_projections_frequency(
 		'ortho': ('ortho', 'Orthographic\n(hemisphere view)'),
 		'equirect': ('cyl', 'Equirectangular\n(Plate Carrée)'),
 		'robin': ('robin', 'Robinson\n(pseudocylindrical)'),
+		'rect': ('rect', 'Longitude vs. Latitude\n(linear, freely croppable)'),
 	}
 	proj_key = str(projection_type).lower()
 	if proj_key == 'all':
@@ -1127,7 +1199,7 @@ def plot_poincare_projections_frequency(
 	else:
 		if proj_key not in projection_map:
 			raise ValueError(
-				"Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho, equirect, robin"
+				"Invalid projection_type. Choose from: all, gnom, stere, aeqd, ortho, equirect, robin, rect"
 			)
 		projections = [projection_map[proj_key]]
 		fig, ax_single = plt.subplots(1, 1, figsize=pub_figsize(height_ratio=0.75))
@@ -1143,6 +1215,65 @@ def plot_poincare_projections_frequency(
 	for ax, (proj, _title) in zip(axes, projections):
 		#lon0_use = 0.0 if proj == 'robin' else lon0
 		lon0_use = lon0
+		pa_crop_ylim = None
+		pa_crop_xlim = None
+
+		if proj == 'rect':
+			# Plain linear lon/lat scatter -- no projection, no curvature, no
+			# aspect-lock. Crop with rect_xlim/rect_ylim (or pcrop for an
+			# automatic tight crop around the data) exactly like a normal
+			# matplotlib axis, since there's no sphere-wrap concern for a
+			# track that stays at ~constant latitude.
+			sx = np.asarray(lon_f, dtype=float)
+			sy = np.asarray(lat_f, dtype=float)
+			fin_s = np.isfinite(sx) & np.isfinite(sy)
+			if np.any(fin_s):
+				ax.scatter(sx[fin_s], sy[fin_s],
+						   c=freq_mhz[fin_s], cmap='plasma', norm=norm,
+						   s=25.0, edgecolors='black', linewidths=0.6,
+						   zorder=4, alpha=1.0, marker='s')
+				for j in np.where(fin_s)[0]:
+					dx = sigma_lon_deg[j] if j < len(sigma_lon_deg) else np.nan
+					dy = sigma_lat_deg[j] if j < len(sigma_lat_deg) else np.nan
+					if np.isfinite(dx) and np.isfinite(dy):
+						ax.errorbar(sx[j], sy[j], xerr=dx, yerr=dy, fmt='none',
+									ecolor='gray', elinewidth=0.7, alpha=0.5,
+									capsize=2.5, capthick=0.7, zorder=3)
+
+			if circle_fits:
+				for i_seg, lon_arc, lat_arc in circle_fits:
+					arc_segments = _split_lon_lat_segments(lon_arc, lat_arc, lon0_use)
+					for seg_lon, seg_lat in arc_segments:
+						ok = np.isfinite(seg_lon) & np.isfinite(seg_lat)
+						if np.nansum(ok) >= 2:
+							ax.plot(np.asarray(seg_lon)[ok], np.asarray(seg_lat)[ok],
+									linestyle='-', linewidth=style['line']*2,
+									color='black', alpha=0.95, zorder=2)
+
+			ax.set_xlabel('Longitude [deg]', fontsize=style['label'])
+			ax.set_ylabel('Latitude [deg]', fontsize=style['label'])
+			ax.grid(True, linestyle=':', linewidth=0.5, color='lightgray', zorder=1)
+
+			if rect_xlim is not None:
+				ax.set_xlim(*rect_xlim)
+			elif pcrop_lon is not None:
+				ax.set_xlim(float(pcrop_lon[0]), float(pcrop_lon[1]))
+			elif pcrop and np.any(fin_s):
+				lo, hi = float(np.nanmin(sx[fin_s])), float(np.nanmax(sx[fin_s]))
+				pad = 0.10 * (hi - lo) if hi > lo else 1.0
+				ax.set_xlim(lo - pad, hi + pad)
+
+			if rect_ylim is not None:
+				ax.set_ylim(*rect_ylim)
+			elif pcrop_lat is not None:
+				ax.set_ylim(float(pcrop_lat[0]), float(pcrop_lat[1]))
+			elif pcrop and np.any(fin_s):
+				lo, hi = float(np.nanmin(sy[fin_s])), float(np.nanmax(sy[fin_s]))
+				pad = 0.10 * (hi - lo) if hi > lo else 1.0
+				ax.set_ylim(lo - pad, hi + pad)
+
+			ax.tick_params(axis='both', labelsize=style['tick'])
+			continue
 
 		if proj == 'ortho':
 			bsmp = _Basemap(
@@ -1157,16 +1288,86 @@ def plot_poincare_projections_frequency(
 				ax=ax, rsphere=1.0,
 			)
 		elif proj == 'robin':
-			bsmp = _Basemap(
-				projection='robin', lon_0=lon0_use,
-				ax=ax, rsphere=1.0,
-			)
+			bsmp = _Basemap(projection='robin', lon_0=lon0_use,
+							ax=ax, rsphere=1.0)
 		else:
 			bsmp = _Basemap(
 				projection=proj, lat_0=lat0, lon_0=lon0_use,
 				width=2 * half, height=2 * half,
 				ax=ax, rsphere=1.0,
 			)
+
+		if pcrop or pcrop_lat is not None or pcrop_lon is not None:
+			lat_fin = lat_f[np.isfinite(lat_f)]
+			lon_fin = lon_f[np.isfinite(lon_f) & np.isfinite(lat_f)]
+
+			if pcrop_lat is not None:
+				lat_lo, lat_hi = float(pcrop_lat[0]), float(pcrop_lat[1])
+			elif lat_fin.size:
+				lat_lo = float(np.nanmin(lat_fin))
+				lat_hi = float(np.nanmax(lat_fin))
+				lat_pad = 0.10 * (lat_hi - lat_lo)
+				if lat_pad <= 0:
+					lat_pad = 5.0
+				lat_lo = max(-90.0, lat_lo - lat_pad)
+				lat_hi = min(90.0, lat_hi + lat_pad)
+			else:
+				lat_lo, lat_hi = None, None
+
+			if pcrop_lon is not None:
+				lon_lo, lon_hi = float(pcrop_lon[0]), float(pcrop_lon[1])
+			elif lon_fin.size:
+				lon_lo = float(np.nanmin(lon_fin))
+				lon_hi = float(np.nanmax(lon_fin))
+				lon_pad = 0.10 * (lon_hi - lon_lo)
+				if lon_pad <= 0:
+					lon_pad = 5.0
+				lon_lo = lon_lo - lon_pad
+				lon_hi = lon_hi + lon_pad
+			else:
+				lon_lo, lon_hi = None, None
+
+			if lat_lo is not None and lon_lo is not None:
+				try:
+					# Project the corners of the padded lon/lat box rather than
+					# just the poles, since meridians curve in most projections.
+					corner_lons = [lon_lo, lon_lo, lon_hi, lon_hi]
+					corner_lats = [lat_lo, lat_hi, lat_lo, lat_hi]
+					cx_proj, cy_proj = bsmp(corner_lons, corner_lats)
+					cx_proj = np.asarray(cx_proj, dtype=float)
+					cy_proj = np.asarray(cy_proj, dtype=float)
+					ok = np.isfinite(cx_proj) & np.isfinite(cy_proj)
+					if np.any(ok):
+						x_min = float(np.min(cx_proj[ok])); x_max = float(np.max(cx_proj[ok]))
+						y_min = float(np.min(cy_proj[ok])); y_max = float(np.max(cy_proj[ok]))
+						if x_max > x_min and y_max > y_min:
+							cxm = 0.5 * (x_min + x_max)
+							cym = 0.5 * (y_min + y_max)
+							half_x_data = 0.5 * (x_max - x_min)
+							half_y_data = 0.5 * (y_max - y_min)
+
+							# Match the crop box to the panel's physical aspect
+							# ratio so it actually fills the panel (a real zoom)
+							# instead of leaving the box the same on-screen size
+							# with the surrounding whitespace just relabelled.
+							bbox = ax.get_position()
+							fig_w, fig_h = fig.get_size_inches()
+							phys_w = bbox.width * fig_w
+							phys_h = bbox.height * fig_h
+							aspect = phys_w / phys_h if phys_h > 0 else 1.0
+
+							if half_x_data / max(half_y_data, 1e-12) > aspect:
+								half_x = half_x_data
+								half_y = half_x_data / aspect
+							else:
+								half_y = half_y_data
+								half_x = half_y_data * aspect
+
+							pa_crop_xlim = (cxm - half_x, cxm + half_x)
+							pa_crop_ylim = (cym - half_y, cym + half_y)
+				except Exception:
+					pa_crop_xlim = None
+					pa_crop_ylim = None
 
 		bsmp.drawmapboundary(fill_color='white', zorder=0)
 		if proj == 'ortho':
@@ -1299,6 +1500,17 @@ def plot_poincare_projections_frequency(
 						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line']*2,
 								color='black', alpha=0.95, zorder=2)
 
+		if (pcrop or pcrop_lat is not None or pcrop_lon is not None) \
+				and pa_crop_ylim is not None and pa_crop_xlim is not None:
+			ax.set_xlim(*pa_crop_xlim)
+			ax.set_ylim(*pa_crop_ylim)
+			# Drop the raw matplotlib axis ticks (projected-unit numbers) that
+			# otherwise reappear once xlim/ylim are set explicitly; Basemap's
+			# own drawparallels/drawmeridians labels are separate annotations
+			# and are unaffected by this.
+			ax.set_xticks([])
+			ax.set_yticks([])
+
 		ax.tick_params(axis='both', labelsize=style['tick'])
 
 	if is_all:
@@ -1306,18 +1518,36 @@ def plot_poincare_projections_frequency(
 							hspace=0.15, wspace=0.15)
 		cax = fig.add_axes([0.25, 0.035, 0.50, 0.016])
 	else:
-		fig.subplots_adjust(left=0.10, right=0.93, top=0.90, bottom=0.14)
-		cax = fig.add_axes([0.22, 0.13, 0.56, 0.025])
+		# Single-panel output: set the main axes and the colour bar positions
+		# explicitly so the colour bar never sits on top of the plot. For the
+		# plain lon/lat 'rect' panel the colour bar is placed on the right;
+		# for the other projections it sits below the plot.
+		is_rect = (proj_key == 'rect')
+		if is_rect:
+			for _ax in fig.axes:
+				try:
+					_ax.set_position([0.12, 0.14, 0.70, 0.72])
+				except Exception:
+					pass
+			cax = fig.add_axes([0.86, 0.14, 0.025, 0.72])
+			cb_orientation = 'vertical'
+		else:
+			for _ax in fig.axes:
+				try:
+					_ax.set_position([0.12, 0.18, 0.76, 0.70])
+				except Exception:
+					pass
+			cax = fig.add_axes([0.30, 0.10, 0.40, 0.025])
+			cb_orientation = 'horizontal'
 	sm = plt.cm.ScalarMappable(cmap='plasma', norm=norm)
 	sm.set_array([])
-	cb = fig.colorbar(sm, cax=cax, orientation='horizontal')
+	cb = fig.colorbar(sm, cax=cax, orientation=cb_orientation)
 	cb.set_label("Frequency [MHz]", fontsize=style['label'])
 	cb.ax.tick_params(labelsize=style['tick'])
 
 	_savefig(output_file, dpi=600, bbox_inches='tight')
 	print(f"Poincare frequency projection panel saved to {output_file}")
 	plt.close()
-
 
 def plot_poincare_sphere_subbands(
 		time_series_data: Dict,
@@ -1632,7 +1862,7 @@ def plot_poincare_sphere_subbands(
 		if circle_fit_mode is not None and len(track['q']) >= 3:
 			points_xyz = np.column_stack([track['q'], track['u'], track['v']])
 			segments = _build_circle_segments(len(track['q']), circle_fit_segments)
-			for s_idx, e_idx in segments:
+			for i_seg, (s_idx, e_idx) in enumerate(segments):
 				weights = _poincare_circle_weights(
 					track['sigma_q'][s_idx:e_idx + 1],
 					track['sigma_u'][s_idx:e_idx + 1],
@@ -1645,6 +1875,7 @@ def plot_poincare_sphere_subbands(
 				)
 				if fit is None:
 					continue
+				_report_circle_fit(fit, i_seg)
 				arc = fit['arc_xyz']
 				ax.plot(arc[:, 0], arc[:, 1], arc[:, 2],
 						linestyle='-', linewidth=style['line'], alpha=0.95,
@@ -1716,7 +1947,8 @@ def plot_poincare_projections(
 		center: Optional[Tuple[float, float, float]] = None,
 		offpulse_std: Optional[Dict] = None,
 		circle_fit_mode: Optional[str] = None,
-		circle_fit_segments: Optional[List[Tuple[int, int]]] = None):
+		circle_fit_segments: Optional[List[Tuple[int, int]]] = None,
+		pcrop: bool = False):
 	"""
 	Generate a 2×2 panel of 2-D cropped projections of the Poincaré sphere.
 
@@ -1899,6 +2131,7 @@ def plot_poincare_projections(
 			)
 			if fit is None:
 				continue
+			_report_circle_fit(fit, i_seg)
 			arc = fit['arc_xyz']
 			lon_arc = np.degrees(np.arctan2(arc[:, 1], arc[:, 0]))
 			lat_arc = np.degrees(np.arcsin(np.clip(arc[:, 2], -1.0, 1.0)))
@@ -1981,6 +2214,7 @@ def plot_poincare_projections(
 	for ax, (proj, _title) in zip(axes, projections):
 		#lon0_use = 0.0 if proj == 'robin' else lon0
 		lon0_use = lon0
+		pa_crop_ylim = None
 		if proj == 'ortho':
 			bsmp = _Basemap(
 				projection='ortho', lat_0=lat0, lon_0=lon0_use,
@@ -1994,10 +2228,21 @@ def plot_poincare_projections(
 				ax=ax, rsphere=1.0,
 			)
 		elif proj == 'robin':
-			bsmp = _Basemap(
-				projection='robin', lon_0=lon0_use,
-				ax=ax, rsphere=1.0,
-			)
+			bsmp = _Basemap(projection='robin', lon_0=lon0_use,
+							ax=ax, rsphere=1.0)
+			if pcrop:
+				lat_fin = lat_f[np.isfinite(lat_f)]
+				if lat_fin.size:
+					lat_lo = float(np.nanmin(lat_fin))
+					lat_hi = float(np.nanmax(lat_fin))
+					pad = 0.10 * (lat_hi - lat_lo)
+					if pad <= 0:
+						pad = 5.0
+					lat_lo = max(-90.0, lat_lo - pad)
+					lat_hi = min(90.0, lat_hi + pad)
+					_, y_lo = bsmp(lon0_use, lat_lo)
+					_, y_hi = bsmp(lon0_use, lat_hi)
+					pa_crop_ylim = (float(y_lo), float(y_hi))
 		else:
 			bsmp = _Basemap(
 				projection=proj, lat_0=lat0, lon_0=lon0_use,
@@ -2102,6 +2347,9 @@ def plot_poincare_projections(
 						ax.plot(tx[ok], ty[ok], linestyle='-', linewidth=style['line'],
 								color='black', alpha=0.95, zorder=2)
 
+		if pcrop and pa_crop_ylim is not None:
+			ax.set_ylim(*pa_crop_ylim)
+
 		ax.tick_params(axis='both', labelsize=style['tick'])
 
 	if is_all:
@@ -2133,7 +2381,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 						time_series_data: Optional[Dict] = None,
 						freq_hz: Optional[np.ndarray] = None,
 						n_rm_bins: int = 20,
-						n_pa_bins: int = 50,
+						pa_scrunch: int = 1,
 						noise_fraction: float = 0.1,
 						offpulse_std: Optional[np.ndarray] = None,
 						full_time_series: Optional[np.ndarray] = None,
@@ -2322,41 +2570,34 @@ def plot_rm_time_series(time_array: np.ndarray,
 				_peak_sel |= (times_ms >= full_time[si] * 1e3 - 1.0) & (times_ms <= full_time[_clip_ei] * 1e3 + 1.0)
 				mask_pa &= _peak_sel
 
-			if n_pa_bins > 0 and np.any(mask_pa):
+			if pa_scrunch > 1 and np.any(mask_pa):
 				t_good = times_ms[mask_pa]
 				pa_good = pa_deg[mask_pa]
 				ea_good = ea_deg[mask_pa]
 				pa_sig_good = pa_sigma_deg[mask_pa]
 				ea_sig_good = ea_sigma_deg[mask_pa]
 
-				bin_edges = np.linspace(t_good.min(), t_good.max(), n_pa_bins + 1)
-				bin_centres, pa_binned, pa_binned_err = [], [], []
-				ea_binned, ea_binned_err = [], []
-				bin_counts = []                    
-				
-				for b in range(n_pa_bins):
-					sel = (t_good >= bin_edges[b]) & (t_good < bin_edges[b + 1])
-					if b == n_pa_bins - 1:
-						sel = (t_good >= bin_edges[b]) & (t_good <= bin_edges[b + 1])
-					if not np.any(sel):
-						continue
+				n_keep = len(t_good) // pa_scrunch
+				bc, pa_b, pa_be, ea_b, ea_be, counts = [], [], [], [], [], []
+				for g in range(n_keep):
+					sel = slice(g * pa_scrunch, (g + 1) * pa_scrunch)
 					w_pa = 1.0 / (pa_sig_good[sel]**2 + 1e-20)
 					w_ea = 1.0 / (ea_sig_good[sel]**2 + 1e-20)
-					bin_centres.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
-					pa_binned.append(np.nansum(w_pa * pa_good[sel]) / np.nansum(w_pa))
-					pa_binned_err.append(1.0 / np.sqrt(np.nansum(w_pa)))
-					ea_binned.append(np.nansum(w_ea * ea_good[sel]) / np.nansum(w_ea))
-					ea_binned_err.append(1.0 / np.sqrt(np.nansum(w_ea)))
-					bin_counts.append(np.nansum(sel))       
-				
-				bc      = np.array(bin_centres)
-				pa_b    = np.array(pa_binned)
-				pa_be   = np.array(pa_binned_err)
-				ea_b    = np.array(ea_binned)
-				ea_be   = np.array(ea_binned_err)
-				counts  = np.array(bin_counts)          
-				MIN_BIN_POINTS = 2         
-				PA_ERR_MAX    = 20.0       
+					bc.append(0.5 * (t_good[sel].min() + t_good[sel].max()))
+					pa_b.append(np.nansum(w_pa * pa_good[sel]) / np.nansum(w_pa))
+					pa_be.append(1.0 / np.sqrt(np.nansum(w_pa)))
+					ea_b.append(np.nansum(w_ea * ea_good[sel]) / np.nansum(w_ea))
+					ea_be.append(1.0 / np.sqrt(np.nansum(w_ea)))
+					counts.append(pa_scrunch)
+
+				bc      = np.array(bc)
+				pa_b    = np.array(pa_b)
+				pa_be   = np.array(pa_be)
+				ea_b    = np.array(ea_b)
+				ea_be   = np.array(ea_be)
+				counts  = np.array(counts)
+				MIN_BIN_POINTS = 2
+				PA_ERR_MAX    = 20.0
 
 				bin_ok = (
 					np.isfinite(bc)
@@ -2444,7 +2685,7 @@ def plot_rm_time_series(time_array: np.ndarray,
 
 		ax_top.plot(full_time[full_mask] * 1e3, I_full[full_mask], 'k-', linewidth=style['line']*.8, label='I')
 		ax_top.set_ylabel(r'S [arb.]', fontsize=style['label'])
-		ax_top.tick_params(axis='y', labelsize=style['tick'])
+		ax_top.tick_params(axis='y', labelsize=style['tick'], labelleft=False)
 		ax_top.tick_params(right=False, labelright=False)
 		ax_top.plot(full_time[full_mask] * 1e3, L_full[full_mask], 'r-', linewidth=style['line']*.5, label='L', alpha=0.8)
 		ax_top.plot(full_time[full_mask] * 1e3, V_full[full_mask], 'b-', linewidth=style['line']*.5, label='V', alpha=0.8)
@@ -2720,7 +2961,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
                                    output_file: str = 'rm_corrected_time_series.png',
                                    time_series_data: Optional[Dict] = None,
                                    full_res_time: Optional[np.ndarray] = None,
-                                   n_pa_bins: int = 0,
+                                   pa_scrunch: int = 1,
                                    show_full_time: bool = True,
                                    show_legends: bool = True
                                    ):
@@ -2772,7 +3013,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 	pa_corr_full = rm_results.get('pa_corr_full')
 	l_corr_full = rm_results.get('l_corr_full')
 
-	# -- PA binning via --pa-bins (masked to good RM-bin windows) --
+	# -- PA scrunching via -pscr (masked to good RM-bin windows) --
 	tbin_start = rm_results.get('time_bin_start')
 	tbin_end = rm_results.get('time_bin_end')
 	good_mask = None
@@ -2791,27 +3032,19 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			orig_slice = np.zeros(len(full_time), dtype=bool)
 			orig_slice[idx] = good_mask[:len(idx)]
 			mask_orig &= orig_slice
-		if np.any(mask_orig) and n_pa_bins > 0 and np.sum(mask_orig) > n_pa_bins:
+		if np.any(mask_orig) and pa_scrunch > 1 and np.sum(mask_orig) > pa_scrunch:
 			t_orig = full_time[mask_orig] * 1e3
 			pa_orig = np.degrees(np.unwrap(np.radians(pa_orig_full[mask_orig])))
-			bin_edges = np.linspace(t_orig.min(), t_orig.max(), n_pa_bins + 1)
-			bc_o, pa_o, pa_oe = [], [], []
-			for b in range(n_pa_bins):
-				sel = (t_orig >= bin_edges[b]) & (t_orig < bin_edges[b + 1])
-				if b == n_pa_bins - 1:
-					sel = (t_orig >= bin_edges[b]) & (t_orig <= bin_edges[b + 1])
-				if not np.any(sel):
-					continue
-				pa_o.append(np.nanmean(pa_orig[sel]))
-				pa_oe.append(np.nanstd(pa_orig[sel]) / max(np.sqrt(np.nansum(sel)), 1.0))
-				bc_o.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
-			bc_o, pa_o, pa_oe = [np.array(x) for x in (bc_o, pa_o, pa_oe)]
+			bc_o = tscrunch_array(t_orig, pa_scrunch)
+			pa_o = tscrunch_array(pa_orig, pa_scrunch)
+			pa_o_sq = tscrunch_array(pa_orig**2, pa_scrunch)
+			pa_oe = np.sqrt(np.clip(pa_o_sq - pa_o**2, 0.0, None)) / np.sqrt(pa_scrunch)
 			ok_o = np.isfinite(bc_o) & np.isfinite(pa_o) & np.isfinite(pa_oe) & (pa_oe <= 20.0)
 			if np.any(ok_o):
 				ax_pa.errorbar(bc_o[ok_o], pa_o[ok_o], yerr=pa_oe[ok_o],
 							   fmt='o', color='cornflowerblue', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm orig}$', zorder=3)
-		elif n_pa_bins == 0:
+		else:
 			pa_orig_bin = rm_results.get('pa_deg', np.full_like(time_peak, np.nan))
 			pa_orig_err = rm_results.get('pa_err_deg', np.full_like(time_peak, np.nan))
 			if np.any(np.isfinite(pa_orig_bin[good])):
@@ -2825,27 +3058,19 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 		mask_corr = np.isfinite(pa_corr_full)
 		if good_mask is not None:
 			mask_corr &= good_mask
-		if np.any(mask_corr) and n_pa_bins > 0 and np.sum(mask_corr) > n_pa_bins:
+		if np.any(mask_corr) and pa_scrunch > 1 and np.sum(mask_corr) > pa_scrunch:
 			t_corr = frt[mask_corr] * 1e3
 			pa_corr_u = np.degrees(np.unwrap(np.radians(pa_corr_full[mask_corr])))
-			bin_edges = np.linspace(t_corr.min(), t_corr.max(), n_pa_bins + 1)
-			bc_c, pa_c, pa_ce = [], [], []
-			for b in range(n_pa_bins):
-				sel = (t_corr >= bin_edges[b]) & (t_corr < bin_edges[b + 1])
-				if b == n_pa_bins - 1:
-					sel = (t_corr >= bin_edges[b]) & (t_corr <= bin_edges[b + 1])
-				if not np.any(sel):
-					continue
-				pa_c.append(np.nanmean(pa_corr_u[sel]))
-				pa_ce.append(np.nanstd(pa_corr_u[sel]) / max(np.sqrt(np.nansum(sel)), 1.0))
-				bc_c.append(0.5 * (bin_edges[b] + bin_edges[b + 1]))
-			bc_c, pa_c, pa_ce = [np.array(x) for x in (bc_c, pa_c, pa_ce)]
+			bc_c = tscrunch_array(t_corr, pa_scrunch)
+			pa_c = tscrunch_array(pa_corr_u, pa_scrunch)
+			pa_c_sq = tscrunch_array(pa_corr_u**2, pa_scrunch)
+			pa_ce = np.sqrt(np.clip(pa_c_sq - pa_c**2, 0.0, None)) / np.sqrt(pa_scrunch)
 			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce) & (pa_ce <= 20.0)
 			if np.any(ok_c):
 				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='o',
 							   color='red', ecolor='gray',
 							   markersize=3, capsize=2, label=r'PA$_{\rm corr}$', zorder=4)
-		elif n_pa_bins == 0:
+		else:
 			pa_corr_bin = rm_results.get('pa_corr_deg', np.full_like(time_peak, np.nan))
 			pa_corr_err = rm_results.get('pa_corr_err_deg', np.full_like(time_peak, np.nan))
 			pa_corr_unw = np.degrees(np.unwrap(np.radians(pa_corr_bin[good])))
@@ -2877,7 +3102,7 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 		ax_top.plot(full_time * 1e3, V_full, 'b-', linewidth=style['line'], label='V', alpha=0.7)
 
 	ax_top.set_ylabel(r'S [arb.]', fontsize=style['label'])
-	ax_top.tick_params(axis='y', labelsize=style['tick'], right=False, labelright=False)
+	ax_top.tick_params(axis='y', labelsize=style['tick'], right=False, labelright=False, labelleft=False)
 
 	rm_good = rm_results['rm'][good]
 	rm_err_good = rm_results.get('rm_err', np.full_like(rm_good, np.nan))[good]
