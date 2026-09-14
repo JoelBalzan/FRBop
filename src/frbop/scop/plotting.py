@@ -887,8 +887,8 @@ def plot_acf_fit(
     if delta_nu_d is not None and best_fit and "popt" in best_fit:
         model_fn = [lorentzian, lorentzian_2c, lorentzian_3c][best_n_comp - 1]
         label = (
-            f"{labels[best_n_comp - 1]}\n"
-            + rf"$\Delta \nu_{{\rm d}} = {delta_nu_d:.2f} \pm {dnu_err:.2f}$ MHz"
+            f"{labels[best_n_comp - 1]}"
+            #+ rf"\n$\Delta \nu_{{\rm d}} = {delta_nu_d:.4f} \pm {dnu_err:.3f}$ MHz"
             if best_n_comp == 1
             else f"{labels[best_n_comp - 1]} fit"
         )
