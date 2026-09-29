@@ -27,7 +27,7 @@ from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_polarisation_fraction_acf_ccf,
                        plot_rm_corrected_time_series, plot_rm_results,
                        plot_rm_time_series)
-from .rm_tau_correlation import plot_rm_tau_correlation
+from .rm_tau.rm_tau_correlation import apply_named_defaults, plot_rm_tau_correlation, plot_rm_tau_correlation_host_frame
 
 warnings.filterwarnings("ignore")
 
@@ -475,6 +475,32 @@ def main() -> None:
         help="Disable the auto-generated RM-tau correlation plot in --time-avg mode",
     )
 
+    parser.add_argument(
+        "--ra",
+        type=float,
+        default=None,
+        help="RA in degrees (ICRS), for the host-frame RM-tau correlation plot "
+             "(Galactic RM subtraction via SPICE-RACS DR2)",
+    )
+    parser.add_argument(
+        "--dec",
+        type=float,
+        default=None,
+        help="Dec in degrees (ICRS), for the host-frame RM-tau correlation plot",
+    )
+    parser.add_argument(
+        "--z",
+        type=float,
+        default=None,
+        help="Redshift, for the host-frame RM-tau correlation plot",
+    )
+    parser.add_argument(
+        "--rm-err",
+        type=float,
+        default=None,
+        help="Uncertainty on --rm (rad/m^2)",
+    )
+
     # Physics helpers
     parser.add_argument(
         "--turbulent-radius-pc",
@@ -491,6 +517,7 @@ def main() -> None:
     parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
 
     args = parser.parse_args()
+    apply_named_defaults(args, parser)
 
     stokes_axis = 0
     time_axis = 1
@@ -1098,6 +1125,38 @@ def main() -> None:
                             scattering_index=args.scattering_index,
                             scattering_index_err=args.scattering_index_err,
                         )
+
+                        if args.ra is not None and args.dec is not None and args.z is not None:
+                            plot_rm_tau_correlation_host_frame(
+                                sigma_rm=sigma_rm,
+                                sigma_rm_err=sigma_rm_err,
+                                rm=args.rm,
+                                rm_err=args.rm_err,
+                                tau=args.tau,
+                                tau_err=args.tau_err,
+                                ra=args.ra,
+                                dec=args.dec,
+                                z=args.z,
+                                output_file=f"{args.output}_rm_tau_host_frame.{args.ext}",
+                                name=args.tau_name,
+                            )
+                            plot_rm_tau_correlation_host_frame(
+                                sigma_rm=sigma_rm,
+                                sigma_rm_err=sigma_rm_err,
+                                rm=args.rm,
+                                rm_err=args.rm_err,
+                                tau=args.tau,
+                                tau_err=args.tau_err,
+                                ra=args.ra,
+                                dec=args.dec,
+                                z=args.z,
+                                output_file=f"{args.output}_rm_tau_host_frame_detections.{args.ext}",
+                                name=args.tau_name,
+                                exclude_upper_limits=True,
+                            )
+                        else:
+                            print("  Host-frame RM-tau correlation plot skipped: "
+                                 "--ra/--dec/--z not available for this burst.")
                     except Exception as exc:
                         print(f"  RM-tau correlation plot skipped: {exc}")
             elif not args.no_rm_tau:

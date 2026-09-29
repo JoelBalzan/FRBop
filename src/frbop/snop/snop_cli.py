@@ -733,7 +733,7 @@ def main():
                 tN=int(analysis_tN),
             )
             if rmDict is not None:
-                logger.info("Found RM = %.2f rad/m^2", rmDict['rm'])
+                logger.info("Found RM = %.2f +/- %.2f rad/m^2", rmDict['rm'], rmDict.get('rm_err', float('nan')))
                 
                 # Apply RM correction
                 logger.info("=== Applying RM correction ===")

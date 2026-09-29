@@ -942,7 +942,9 @@ def _acf_1d(x):
 def _weighted_linear_fit(x, y, yerr):
     """Weighted least-squares line y = a + b*x with weights w = 1/yerr**2.
 
-    Returns (a, a_err, b, b_err) or None when the fit is not possible.
+    Returns (a, a_err, b, b_err, chi2_red, r) or None when the fit is not
+    possible.  chi2_red is the reduced chi-square (per degree of freedom,
+    N - 2) and r is Pearson's correlation coefficient between x and y.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -962,7 +964,16 @@ def _weighted_linear_fit(x, y, yerr):
     if not np.all(np.isfinite(cov)):
         return None
     a, b = cov @ (WX.T @ yf)
-    return a, float(np.sqrt(cov[0, 0])), b, float(np.sqrt(cov[1, 1]))
+
+    yfit = a + b * xf
+    chi2 = float(np.sum(w * (yf - yfit) ** 2))
+    dof = max(int(finite.sum()) - 2, 1)
+    chi2_red = chi2 / dof
+    if xf.std() > 0 and yf.std() > 0:
+        r = float(np.corrcoef(xf, yf)[0, 1])
+    else:
+        r = np.nan
+    return a, float(np.sqrt(cov[0, 0])), b, float(np.sqrt(cov[1, 1])), chi2_red, r
 
 
 def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=None,
@@ -1112,6 +1123,8 @@ def compute_modulation_index(ds_onpulse, off_pulse, freq, i_sigma=3.0, nbins=Non
         "fit_intercept_err": fit[1] if fit is not None else np.nan,
         "fit_slope": fit[2] if fit is not None else np.nan,
         "fit_slope_err": fit[3] if fit is not None else np.nan,
+        "fit_chi2_red": fit[4] if fit is not None else np.nan,
+        "fit_r": fit[5] if fit is not None else np.nan,
         "mask": mask,
         "i_cut": i_cut,
         "t_centers": t_centers,
@@ -1162,14 +1175,15 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
     fit = _weighted_linear_fit(t_mod[good], mod_index[good], mod_err[good]) if np.any(good) else None
     fit_line = None
     if fit is not None:
-        a, a_err, b, b_err = fit
+        a, a_err, b, b_err, chi2_red, r = fit
         x_line = np.array([float(np.min(t_mod[good])), float(np.max(t_mod[good]))])
         fit_line, = ax_m.plot(x_line, a + b * x_line, color=IBM_PALETTE[3], alpha=0.8,
                               linewidth=1.5, linestyle=':',
                               #label=rf'$m_g(t) = {a:.3f} + ({b:.3f}\pm{b_err:.3f})\,t$'
                               )
         print(f"  m_g(t) weighted linear fit: intercept = {a:.4f} ± {a_err:.4f}, "
-              f"slope = {b:.4f} ± {b_err:.4f} per ms")
+              f"slope = {b:.4f} ± {b_err:.4f} per ms, "
+              f"chi2_red = {chi2_red:.3f}, r = {r:.4f}")
     if np.any(good):
         ax_m.plot([], [], ' ', label=rf'$m_g^{{\rm peak}} = {m_peak:.4f} \pm {m_peak_err:.4f}$')
     ax_m.set_ylabel(r'$m_g$')
