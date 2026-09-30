@@ -1124,6 +1124,7 @@ def main() -> None:
                             ref_freq_mhz=args.ref_freq,
                             scattering_index=args.scattering_index,
                             scattering_index_err=args.scattering_index_err,
+                            print_table=False
                         )
 
                         if args.ra is not None and args.dec is not None and args.z is not None:
@@ -1139,6 +1140,7 @@ def main() -> None:
                                 z=args.z,
                                 output_file=f"{args.output}_rm_tau_host_frame.{args.ext}",
                                 name=args.tau_name,
+                                print_table=False
                             )
                             plot_rm_tau_correlation_host_frame(
                                 sigma_rm=sigma_rm,
