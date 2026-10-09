@@ -495,6 +495,21 @@ def main():
 		stokes_q = None
 		stokes_u = None
 
+	# Stokes I: per-channel zero mean, unit std (freq x time). Q/U/V are divided by the
+	# same per-channel Stokes I std so polarisation ratios between channels are preserved.
+	print("\nNormalising per channel (I: zero mean, unit std; Q/U/V scaled by Stokes I std)...")
+	stokes_i = np.array(stokes_i, dtype=float)
+	stokes_i -= np.mean(stokes_i, axis=1, keepdims=True)
+	i_std = np.std(stokes_i, axis=1, keepdims=True)
+	i_std = np.where(i_std > 0, i_std, 1.0)
+	stokes_i /= i_std
+	if stokes_q is not None:
+		stokes_q = np.asarray(stokes_q, dtype=float) / i_std
+	if stokes_u is not None:
+		stokes_u = np.asarray(stokes_u, dtype=float) / i_std
+	if stokes_v is not None:
+		stokes_v = np.asarray(stokes_v, dtype=float) / i_std
+
 	fs_factor = int(args.fscrunch) if args.fscrunch else 1
 	if fs_factor > 1:
 		print(f"\nScrunching in frequency by factor {fs_factor}...")
