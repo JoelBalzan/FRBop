@@ -51,6 +51,15 @@ from .galactic_rm import (
 )
 
 
+# Minimum significance of the host-frame RM, |RM_host| / sigma(RM_gal) *
+# (1 + z)^2, for a source to be kept by the reliable-foreground filter.
+# Sources whose Galactic RM error is a substantial fraction of RM_obs have a
+# host RM that is consistent with no RM at all, so both its magnitude and
+# its sign are untrustworthy. See rm_host_significance() and
+# filter_reliable_foreground().
+DEFAULT_RM_HOST_SIGMA_MIN = 3.0
+
+
 def _radec(
 	ra_str: str,
 	dec_str: Optional[str] = None,
@@ -99,6 +108,62 @@ PANDHI2026_SAMPLE = [
 	},
 ]
 
+PANDHI2026_SUBBURST_SAMPLE = [
+
+    {
+        "name": "FRB 20220529A_burst2",
+        "z": 0.1839,
+        "nu_centre": 600,
+        "rm": 43.0,
+        "rm_err": 1.0,
+        "sigma_rm": 2.50,
+        "sigma_rm_err": 0.02,
+        "tau": 1.43,
+        "tau_err": 0.09,
+        **_radec("01h16m24.99s +20d37m56.55s"),
+    },
+
+    {
+        "name": "FRB 20220529A_burst5",
+        "z": 0.1839,
+        "nu_centre": 600,
+        "rm": -4.4,
+        "rm_err": 0.4,
+        "sigma_rm": 2.50,
+        "sigma_rm_err": 0.02,
+        "tau": 0.41,
+        "tau_err": 0.02,
+        **_radec("01h16m24.99s +20d37m56.55s"),
+    },
+
+    {
+        "name": "FRB 20220529A_burst13",
+        "z": 0.1839,
+        "nu_centre": 600,
+        "rm": -3.5,
+        "rm_err": 0.5,
+        "sigma_rm": 2.50,
+        "sigma_rm_err": 0.02,
+        "tau": 0.43,
+        "tau_err": 0.01,
+        **_radec("01h16m24.99s +20d37m56.55s"),
+    },
+
+    {
+        "name": "FRB 20220529A_burst16",
+        "z": 0.1839,
+        "nu_centre": 600,
+        "rm": 7.0,
+        "rm_err": 1.0,
+        "sigma_rm": 2.50,
+        "sigma_rm_err": 0.02,
+        "tau": 1.96,
+        "tau_err": 0.01,
+        **_radec("01h16m24.99s +20d37m56.55s"),
+    },
+
+]
+
 
 # name           RM      sigma_RM   sigma_RM_err  tau      tau_err
 # FRB 20121102A  81542   30.9       0.4          <0.43     -
@@ -117,7 +182,7 @@ FENG2022_SAMPLE = [
 		"z": 0.19273,
 		"nu_centre": 1300,
 		"rm": 81542.0,
-		"rm_err": None,
+		"rm_err": 9.48,
 		"sigma_rm": 30.9,
 		"sigma_rm_err": 0.4,
 		"tau": -0.43,
@@ -129,7 +194,7 @@ FENG2022_SAMPLE = [
 		"z": 0.3304,
 		"nu_centre": 1300,
 		"rm": 546.0,
-		"rm_err": None,
+		"rm_err": 2.86,
 		"sigma_rm": 6.3,
 		"sigma_rm_err": 0.4,
 		"tau": None,
@@ -141,7 +206,7 @@ FENG2022_SAMPLE = [
 		"z": 0.0337,
 		"nu_centre": 1300,
 		"rm": -115.0,
-		"rm_err": None,
+		"rm_err": 0.15,
 		"sigma_rm": 0.12,
 		"sigma_rm_err": 0.01,
 		"tau": 0.009,
@@ -153,7 +218,7 @@ FENG2022_SAMPLE = [
 		"z": 0.0640,
 		"nu_centre": 1300,
 		"rm": -411.0,
-		"rm_err": None,
+		"rm_err": 6.6,
 		"sigma_rm": 3.6,
 		"sigma_rm_err": 0.1,
 		"tau": 0.19,
@@ -165,7 +230,7 @@ FENG2022_SAMPLE = [
 		"z": 0.12817,
 		"nu_centre": 1300,
 		"rm": 4681.0,
-		"rm_err": None,
+		"rm_err": 3.95,
 		"sigma_rm": 6.1,
 		"sigma_rm_err": 0.5,
 		"tau": 0.21,
@@ -177,7 +242,7 @@ FENG2022_SAMPLE = [
 		"z": 0.241,
 		"nu_centre": 1300,
 		"rm": 2759.0,
-		"rm_err": None,
+		"rm_err": 86.4,
 		"sigma_rm": 218.9,
 		"sigma_rm_err": 10.2,
 		"tau": 9.8,
@@ -189,7 +254,7 @@ FENG2022_SAMPLE = [
 		"z": 0.098,
 		"nu_centre": 1300,
 		"rm": -684.0,
-		"rm_err": None,
+		"rm_err": 0.67,
 		"sigma_rm": 2.5,
 		"sigma_rm_err": 0.1,
 		"tau": 0.59,
@@ -1087,6 +1152,167 @@ def _print_observer_frame_table(
 	print()
 
 
+def _uses_scatter_err(src: Dict) -> bool:
+	"""
+	Return whether the local SPICE-RACS scatter, rather than the formal
+	pixel error, is the appropriate uncertainty for this source.
+
+	Two SPICE-RACS DR2 products describe different things:
+
+		rm_galactic_err     the formal error on the pixel's weighted
+		                    mean, i.e. how well that mean is measured.
+
+		rm_galactic_scatter the MAD scatter of the neighbouring sources,
+		                    i.e. how much the foreground varies from one
+		                    line of sight to the next.
+
+	Normally the formal error is the right figure: the target is close
+	enough to the pixel mean that the mean describes it. The scatter only
+	becomes the limiting term once it is large compared to the formal
+	error, which is what DEFAULT_SCATTER_WARN_THRESHOLD marks. Below that
+	the structure is a sub-dominant detail and the formal error stands.
+	Above it, the target's line of sight can plausibly sit well away from
+	the pixel mean, so the scatter is used instead.
+	"""
+	scatter = src.get("rm_galactic_scatter")
+
+	if scatter is None or not np.isfinite(scatter):
+		return False
+
+	return float(scatter) > DEFAULT_SCATTER_WARN_THRESHOLD
+
+
+def _rm_host_err(src: Dict) -> float:
+	"""
+	Return the 1-sigma uncertainty on the Galactic RM at the source's own
+	position, scaled to the host frame [rad m^-2].
+
+	This is the formal SPICE-RACS pixel error in the ordinary case, and
+	the local neighbour scatter for the high-scatter positions identified
+	by _uses_scatter_err(). See that function for why the choice is
+	conditional rather than always taking the larger of the two.
+	"""
+	z = src.get("z")
+
+	if z is None:
+		return float("nan")
+
+	if _uses_scatter_err(src):
+		sigma = float(src.get("rm_galactic_scatter"))
+	else:
+		sigma = src.get("rm_galactic_err")
+
+		if sigma is None:
+			return float("nan")
+
+		sigma = float(sigma)
+
+		if not np.isfinite(sigma) or sigma <= 0:
+			return float("nan")
+
+	return sigma * (1.0 + z) ** 2
+
+
+def rm_host_significance(src: Dict) -> float:
+	"""
+	Return |RM_host| / sigma(RM_gal,host) for a host-frame-corrected source.
+
+	NaN when the significance cannot be evaluated (no z, no usable
+	uncertainty, or RM_host = 0).
+
+	A large uncertainty on the Galactic line-of-sight RM only matters if it
+	is large compared to RM_obs. Where RM_obs is very large -- e.g. FRB
+	20121102A, whose RM exceeds 8e4 rad/m^2 -- even a +/-40 rad/m^2
+	foreground leaves RM_host overwhelmingly significant, so the source
+	is safe to keep however noisy the local foreground is. The failure
+	case is the opposite extreme: a small RM_obs combined with a large
+	foreground uncertainty gives a host RM consistent with zero, whose
+	magnitude and sign are both meaningless.
+	"""
+	rm = src.get("rm")
+
+	if rm is None:
+		return float("nan")
+
+	err = _rm_host_err(src)
+
+	if not np.isfinite(err) or err <= 0:
+		return float("nan")
+
+	return abs(float(rm)) / err
+
+
+def filter_reliable_foreground(
+	sample: List[Dict],
+	sigma_min: float = DEFAULT_RM_HOST_SIGMA_MIN,
+) -> List[Dict]:
+	"""
+	Drop sources whose host-frame RM is not significantly non-zero.
+
+	A single criterion: |RM_host| must reach sigma_min times the Galactic RM
+	uncertainty, keeping sources whose host RM is indistinguishable from
+	zero. Which uncertainty that is depends on the position: the formal
+	SPICE-RACS pixel error normally, and the local neighbour scatter for
+	positions flagged by _uses_scatter_err(). There is no blanket
+	rejection for a high scatter, because a noisy foreground is not by
+	itself a defect -- it only becomes one when it is large compared with
+	RM_obs, and the significance test already measures exactly that. A
+	source with a very large RM survives a very noisy foreground, which is
+	the correct outcome.
+
+	Every excluded source is reported with its significance and the error
+	that produced it, so the decision is auditable.
+	"""
+	kept: List[Dict] = []
+
+	for src in sample:
+		name = src.get("name", "?")
+
+		# Name the error actually used, so the two regimes are not confused.
+		if _uses_scatter_err(src):
+			err_name = "local SPICE-RACS scatter"
+			err_note = (
+				" (scatter exceeds "
+				f"{DEFAULT_SCATTER_WARN_THRESHOLD:g} rad/m^2, so the "
+				"scatter is used rather than the formal error)"
+			)
+		else:
+			err_name = "Galactic RM error"
+			err_note = ""
+
+		sig = rm_host_significance(src)
+
+		if not np.isfinite(sig) or sig < sigma_min:
+			if np.isfinite(sig):
+				print(
+					f"  [host-frame] excluding {name}: "
+					f"|RM_host| = {abs(float(src['rm'])):.2f} rad/m^2 "
+					f"is only {sig:.1f}x the {err_name} "
+					f"({_rm_host_err(src):.2f} rad/m^2 in the host "
+					f"frame), below the required {sigma_min:g} "
+					f"sigma{err_note}"
+				)
+			else:
+				print(
+					f"  [host-frame] excluding {name}: significance "
+					f"cannot be evaluated (no usable Galactic RM "
+					f"uncertainty)"
+				)
+
+			continue
+
+		kept.append(src)
+
+	if len(kept) < len(sample):
+		print(
+			f"  [host-frame] reliable-foreground filter kept "
+			f"{len(kept)}/{len(sample)} sources at "
+			f"{sigma_min:g} sigma"
+		)
+
+	return kept
+
+
 def _print_host_frame_table(sample: List[Dict]) -> None:
 	"""Print observer-frame and host-frame products for the corrected sample."""
 	columns = [
@@ -1095,6 +1321,7 @@ def _print_host_frame_table(sample: List[Dict]) -> None:
 		("RM obs", 19),
 		("RM Gal", 20),
 		("RM host", 19),
+		("RM host sig", 12),
 		("sigmaRM obs", 17),
 		("sigmaRM host", 17),
 		("tau obs [ms]", 17),
@@ -1162,6 +1389,7 @@ def _print_host_frame_table(sample: List[Dict]) -> None:
 			f"{rm_obs:>19}",
 			f"{rm_gal:>20}",
 			f"{rm_host:>19}",
+			f"{_fmt(rm_host_significance(src), 1):>12}",
 			f"{sigma_obs:>17}",
 			f"{sigma_host:>17}",
 			f"{tau_obs:>17}",
@@ -1177,6 +1405,15 @@ def _print_host_frame_table(sample: List[Dict]) -> None:
 		"RM_host = (RM_obs − RM_Gal) × (1+z)^2    "
 		"sigmaRM_host = sigmaRM_obs × (1+z)^2    "
 		"tau_host = tau_obs / (1+z)^3"
+	)
+	print(
+		"RM host sig = |RM_host| / (Galactic RM error scaled to the host "
+		"frame). The error is the formal SPICE-RACS pixel error, except "
+		"where the local neighbour scatter exceeds "
+		f"{DEFAULT_SCATTER_WARN_THRESHOLD:g} rad/m^2, in which case the "
+		"scatter is used instead. Values of order unity mean the host RM "
+		"is consistent with zero and the foreground correction is "
+		"unreliable."
 	)
 	print(
 		"Negative tau values and sigma_RM values denote upper limits; "
@@ -1894,6 +2131,7 @@ def plot_rm_tau_correlation_host_frame(
 	name: str = "This work",
 	scatter_warn_threshold: float = DEFAULT_SCATTER_WARN_THRESHOLD,
 	exclude_upper_limits: bool = False,
+	rm_host_sigma_min: Optional[float] = None,
 	print_table: bool = True
 ) -> Dict:
 	"""
@@ -1904,9 +2142,21 @@ def plot_rm_tau_correlation_host_frame(
 	tau_host = tau_obs / (1 + z)^3
 
 	Sources without the required coordinates/redshift/RM are skipped.
-	High SPICE-RACS neighbour scatter causes a fallback to the
-	Hutschenreuter et al. (2022) Galactic RM reconstruction rather than
-	rejecting the source.
+	The Hutschenreuter et al. (2022) reconstruction is used only where
+	SPICE-RACS DR2 has no coverage; a high neighbour scatter keeps the
+	measured SPICE-RACS value and is reported as a note.
+
+	When rm_host_sigma_min is set, reference sources are additionally
+	dropped by filter_reliable_foreground() if |RM_host| falls below
+	that many times the Galactic RM error. That error is the formal
+	SPICE-RACS pixel error, except for the positions whose local
+	neighbour scatter exceeds scatter_warn_threshold, where the scatter
+	is used instead. A high scatter therefore never rejects a source on
+	its own: it only changes which error the significance is measured
+	against. A source with a very large RM passes either way, while a
+	small RM sitting in a noisy foreground correctly fails. Your own
+	burst is never dropped, following the same convention as
+	exclude_upper_limits; a warning is printed if it fails the check.
 	"""
 	if sample is None:
 		sample = feng2022_sample()
@@ -1948,6 +2198,25 @@ def plot_rm_tau_correlation_host_frame(
 			f"'{name}' -- check ra/dec/z/rm are all provided and "
 			f"valid."
 		)
+
+	if rm_host_sigma_min is not None:
+		corrected_sample = filter_reliable_foreground(
+			corrected_sample,
+			rm_host_sigma_min,
+		)
+
+		user_sig = rm_host_significance(user_src)
+
+		if not np.isfinite(user_sig) or user_sig < rm_host_sigma_min:
+			print(
+				f"  WARNING: your burst '{name}' is kept in this plot "
+				f"but does not pass the reliable-foreground check: "
+				f"|RM_host| = {abs(float(user_src['rm'])):.2f} rad/m^2 "
+				f"is only {user_sig:.1f}x the Galactic RM error "
+				f"({_rm_host_err(user_src):.2f} rad/m^2 in the host frame) "
+				f"(< {rm_host_sigma_min:g} sigma). Treat its host RM "
+				f"as consistent with zero."
+			)
 
 	corrected_sample_with_user = [
 		dict(src) for src in corrected_sample

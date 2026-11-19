@@ -7,6 +7,7 @@ from scipy.fftpack import dct, idct #https://docs.scipy.org/doc/scipy/reference/
 from scipy import linalg #https://docs.scipy.org/doc/scipy/reference/linalg.html
 
 from .dm_processing import get_kc, uncertainty_calc, get_ranges_above_max
+from .structure_errors import channel_delays, sigma_dm
 
 def _main():
 
@@ -31,6 +32,16 @@ def _main():
     results = []
     uncertainty_lower = []
     uncertainty_upper = []
+    # S23 recipe, kept for comparison (overestimates the uncertainty)
+    results_S23 = []
+    uncertainty_lower_S23 = []
+    uncertainty_upper_S23 = []
+
+    # Corrected 1-sigma DM uncertainty needs the channel delays
+    if args.f0 is not None:
+        tau_us, share = channel_delays(args.f0, args.bw, args.nchan)
+    else:
+        print("No centre frequency given (-f/--f0): using the S23 uncertainty ranges.")
 
     for kc in kc_set:
         #filter response
@@ -74,20 +85,40 @@ def _main():
         possible_max_ranges = get_ranges_above_max(max_structure_parameter, adjusted_SPs)
         
         if possible_max_ranges[0][0] == 0:
-            uncertainty_lower.append(DM_data[0]-0.1) 
+            uncertainty_lower_S23.append(DM_data[0]-0.1) 
         else:
-            uncertainty_lower.append(DM_data[possible_max_ranges[0][0]])
+            uncertainty_lower_S23.append(DM_data[possible_max_ranges[0][0]])
         if len(possible_max_ranges[-1])==2:
-            uncertainty_upper.append(DM_data[possible_max_ranges[-1][1]])
+            uncertainty_upper_S23.append(DM_data[possible_max_ranges[-1][1]])
         else:
-            uncertainty_upper.append(DM_data[-1]+0.1)
-        results.append(DM_data[max_index])
+            uncertainty_upper_S23.append(DM_data[-1]+0.1)
+        results_S23.append(DM_data[max_index])
+
+        # Corrected: fitted peak +/- 1 sigma
+        if args.f0 is not None:
+            try:
+                dm_fit = sigma_dm(I_data, DM_data, kc, O, tau_us, share, float(args.dt))
+                results.append(dm_fit['dm_hat'])
+                uncertainty_lower.append(dm_fit['dm_hat'] - dm_fit['sigma_dm'])
+                uncertainty_upper.append(dm_fit['dm_hat'] + dm_fit['sigma_dm'])
+            except RuntimeError:
+                results.append(np.nan)
+                uncertainty_lower.append(np.nan)
+                uncertainty_upper.append(np.nan)
+
+    if args.f0 is None:
+        results, uncertainty_lower, uncertainty_upper = results_S23, uncertainty_lower_S23, uncertainty_upper_S23
 
     if args.save_all:
+        plt.rcParams['font.family'] = 'cm'
+        plt.rcParams['mathtext.fontset'] = 'cm'
         plt.rcParams['font.size'] = 14
         plt.plot(kc_set, results, color='black', label='Structure Maximising\nDelta DM')
         plt.plot(kc_set, uncertainty_lower, '--', color='black', label='Uncertainty Bounds')
         plt.plot(kc_set, uncertainty_upper, '--', color='black')
+        if args.f0 is not None:
+            plt.plot(kc_set, uncertainty_lower_S23, ':', color='grey', label='S23 recipe')
+            plt.plot(kc_set, uncertainty_upper_S23, ':', color='grey')
         plt.ylim(DM_data[0], DM_data[-1])
         plt.xlabel(r"$k_c$")
         plt.ylabel(r"$\rm{\Delta\ DM}\ (\rm{pc\ cm}^{-3})$")
@@ -98,12 +129,17 @@ def _main():
         plt.clf()
 
     np.savetxt(f"{args.label}_uncertainly_kc.dat", np.vstack([kc_set, uncertainty_lower, results, uncertainty_upper]).T)
+    np.savetxt(f"{args.label}_uncertainly_kc_S23.dat", np.vstack([kc_set, uncertainty_lower_S23, results_S23, uncertainty_upper_S23]).T)
 
     uncertainty_ranges = [uncertainty_upper[i]-uncertainty_lower[i] for i in range(len(kc_set))]
+    if np.all(np.isnan(uncertainty_ranges)):
+        raise RuntimeError("No uncertainty could be calculated for any kc")
 
-    min_uncertainty = uncertainty_ranges[0]
+    min_uncertainty = np.nanmax(uncertainty_ranges)
     min_indices = []
     for i, uncertainty_range in enumerate(uncertainty_ranges):
+        if np.isnan(uncertainty_range):
+            continue
         if uncertainty_range < min_uncertainty:
             min_indices = [i]
             min_uncertainty = uncertainty_range
@@ -122,6 +158,10 @@ def _main():
     else:
         summary_file.write(f"kc was forced to be {real_kc}\n")
     summary_file.write(f"kc range tested was from {kc_set[0]} to {kc_set[-1]}\n")
+    if args.f0 is not None:
+        summary_file.write(f"uncertainty ranges are the fitted structure maximising delta DM +/- 1 sigma\n")
+    else:
+        summary_file.write(f"uncertainty ranges are from the S23 recipe (no centre frequency given; these overestimate the uncertainty)\n")
     summary_file.write(f"smallest uncertainty range found was of size {min_uncertainty}\n")
     summary_file.write(f"this range had DM bounds {uncertainty_lower[min_index]} to {uncertainty_upper[min_index]}\n")
     summary_file.write(f"the number of kc values which produced a range of this size was {len(min_indices)}\n")
@@ -167,6 +207,24 @@ def get_args() -> ArgumentParser:
         default=None,
         type=int,
         help="Value of kc to use.",
+    )
+    parser.add_argument(
+        "-f", "--f0",
+        type=float,
+        default=None,
+        help="Central frequency of observation in MHz (as given to generate_profiles.py). Needed for the corrected DM uncertainty.",
+    )
+    parser.add_argument(
+        "-b", "--bw",
+        type=float,
+        default=336,
+        help="Bandwidth of observation in MHz (as given to generate_profiles.py).",
+    )
+    parser.add_argument(
+        "--nchan",
+        type=int,
+        default=336,
+        help="Number of coarse channels formed by generate_profiles.py.",
     )
     return parser.parse_args()
 

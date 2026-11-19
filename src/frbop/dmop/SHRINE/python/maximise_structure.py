@@ -1,13 +1,13 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+import time
 
-import matplotlib.pyplot as plt
 import numpy as np
-from scipy import \
-    linalg  # https://docs.scipy.org/doc/scipy/reference/linalg.html
-from scipy.fftpack import (  # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
-    dct, idct)
+import matplotlib.pyplot as plt
+from scipy.fftpack import dct, idct #https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.dct.html
+from scipy import linalg #https://docs.scipy.org/doc/scipy/reference/linalg.html
 
-from .dm_processing import get_kc, get_ranges_above_max, uncertainty_calc
+from .dm_processing import get_kc, uncertainty_calc, get_ranges_above_max
+from .structure_errors import channel_delays, difference_sigma, sigma_dm, sp_sigma
 
 
 def _main():
@@ -15,41 +15,11 @@ def _main():
     args = get_args()
 
     DM_data = np.load(f"{args.label}_DMs.npy")
-    # Support PA-based structure maximising: load PA (and Q/U for masking) when requested
-    if args.pa:
-        PA_data = np.load(f"{args.label}_PA_{args.dt}us.npy", mmap_mode='r')
-        Q_data = np.load(f"{args.label}_Q_{args.dt}us.npy", mmap_mode='r')
-        U_data = np.load(f"{args.label}_U_{args.dt}us.npy", mmap_mode='r')
-        data_label = 'PA'
-        data_raw = PA_data.copy()
-        # Unwrap PA for each DM row: 0.5 * unwrap(2*PA)
-        data_raw = 0.5 * np.unwrap(2.0 * data_raw, axis=1)
-
-        # Mask low polarisation S/N regions using Q/U amplitude percentile
-        if args.pa_mask_pct is not None:
-            L = np.sqrt(Q_data ** 2 + U_data ** 2)
-            thresh = np.percentile(L, args.pa_mask_pct)
-            mask = L <= thresh
-            # interpolate masked values along time axis for each DM
-            for i in range(data_raw.shape[0]):
-                row = data_raw[i]
-                bad = mask[i]
-                if np.all(bad):
-                    # if fully bad, leave as zeros
-                    data_raw[i] = 0.0
-                    continue
-                if np.any(bad):
-                    good_idx = np.where(~bad)[0]
-                    bad_idx = np.where(bad)[0]
-                    data_raw[i, bad_idx] = np.interp(bad_idx, good_idx, row[good_idx])
-
-    else:
-        data_label = 'I'
-        data_raw = np.load(f"{args.label}_I_{args.dt}us.npy")
+    I_data = np.load(f"{args.label}_I_{args.dt}us.npy")
 
     #Setup complete, start doing the math
-    CI_data = dct(data_raw, norm='ortho')  # note "norm=ortho" to match MATLAB's dct
-    dm_length, k_length = CI_data.shape
+    CI_data=dct(I_data, norm='ortho') #note "norm=ortho" to match MATLAB's dct
+    dm_length,k_length=CI_data.shape
 
     #Low pass filter
     if args.force_kc is None:
@@ -63,10 +33,10 @@ def _main():
 
     #Pass DCT data through the combined filter to calculate structure parameter
     fL_diag=np.diag(fL) #make low-pass Filter into a diagonal matrix
-    LPF_data = fL_diag @ np.transpose(CI_data)  # pass data through LPF
-    data_smooth = idct(np.transpose(LPF_data), norm='ortho')  # smooth data
+    LPF_data=fL_diag@np.transpose(CI_data) #pass data through LPF
+    I_smooth=idct(np.transpose(LPF_data), norm='ortho') #smooth data
 
-    np.save(f"{args.label}_{data_label}_smooth_{args.dt}us.npy", data_smooth)
+    np.save(f"{args.label}_I_smooth_{args.dt}us.npy", I_smooth)
 
     #1st derivative "high-pass" filter
     pi=np.pi
@@ -77,26 +47,45 @@ def _main():
     filter_diag=np.diag(filter) #make Filter into a diagonal matrix
 
     #pass DCT data through the combined filter
-    CI_filtered = filter_diag @ np.transpose(CI_data)
-    norm_CI_filtered = linalg.norm(CI_filtered, axis=0)  # calculate structrue parameter, note numpy axis
+    CI_filtered=filter_diag@np.transpose(CI_data)
+    norm_CI_filtered=linalg.norm(CI_filtered, axis=0) #calculate structrue parameter, note numpy axis (see https://www.sharpsightlabs.com/blog/numpy-axes-explained/)
 
-    #Uncertainty calculations
-    delta_data = data_raw - data_smooth  # de-trended noise
-
-    #calculate uncertainty proper
-    uncertainty = uncertainty_calc(delta_data, LPF_data, filter_diag)
-
-    #Second round of uncertainty calculations
     max_index = np.argmax(norm_CI_filtered)
-    delta_delta_data = delta_data - delta_data[max_index]
-
-    relative_uncertainty = uncertainty_calc(delta_delta_data, LPF_data, filter_diag)
-
-    #Find uncertainty in structure maximizing DM
     max_structure_parameter = norm_CI_filtered[max_index]
     delta_DM_at_max = DM_data[max_index]
 
-    adjusted_SPs = norm_CI_filtered + (norm_CI_filtered * relative_uncertainty)
+    #Corrected 1-sigma uncertainties (see structure_errors.py)
+    #Structure parameter: sigma_S^2 = sum_t w_t^2 sigma_t^2, w = a_hat^T D1 S
+    SP_sigma = sp_sigma(I_data, kc, O)
+    uncertainty = SP_sigma/norm_CI_filtered
+
+    #DM: vertex of a parabola fitted to S(DM), sigma_DM = std[e_par'] / |S''|
+    dm_fit = None
+    relative_uncertainty = None
+    if args.f0 is None:
+        print("No centre frequency given (-f/--f0): skipping the DM uncertainty.")
+    else:
+        tau_us, share = channel_delays(args.f0, args.bw, args.nchan)
+        try:
+            dm_fit = sigma_dm(I_data, DM_data, kc, O, tau_us, share, args.dt)
+        except RuntimeError as err:
+            print(f"DM uncertainty failed: {err}")
+        #noise of S(DM) - S(DM_max), the corrected version of S23's relative uncertainty
+        relative_uncertainty = difference_sigma(I_data, DM_data, kc, O, tau_us, share, args.dt, max_index)/norm_CI_filtered
+
+    #S23 recipe, kept for comparison (overestimates the uncertainties)
+    delta_I=I_data-I_smooth #de-trended noise
+
+    #calculate uncertainty proper
+    uncertainty_S23 = uncertainty_calc(delta_I, LPF_data, filter_diag)
+
+    #Second round of uncertainty calculations
+    delta_delta_I=delta_I-delta_I[max_index]
+
+    relative_uncertainty_S23 = uncertainty_calc(delta_delta_I, LPF_data, filter_diag)
+
+    #Find uncertainty in structure maximizing DM
+    adjusted_SPs = norm_CI_filtered + (norm_CI_filtered * relative_uncertainty_S23)
 
     possible_max_ranges = get_ranges_above_max(max_structure_parameter, adjusted_SPs)
 
@@ -120,8 +109,12 @@ def _main():
         one_range = None
 
     np.savetxt(f"{args.label}_SPs.dat", norm_CI_filtered)
+    np.savetxt(f"{args.label}_SP_sigma.dat", SP_sigma)
     np.savetxt(f"{args.label}_Uncertainties.dat", uncertainty)
-    np.savetxt(f"{args.label}_Relative_Uncertainties.dat", relative_uncertainty)
+    if relative_uncertainty is not None:
+        np.savetxt(f"{args.label}_Relative_Uncertainties.dat", relative_uncertainty)
+    np.savetxt(f"{args.label}_Uncertainties_S23.dat", uncertainty_S23)
+    np.savetxt(f"{args.label}_Relative_Uncertainties_S23.dat", relative_uncertainty_S23)
 
     if args.save_all:
 
@@ -131,26 +124,24 @@ def _main():
 
         plot_DM_index(DM_data, args)
 
-        # Time-series plots (works for both I and PA)
-        plot_I_at_max(data_raw[max_index], data_smooth[max_index], args)
-        plot_noise_at_max(delta_data[max_index], args)
+        # Intensity-time plots
+        plot_I_at_max(I_data[max_index],I_smooth[max_index],args)
+        plot_noise_at_max(delta_I[max_index], args)
 
-        # Data(DM,t) plots
-        plot_noisy_I_DM_t(data_raw, DM_data, args)
-        plot_smooth_I_DM_t(data_smooth, DM_data, args)
-        plot_detrended_noise(delta_data, DM_data, args)
-        plot_relative_detrended_noise(delta_delta_data, DM_data, args)
+        # I(DM,t) plots
+        plot_noisy_I_DM_t(I_data, DM_data, args)
+        plot_smooth_I_DM_t(I_smooth, DM_data, args)
+        plot_detrended_noise(delta_I, DM_data, args)
+        plot_relative_detrended_noise(delta_delta_I, DM_data, args)
         plot_DCT_spectrum(CI_data, args, kc)
 
         # Uncertainty-time plots
-        plot_uncertainty(uncertainty, DM_data, args)
-        plot_relative_uncertainty(relative_uncertainty, DM_data, args)
-        plot_compare_uncertainty(uncertainty, relative_uncertainty, DM_data, args)
+        plot_uncertainty(uncertainty, uncertainty_S23, DM_data, args)
+        plot_relative_uncertainty(relative_uncertainty, relative_uncertainty_S23, DM_data, args)
 
         # Structure parameter plots
-        plot_SP(norm_CI_filtered, DM_data, args)
-        plot_adjusted_SP(adjusted_SPs, DM_data, args)
-        plot_norm_CI_f_adjusted_SP(norm_CI_filtered, adjusted_SPs, DM_data, args)
+        plot_SP(norm_CI_filtered, SP_sigma, DM_data, dm_fit, args)
+        plot_adjusted_SP(norm_CI_filtered, relative_uncertainty, adjusted_SPs, DM_data, dm_fit, args)
 
 
     #Write a nice tidy file
@@ -165,38 +156,52 @@ def _main():
     else:
         summary_file.write(f"\tForced kc: {True}\n\t(This could be because of a provided force_kc value or because minimise_uncertainty was used.\n")
     summary_file.write(f"Initial DM: {args.DM}\n")
-    summary_file.write(f"Structure Maximising Delta DM: {delta_DM_at_max}\n")
-    summary_file.write(f"Uncertainty in Structure Maximising Delta DM: ")
+    if dm_fit is not None:
+        summary_file.write(f"Structure Maximising Delta DM: {dm_fit['dm_hat']}\n")
+        summary_file.write(f"Uncertainty in Structure Maximising Delta DM: +/-{dm_fit['sigma_dm']}\t//1 sigma\n")
+        summary_file.write(f"\tPeak of a parabola fitted to the structure parameter over delta DM {dm_fit['fit_range'][0]} to {dm_fit['fit_range'][1]} ({dm_fit['fit_points']} points).\n")
+        summary_file.write(f"\tDelta DM of the largest structure parameter on the grid: {delta_DM_at_max}\n")
+        for warning in dm_fit["warnings"]:
+            summary_file.write(f"\tWarning: {warning}.\n")
+    else:
+        summary_file.write(f"Structure Maximising Delta DM: {delta_DM_at_max}\n")
+        summary_file.write(f"Uncertainty in Structure Maximising Delta DM: unknown\n")
+        summary_file.write(f"\tNeeds the centre frequency (-f/--f0), or the fit to the structure parameter failed.\n")
+    summary_file.write(f"Structure Parameter at Maximum: {max_structure_parameter} +/- {SP_sigma[max_index]}\t//1 sigma\n")
+    summary_file.write(f"\tRelative uncertainty: {uncertainty[max_index]}\n")
+    summary_file.write(f"S23 recipe (Sutinjo et al. 2023; overestimates the uncertainties, kept for comparison):\n")
+    summary_file.write(f"\tRelative uncertainty in Structure Parameter at Maximum: {uncertainty_S23[max_index]}\n")
+    summary_file.write(f"\tUncertainty range in Structure Maximising Delta DM (Eq. 11): ")
     if min_delta_DM is not None:
         if min_delta_DM != np.min(DM_data):
             if max_delta_DM is not None:
                 summary_file.write(f"{min_delta_DM-delta_DM_at_max}/+{max_delta_DM-delta_DM_at_max}\n")
             else:
                 summary_file.write(f"{min_delta_DM-delta_DM_at_max}/+unknown\n")
-                summary_file.write(f"\tUpper bound on uncertainty exceeds delta DM range.\n")
+                summary_file.write(f"\t\tUpper bound on uncertainty exceeds delta DM range.\n")
         else:
             if max_delta_DM is not None:
                 summary_file.write(f"{min_delta_DM-delta_DM_at_max}/+{max_delta_DM-delta_DM_at_max}\n")
-                summary_file.write(f"\tLower bound on uncertainty is equal to lower bound on delta DM range.\n")
-                summary_file.write(f"\tThis probably means it is actually lower than {np.min(DM_data)}.\n")
+                summary_file.write(f"\t\tLower bound on uncertainty is equal to lower bound on delta DM range.\n")
+                summary_file.write(f"\t\tThis probably means it is actually lower than {np.min(DM_data)}.\n")
             else:
                 summary_file.write(f"{min_delta_DM-delta_DM_at_max}/+unknown\n")
-                summary_file.write(f"\tLower bound on uncertainty is equal to lower bound on delta DM range.\n")
-                summary_file.write(f"\tThis probably means it is actually lower than {np.min(DM_data)}.\n")
-                summary_file.write(f"\tUpper bound on uncertainty exceeds delta DM range.\n")
+                summary_file.write(f"\t\tLower bound on uncertainty is equal to lower bound on delta DM range.\n")
+                summary_file.write(f"\t\tThis probably means it is actually lower than {np.min(DM_data)}.\n")
+                summary_file.write(f"\t\tUpper bound on uncertainty exceeds delta DM range.\n")
     else:
         summary_file.write(f"-unknown/+unknown\n")
-        summary_file.write(f"\tNo uncertainty range found. Something has gone wrong!\n")
+        summary_file.write(f"\t\tNo uncertainty range found. Something has gone wrong!\n")
     if not one_range:
-        summary_file.write(f"\tUncertainty range was not continuous.\n")
-        summary_file.write(f"\tRanges found were from:\n")
+        summary_file.write(f"\t\tUncertainty range was not continuous.\n")
+        summary_file.write(f"\t\tRanges found were from:\n")
         for possible_range in possible_max_ranges:
             if len(possible_range) == 2:
                 #good range
-                summary_file.write(f"\t{DM_data[possible_range[0]]} to {DM_data[possible_range[1]]}\n")
+                summary_file.write(f"\t\t{DM_data[possible_range[0]]} to {DM_data[possible_range[1]]}\n")
             else:
                 #bad range
-                summary_file.write(f"\t{DM_data[possible_range[0]]} onwards. (Range finishes out of bounds).\n")
+                summary_file.write(f"\t\t{DM_data[possible_range[0]]} onwards. (Range finishes out of bounds).\n")
     summary_file.write(f"*/\n//end maximise_structure summary//\n\n\n")
     summary_file.close()
 
@@ -241,16 +246,22 @@ def get_args() -> ArgumentParser:
         help="Value of kc to use.",
     )
     parser.add_argument(
-        "--pa",
-        action="store_true",
-        default=False,
-        help="Run structure maximising on PA instead of intensity (requires Q/U files).",
+        "-f", "--f0",
+        type=float,
+        default=None,
+        help="Central frequency of observation in MHz (as given to generate_profiles.py). Needed for the DM uncertainty.",
     )
     parser.add_argument(
-        "--pa-mask-pct",
+        "-b", "--bw",
         type=float,
-        default=10.0,
-        help="Percentile threshold on polarisation amplitude below which PA samples are masked and interpolated (default: 10).",
+        default=336,
+        help="Bandwidth of observation in MHz (as given to generate_profiles.py).",
+    )
+    parser.add_argument(
+        "--nchan",
+        type=int,
+        default=336,
+        help="Number of coarse channels formed by generate_profiles.py.",
     )
     return parser.parse_args()
 
@@ -285,7 +296,7 @@ def plot_noisy_I_DM_t(I_data: np.ndarray, DM_data: np.ndarray, args):
     :type args: :class:`argparse.Namespace`
     """
     imgplot_Inoisy = plt.imshow(I_data, aspect="auto", extent=(0, I_data.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_I_DM_t.png")
     plt.clf() 
@@ -303,7 +314,7 @@ def plot_I_at_max(I_series: np.ndarray, I_smooth_series: np.ndarray, args):
     """
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_series, alpha=0.5, color='blue')
     plt.plot([i*args.dt/1000 for i in range(len(I_series))], I_smooth_series, color='blue')
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel("I")
     plt.savefig(f"{args.label}_{args.dt}us_I_max.png")
     plt.clf() 
@@ -322,25 +333,37 @@ def plot_DCT_spectrum(CI_data: np.ndarray, args, kc):
 
 def plot_smooth_I_DM_t(I_smooth: np.ndarray, DM_data: np.ndarray, args):
     imgplot_Ismooth = plt.imshow(I_smooth, aspect="auto", extent=(0, I_smooth.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_I_DM_t_smoothed.png")
     plt.clf() 
 
 
-def plot_SP(SP_data: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,SP_data,'-')
+def plot_SP(SP_data: np.ndarray, SP_sigma: np.ndarray, DM_data: np.ndarray, dm_fit, args):
+    """Structure parameter with its 1-sigma band, the parabola fit and DM +/- sigma_DM."""
+    plt.plot(DM_data,SP_data,'-',label='Structure parameter')
+    plt.fill_between(DM_data,SP_data-SP_sigma,SP_data+SP_sigma,alpha=0.3,label=r'$\pm1\sigma$')
+    if dm_fit is not None:
+        lo, hi = dm_fit['fit_range']
+        x = np.linspace(lo, hi, 200)
+        c0, c1, c2 = dm_fit['coeffs']
+        u = x - DM_data[dm_fit['centre']]
+        plt.plot(x, c0 + c1*u + c2*u**2, 'k--', label='Parabola fit')
+        plt.axvline(dm_fit['dm_hat'], color='r')
+        plt.axvspan(dm_fit['dm_hat']-dm_fit['sigma_dm'], dm_fit['dm_hat']+dm_fit['sigma_dm'], color='r', alpha=0.2,
+                    label=r'$\Delta$DM $\pm1\sigma$')
     plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.ylabel('Structure Parameter')
     plt.grid(color='k', linestyle='--', linewidth=0.5)
+    plt.legend()
     plt.tight_layout()
     plt.savefig(f"{args.label}_{args.dt}us_structure_parameter.png")
-    plt.clf() 
+    plt.clf()
 
 
 def plot_detrended_noise(delta_I: np.ndarray,DM_data: np.ndarray, args):
     imgplot_DeltaI = plt.imshow(delta_I, aspect="auto", extent=(0, delta_I.shape[1]*args.dt/1000, DM_data[-1], DM_data[0]))
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_detrended_noise.png")
     plt.clf() 
@@ -348,7 +371,7 @@ def plot_detrended_noise(delta_I: np.ndarray,DM_data: np.ndarray, args):
 
 def plot_relative_detrended_noise(delta_delta_I: np.ndarray, dm_data: np.ndarray, args):
     imgplot_DeltaDeltaI = plt.imshow(delta_delta_I, aspect="auto", extent=(0, delta_delta_I.shape[1]*args.dt/1000, dm_data[-1], dm_data[0]))
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.savefig(f"{args.label}_{args.dt}us_relative_detrended_noise.png")
     plt.clf() 
@@ -356,58 +379,50 @@ def plot_relative_detrended_noise(delta_delta_I: np.ndarray, dm_data: np.ndarray
 
 def plot_noise_at_max(noise_at_max: np.ndarray, args): 
     plt.plot([time/1000 for time in range(len(noise_at_max*args.dt))], noise_at_max)
-    plt.xlabel("Time [ms]")
+    plt.xlabel("Time (ms)")
     plt.ylabel("I")
     plt.savefig(f"{args.label}_{args.dt}us_noise_max.png")
     plt.clf() 
 
 
-def plot_uncertainty(uncertainty: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,100*uncertainty,'-')
+def plot_uncertainty(uncertainty: np.ndarray, uncertainty_S23: np.ndarray, DM_data: np.ndarray, args):
+    plt.plot(DM_data,100*uncertainty,'-',label=r'1$\sigma$')
+    plt.plot(DM_data,100*uncertainty_S23,':',color='grey',label='S23 recipe')
     plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.ylabel('Uncertainty (%)')
     plt.grid(color='k', linestyle='--', linewidth=0.5)
+    plt.legend()
     plt.savefig(f"{args.label}_{args.dt}us_uncertainty.png")
-    plt.clf() 
+    plt.clf()
 
 
-def plot_relative_uncertainty(relative_uncertainty: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,100*relative_uncertainty,'-')
+def plot_relative_uncertainty(relative_uncertainty, relative_uncertainty_S23: np.ndarray, DM_data: np.ndarray, args):
+    if relative_uncertainty is not None:
+        plt.plot(DM_data,100*relative_uncertainty,'-',label=r'1$\sigma$')
+    plt.plot(DM_data,100*relative_uncertainty_S23,':',color='grey',label='S23 recipe')
     plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.ylabel('Relative Uncertainty (%)')
     plt.grid(color='k', linestyle='--', linewidth=0.5)
+    plt.legend()
     plt.savefig(f"{args.label}_{args.dt}us_relative_uncertainty.png")
     plt.clf()
 
-def plot_compare_uncertainty(uncertainty: np.ndarray, relative_uncertainty: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,np.sqrt(2)*100*uncertainty,'-',label=r'$\sqrt{2}$ Uncertainty')
-    plt.plot(DM_data,100*relative_uncertainty,'-',label='Relative Uncertainty')
-    plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
-    plt.ylabel('Uncertainty (%)')
-    plt.grid(color='k', linestyle='--', linewidth=0.5)
-    plt.legend()
-    plt.savefig(f"{args.label}_{args.dt}us_compare_uncertainty.png")
-    plt.clf()
 
-
-def plot_adjusted_SP(adjusted_SPs: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,adjusted_SPs,'-')
+def plot_adjusted_SP(SP_data: np.ndarray, relative_uncertainty, adjusted_SPs: np.ndarray, DM_data: np.ndarray, dm_fit, args):
+    """S(DM) + sigma_12/2 (1 sigma) against S(DM_max), with the S23 version for comparison."""
+    if relative_uncertainty is not None:
+        plt.plot(DM_data,SP_data*(1+relative_uncertainty/2),'-',label=r'S + $\sigma_{12}$/2 (1$\sigma$)')
+    plt.plot(DM_data,adjusted_SPs,':',color='grey',label='S23 recipe')
+    plt.axhline(np.max(SP_data), color='k', linewidth=0.8)
+    if dm_fit is not None:
+        plt.axvspan(dm_fit['dm_hat']-dm_fit['sigma_dm'], dm_fit['dm_hat']+dm_fit['sigma_dm'], color='r', alpha=0.2,
+                    label=r'$\Delta$DM $\pm1\sigma$')
     plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
     plt.ylabel('Relative Uncertainty Adjusted Structure Parameter')
     plt.grid(color='k', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    plt.savefig(f"{args.label}_{args.dt}us_adjusted_SP.png")
-    plt.clf()
-
-def plot_norm_CI_f_adjusted_SP(norm_CI_filtered: np.ndarray, adjusted_SPs: np.ndarray, DM_data: np.ndarray, args):
-    plt.plot(DM_data,norm_CI_filtered,'-',label='Structure Parameter')
-    plt.plot(DM_data,adjusted_SPs,'-',label='Relative Uncertainty Adjusted Structure Parameter')
-    plt.xlabel(r"$\Delta$DM ($\mathregular{pc\ cm^{-3}}$)")
-    plt.ylabel('Structure Parameter')
-    plt.grid(color='k', linestyle='--', linewidth=0.5)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"{args.label}_{args.dt}us_norm_CI_f_adjusted_SP.png")
+    plt.savefig(f"{args.label}_{args.dt}us_adjusted_SP.png")
     plt.clf()
 
 if __name__ == "__main__":

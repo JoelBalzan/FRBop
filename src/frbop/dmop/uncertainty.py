@@ -1,19 +1,8 @@
 """DM uncertainty estimation utilities."""
 
-import contextlib
-import io
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from scipy.fftpack import dct
-
-from .common import (
-	shrine_get_kc,
-	shrine_get_ranges_above_max,
-	shrine_lowpass_smooth,
-	shrine_uncertainty_calc,
-)
 
 class UncertaintyMixin:
 	@staticmethod
@@ -53,21 +42,25 @@ class UncertaintyMixin:
 		}
 
 	@staticmethod
+	def _format_error(err: float) -> str:
+		"""2 dp, unless that rounds to zero; then 1 significant figure."""
+		err = abs(float(err))
+		if round(err, 2) != 0.0 or err == 0.0:
+			return f"{err:.2f}"
+		return f"{float(f'{err:.1g}'):.{max(0, -int(np.floor(np.log10(err))))}f}"
+
+	@staticmethod
 	def _format_uncertainty(best_dm: float,
 						 minus: Optional[float],
 						 plus: Optional[float],
-						 precision: int = 6) -> str:
+						 precision: int = 6,
+						 compact_errors: bool = False) -> str:
+		fmt_err = (UncertaintyMixin._format_error if compact_errors
+				   else (lambda v: UncertaintyMixin._format_dm(v, precision)))
 		best = UncertaintyMixin._format_dm(best_dm, precision)
-		if minus is None and plus is None:
-			return f"{best} (-?/+?)"
-		if minus is None:
-			return f"{best} (-?/+{UncertaintyMixin._format_dm(plus, precision)})"
-		if plus is None:
-			return f"{best} (-{UncertaintyMixin._format_dm(minus, precision)}/+?)"
-		return (
-			f"{best} "
-			f"(-{UncertaintyMixin._format_dm(minus, precision)}/+{UncertaintyMixin._format_dm(plus, precision)})"
-		)
+		m = "?" if minus is None else fmt_err(minus)
+		p = "?" if plus is None else fmt_err(plus)
+		return f"{best} (-{m}/+{p})"
 
 	@staticmethod
 	def _dm_crossing(values: np.ndarray,
@@ -151,24 +144,6 @@ class UncertaintyMixin:
 		clamped['uncertainty_minus'] = None if low_clamped is None else float(best_dm - low_clamped)
 		clamped['uncertainty_plus'] = None if high_clamped is None else float(high_clamped - best_dm)
 		return clamped
-
-	@staticmethod
-	def _shrine_bounds_from_ranges(dm_values: np.ndarray,
-						possible_max_ranges: list) -> Tuple[Optional[float], Optional[float]]:
-		dm = np.asarray(dm_values, dtype=float)
-		if len(possible_max_ranges) < 1:
-			return None, None
-		low_idx = int(possible_max_ranges[0][0])
-		low_dm = float(dm[low_idx]) if 0 <= low_idx < len(dm) else None
-		high_dm = None
-		last = possible_max_ranges[-1]
-		if len(last) == 2:
-			high_idx = int(last[1])
-			if 0 <= high_idx < len(dm):
-				high_dm = float(dm[high_idx])
-		elif len(last) == 1:
-			high_dm = float(dm[-1])
-		return low_dm, high_dm
 
 	def _uncertainty_from_half_prominence(self,
 							 dm_values: np.ndarray,
@@ -312,108 +287,6 @@ class UncertaintyMixin:
 		high_dm = self._dm_crossing(metric, dm, best_idx_eff, threshold, direction=1)
 		return self._uncertainty_dict(best_dm, low_dm, high_dm, method_label)
 
-	def _structure_uncertainty_from_shrine_outputs(self,
-									 dm_values: np.ndarray,
-									 structure_values: np.ndarray,
-									 run_dir: Path,
-									 run_prefix: str,
-									 best_idx: int) -> Dict[str, Optional[float]]:
-		rel_path = run_dir / f"{run_prefix}_Relative_Uncertainties.dat"
-		if not rel_path.exists():
-			best_dm = float(dm_values[int(best_idx)])
-			return self._uncertainty_dict(best_dm, None, None, "SHRINE relative uncertainty")
-
-		rel = np.asarray(np.loadtxt(rel_path), dtype=float)
-		sp = np.asarray(structure_values, dtype=float)
-		dm = np.asarray(dm_values, dtype=float)
-		if rel.shape != sp.shape:
-			best_dm = float(dm[int(best_idx)])
-			return self._uncertainty_dict(best_dm, None, None, "SHRINE relative uncertainty")
-
-		max_index = int(best_idx)
-		max_structure_parameter = float(sp[max_index])
-		adjusted_sps = sp + (sp * rel)
-		possible_max_ranges = shrine_get_ranges_above_max(max_structure_parameter, adjusted_sps)
-		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
-		return self._uncertainty_dict(float(dm[max_index]), low_dm, high_dm, "SHRINE relative uncertainty")
-
-	def _uncertainty_from_metric_shrine(self,
-						 dm_values: np.ndarray,
-						 metric_values: np.ndarray,
-						 kc: Optional[int] = None) -> Dict[str, Optional[float]]:
-		"""
-		SHRINE-style relative uncertainty for a 1D metric profile (e.g. PA slope, L/I).
-		Treats the metric-vs-DM array as the signal and applies the same
-		DCT lowpass + residual norm recipe as shrine_uncertainty_calc.
-		"""
-		dm = np.asarray(dm_values, dtype=float)
-		metric = np.asarray(metric_values, dtype=float)
-		if dm.shape != metric.shape:
-			best_idx = int(np.argmax(metric))
-			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE metric uncertainty")
-
-		max_idx = int(np.argmax(np.abs(metric)))
-
-		# Fill non-finite values before DCT
-		finite = np.isfinite(metric)
-		if not np.any(finite):
-			return self._uncertainty_dict(float(dm[max_idx]), None, None, "SHRINE metric uncertainty")
-		metric_fill = metric.copy()
-		metric_fill[~finite] = float(np.nanmean(metric[finite]))
-
-		# DCT of metric profile (1D, so shape (1, n_dm) to reuse 2D machinery)
-		ci_data = dct(metric_fill[np.newaxis, :], norm='ortho')
-		k_len = ci_data.shape[1]
-		if k_len < 2:
-			return self._uncertainty_dict(float(dm[max_idx]), None, None, "SHRINE metric uncertainty")
-
-		if kc is None:
-			with contextlib.redirect_stdout(io.StringIO()):
-				kc_use = int(shrine_get_kc(ci_data))
-		else:
-			kc_use = int(kc)
-		kc_use = max(1, min(kc_use, k_len))
-
-		i_smooth, lpf_data, _, f_l = shrine_lowpass_smooth(ci_data, kc_use, order=3)
-		k = np.linspace(1, k_len, k_len)
-		hp = np.sqrt(2 - 2 * np.cos((k - 1) * np.pi / k_len))
-		filter_diag = np.diag(hp * f_l)
-
-		delta_i = metric_fill[np.newaxis, :] - i_smooth
-		delta_delta_i = delta_i - delta_i[:, max_idx:max_idx + 1]
-
-		relative_uncertainty = shrine_uncertainty_calc(delta_delta_i, lpf_data, filter_diag)
-		relative_uncertainty = np.asarray(relative_uncertainty, dtype=float)
-		relative_uncertainty[~np.isfinite(relative_uncertainty)] = 0.0
-
-		max_metric = float(metric[max_idx])
-		adjusted_metrics = metric + np.abs(metric) * relative_uncertainty
-		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
-		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
-		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE metric uncertainty")
-
-	def _uncertainty_from_polarisation_L_dm(self,
-											dm_values: np.ndarray,
-											metric_values: np.ndarray,
-											kc: Optional[int] = None) -> Dict[str, Optional[float]]:
-		"""
-		Structure-style DM uncertainty from L(t, DM) and the metric-vs-DM curve.
-
-		Uses the same relative-uncertainty recipe as maximise_structure (via
-		_uncertainty_from_shrine_relative), with rows of the precomputed
-		_nonshrine_L_dm_reference array.
-		"""
-		profiles = getattr(self, "_nonshrine_L_dm_reference", None)
-		if profiles is not None:
-			kc_use = kc if kc is not None else getattr(self, "_nonshrine_resolved_kc", None)
-			return self._uncertainty_from_shrine_relative(
-				dm_values,
-				metric_values,
-				profiles,
-				kc=kc_use,
-			)
-		return self._uncertainty_from_metric_shrine(dm_values, metric_values, kc=kc)
-
 	def _uncertainty_from_metric_errors(self,
 							   dm_values: np.ndarray,
 							   metric_values: np.ndarray,
@@ -468,63 +341,19 @@ class UncertaintyMixin:
 			result['uncertainty_method'] = 'PA slope error'
 		return result
 
-	def _uncertainty_from_shrine_relative(self,
-								 dm_values: np.ndarray,
-								 metric_values: np.ndarray,
-								 reference_profiles: np.ndarray,
-								 kc: Optional[int] = None) -> Dict[str, Optional[float]]:
+	def _uncertainty_from_sigma_dm(self,
+								   dm_best: float,
+								   sigma_dm: Optional[float],
+								   why: Optional[str] = None) -> Dict[str, Optional[float]]:
 		"""
-		Estimate uncertainty using the same relative-uncertainty recipe as SHRINE.
+		The DM uncertainty of structure maximisation: dm_best +/- sigma_DM, the 1-sigma
+		uncertainty of SHRINE-II (Balzan et al., in prep., Eq. final). None on both sides when
+		there is no sigma_DM (why says why).
 		"""
-		dm = np.asarray(dm_values, dtype=float)
-		metric = np.asarray(metric_values, dtype=float)
-		profiles = np.asarray(reference_profiles, dtype=float)
-
-		if profiles.ndim != 2 or profiles.shape[0] != dm.shape[0] or metric.shape[0] != dm.shape[0]:
-			best_idx = int(np.argmax(np.abs(metric)))
-			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE relative uncertainty")
-
-		# Replace non-finite values row-wise so DCT/filtering remains stable.
-		profiles_finite = profiles.copy()
-		for row_idx in range(profiles_finite.shape[0]):
-			row = profiles_finite[row_idx]
-			finite = np.isfinite(row)
-			if np.any(finite):
-				fill_value = float(np.nanmean(row[finite]))
-				profiles_finite[row_idx, ~finite] = fill_value
-			else:
-				profiles_finite[row_idx, :] = 0.0
-
-		ci_data = dct(profiles_finite, norm='ortho')
-		k_len = ci_data.shape[1]
-		if k_len < 2:
-			best_idx = int(np.argmax(np.abs(metric)))
-			return self._uncertainty_dict(float(dm[best_idx]), None, None, "SHRINE relative uncertainty")
-
-		if kc is None:
-			with contextlib.redirect_stdout(io.StringIO()):
-				kc_use = int(shrine_get_kc(ci_data))
-		else:
-			kc_use = int(kc)
-		kc_use = max(1, min(kc_use, k_len))
-
-		i_smooth, lpf_data, _, f_l = shrine_lowpass_smooth(ci_data, kc_use, order=3)
-		k = np.linspace(1, k_len, k_len)
-		hp = np.sqrt(2 - 2 * np.cos((k - 1) * np.pi / k_len))
-		filter_diag = np.diag(hp * f_l)
-
-		delta_i = profiles_finite - i_smooth
-		max_idx = int(np.argmax(np.abs(metric)))
-		delta_delta_i = delta_i - delta_i[max_idx]
-
-		relative_uncertainty = shrine_uncertainty_calc(delta_delta_i, lpf_data, filter_diag)
-		relative_uncertainty = np.asarray(relative_uncertainty, dtype=float)
-		relative_uncertainty[~np.isfinite(relative_uncertainty)] = 0.0
-
-		max_metric = float(metric[max_idx])
-		adjusted_metrics = metric + np.abs(metric) * relative_uncertainty
-		possible_max_ranges = shrine_get_ranges_above_max(max_metric, adjusted_metrics)
-		low_dm, high_dm = self._shrine_bounds_from_ranges(dm, possible_max_ranges)
-		return self._uncertainty_dict(float(dm[max_idx]), low_dm, high_dm, "SHRINE relative uncertainty")
-
-
+		if sigma_dm is None:
+			method = "SHRINE-II sigma_DM: none"
+			if why:
+				method = f"{method} ({why})"
+			return self._uncertainty_dict(dm_best, None, None, method)
+		return self._uncertainty_dict(dm_best, dm_best - sigma_dm, dm_best + sigma_dm,
+									  "SHRINE-II sigma_DM (1 sigma)")

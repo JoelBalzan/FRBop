@@ -47,3 +47,10 @@ frbop scint FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy
 frbop scatt FRB_250607_htr_dsI.npy --freq FRB_250607_htr_freq.npy
 frbop sn -x xpol.npy -y ypol.npy -p parameters.txt
 ```
+
+## DM optimisation and SHRINE-II
+
+The structure-maximising and S/N-maximising methods of `frbop dm` use SHRINE-II (Balzan et al., in prep.), copied
+into `src/frbop/dmop/SHRINE2` (see `VENDORED.md` there). The structure method quotes the DM as d_fit ± σ_DM, the
+1-sigma uncertainty of SHRINE-II, from profiles made with fractional, circular channel shifts and the delays of the
+channels actually summed. The old SHRINE (`src/frbop/dmop/SHRINE`) is no longer used and is not tracked.

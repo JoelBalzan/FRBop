@@ -4,11 +4,30 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 
 from frbop.utils.plotting import (colour_manager, pub_figsize,
                                   pub_grid_figsize, savefig)
 
+
+
+def _declutter_xticks(fig, ax, max_bins: int = 5, min_bins: int = 2, pad_px: float = 8.0) -> None:
+	"""Reduce the number of x ticks on `ax` until the tick labels no longer overlap."""
+	try:
+		renderer = fig.canvas.get_renderer()
+		for n in range(max_bins, min_bins - 1, -1):
+			ax.xaxis.set_major_locator(MaxNLocator(nbins=n))
+			ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+			fig.canvas.draw()
+			boxes = sorted(
+				(t.get_window_extent(renderer) for t in ax.get_xticklabels()
+				 if t.get_visible() and t.get_text()),
+				key=lambda b: b.x0,
+			)
+			if all(b2.x0 - b1.x1 >= pad_px for b1, b2 in zip(boxes, boxes[1:])):
+				break
+	except Exception:
+		pass
 
 class PlottingMixin:
 	def _style_imshow_ticks(self, ax, labelsize: Optional[float] = None,
@@ -235,6 +254,7 @@ class PlottingMixin:
 			all_scan_ax.set_ylabel('')
 			all_scan_ax.grid(True, axis='x', alpha=0.3)
 			all_scan_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+			all_scan_ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 			all_scan_ax.title.set_fontsize(fs_title)
 			all_scan_ax.xaxis.label.set_size(fs_label)
 			all_scan_ax.yaxis.label.set_size(fs_label)
@@ -304,6 +324,7 @@ class PlottingMixin:
 					result.get('uncertainty_minus'),
 					result.get('uncertainty_plus'),
 					precision=3,
+					compact_errors=True,
 				)
 			else:
 				dm_text = self._format_dm(result['dm'], 3)
@@ -498,6 +519,7 @@ class PlottingMixin:
 				scan_ax.set_axis_off()
 		
 		plt.tight_layout(rect=[0.02, 0.02, 0.995, 0.995])
+		_declutter_xticks(fig, axes[0, 2])
 		fig.subplots_adjust(wspace=0.04, hspace=0.5)
 		
 		if save_path:
@@ -673,6 +695,7 @@ class PlottingMixin:
 		cmp_ax.xaxis.labelpad = fs_labelpad
 		cmp_ax.yaxis.labelpad = fs_labelpad
 		cmp_ax.tick_params(axis='both', labelsize=fs_tick)
+		cmp_ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
 
 		# --- Component rows -------------------------------------------------------
 		for seg in range(n_segments):
@@ -736,8 +759,8 @@ class PlottingMixin:
 			minus = res.get('uncertainty_minus')
 			plus = res.get('uncertainty_plus')
 			if minus is not None or plus is not None:
-				sup = f"+{self._format_dm(plus, 2)}" if plus is not None else ""
-				sub = f"-{self._format_dm(minus, 2)}" if minus is not None else ""
+				sup = f"+{self._format_error(plus)}" if plus is not None else ""
+				sub = f"-{self._format_error(minus)}" if minus is not None else ""
 				dm_label = f"DM = {dm_val}" + rf"$^{{{sup}}}_{{{sub}}}$"
 			else:
 				dm_label = f"DM = {dm_val}"
@@ -812,6 +835,7 @@ class PlottingMixin:
 
 		plt.tight_layout(rect=[0.02, 0.02, 0.995, 0.995])
 		fig.subplots_adjust(wspace=0.04, hspace=0.5)
+		_declutter_xticks(fig, cmp_ax)
 
 		if save_path:
 			savefig(save_path, dpi=600, bbox_inches='tight')
@@ -865,7 +889,6 @@ class PlottingMixin:
 		snr_values = np.zeros(len(dm_values))
 		pa_slope_values = np.zeros(len(dm_values)) if (data_q is not None and data_u is not None) else None
 		l_i_mean_values = np.zeros(len(dm_values)) if (data_q is not None and data_u is not None) else None
-		i_data = np.zeros((len(dm_values), output_size))
 		
 		print(f"Scanning {len(dm_values)} DM values...")
 		dt = float(np.nanmedian(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
@@ -876,9 +899,8 @@ class PlottingMixin:
 			if i % 20 == 0:
 				print(f"\r  Progress: {i}/{len(dm_values)}", end='', flush=True)
 			
-			dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nansum(dedispersed, axis=0)
 			if pa_slope_values is not None:
+				dedispersed = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedispersed, dedisp_q, dedisp_u)
@@ -888,32 +910,26 @@ class PlottingMixin:
 
 		run_tag = f"scan_{int(np.round(dm_values[0] * 1000))}_{int(np.round(dm_values[-1] * 1000))}_{len(dm_values)}"
 
+		# Structure and S/N maximisation with SHRINE-II, on its own profiles (Fourier shifts).
 		run_prefix_structure = f"{run_tag}_structure"
-		run_dir_structure = self.run_shrine_method(
-			script_name="maximise_structure.py",
+		structure_run = self.run_shrine2_structure(
 			run_prefix=run_prefix_structure,
 			dm_values=dm_values,
-			i_data=i_data,
-			include_input_dm=True,
-			save_all=True,
+			data=data,
 			force_kc=_scan_shrine_kc,
+			save_all=True,
 		)
-		structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
+		structure_values = np.asarray(structure_run["res"]["Sp"], dtype=float)
 
 		run_prefix_snr = f"{run_tag}_snr"
-		run_dir_snr = self.run_shrine_method(
-			script_name="maximise_sn.py",
+		sn = self.run_shrine2_sn(
 			run_prefix=run_prefix_snr,
 			dm_values=dm_values,
-			i_data=i_data,
-			include_input_dm=False,
+			I=structure_run["I"],
+			kc=structure_run["kc"],
 			save_all=True,
-			force_kc=_scan_shrine_kc,
 		)
-		sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
-		if not sn_path.exists():
-			raise FileNotFoundError(f"Expected SHRINE S/N output not found: {sn_path}")
-		snr_values = np.loadtxt(sn_path)
+		snr_values = np.asarray(sn["SN"], dtype=float)
 		
 		metrics = {
 			'structure': structure_values,

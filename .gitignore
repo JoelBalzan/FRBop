@@ -20,6 +20,8 @@ simfrbs/
 plots/
 output/
 shrine_logs/
+# The old SHRINE (replaced by dmop/SHRINE2, i.e. SHRINE-II); kept on disk, not tracked
+src/frbop/dmop/SHRINE/
 # Local/editor/tooling files
 .vscode/
 .aider*

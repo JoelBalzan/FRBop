@@ -43,8 +43,6 @@ class DMOptimiser(
                  pa_weight_strength: float = 1.0,
                  pa_fit_post_peak_only: bool = False,
                  nonshrine_kc_smooth: bool = False,
-                 nonshrine_shrine_like_errors: bool = False,
-                 nonshrine_kc_minimise_uncertainty: bool = False,
                  nonshrine_kc: Optional[List[int]] = None,
                  shrine_kc: Optional[List[int]] = None,
                  sync_kc: bool = False,
@@ -93,11 +91,6 @@ class DMOptimiser(
             raise ValueError("pa_weight_strength must be positive")
         self.pa_fit_post_peak_only = bool(pa_fit_post_peak_only)
         self.nonshrine_kc_smooth = bool(nonshrine_kc_smooth)
-        self.nonshrine_shrine_like_errors = bool(nonshrine_shrine_like_errors)
-        self.use_nonshrine_shrine_like_uncertainty = bool(
-            self.nonshrine_shrine_like_errors
-        )
-        self.nonshrine_kc_minimise_uncertainty = bool(nonshrine_kc_minimise_uncertainty)
         self.sync_kc = bool(sync_kc)
         if nonshrine_kc is not None and len(nonshrine_kc) > 0:
             self.nonshrine_kc = [int(k) for k in nonshrine_kc]

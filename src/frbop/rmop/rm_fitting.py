@@ -27,7 +27,10 @@ from .plotting import (plot_burns_law_fits, plot_poincare_projections,
                        plot_polarisation_fraction_acf_ccf,
                        plot_rm_corrected_time_series, plot_rm_results,
                        plot_rm_time_series)
-from .rm_tau.rm_tau_correlation import apply_named_defaults, plot_rm_tau_correlation, plot_rm_tau_correlation_host_frame
+from .rm_tau.rm_tau_correlation import (DEFAULT_RM_HOST_SIGMA_MIN,
+                                         apply_named_defaults,
+                                         plot_rm_tau_correlation,
+                                         plot_rm_tau_correlation_host_frame)
 
 warnings.filterwarnings("ignore")
 
@@ -499,6 +502,20 @@ def main() -> None:
         type=float,
         default=None,
         help="Uncertainty on --rm (rad/m^2)",
+    )
+    parser.add_argument(
+        "--rm-host-sigma-min",
+        type=float,
+        default=DEFAULT_RM_HOST_SIGMA_MIN,
+        help="Minimum significance |RM_host| / (Galactic RM error scaled to the "
+             "host frame) for a reference source to appear in the "
+             "reliable-foreground host-frame plot "
+             f"(default: {DEFAULT_RM_HOST_SIGMA_MIN:g}). The error is the "
+             "formal SPICE-RACS pixel error, except where the local neighbour "
+             "scatter exceeds --scatter-warn-threshold, in which case the "
+             "scatter is used. A high scatter never rejects a source on its "
+             "own; a very large RM passes either way. Your own burst is "
+             "never dropped.",
     )
 
     # Physics helpers
@@ -1155,6 +1172,22 @@ def main() -> None:
                                 output_file=f"{args.output}_rm_tau_host_frame_detections.{args.ext}",
                                 name=args.tau_name,
                                 exclude_upper_limits=True,
+                                print_table=False,
+                            )
+                            plot_rm_tau_correlation_host_frame(
+                                sigma_rm=sigma_rm,
+                                sigma_rm_err=sigma_rm_err,
+                                rm=args.rm,
+                                rm_err=args.rm_err,
+                                tau=args.tau,
+                                tau_err=args.tau_err,
+                                ra=args.ra,
+                                dec=args.dec,
+                                z=args.z,
+                                output_file=f"{args.output}_rm_tau_host_frame_reliable.{args.ext}",
+                                name=args.tau_name,
+                                rm_host_sigma_min=args.rm_host_sigma_min,
+                                print_table=False,
                             )
                         else:
                             print("  Host-frame RM-tau correlation plot skipped: "

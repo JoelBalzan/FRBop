@@ -35,8 +35,6 @@ def build_optimiser(stokes_i, freq_mhz, time_ms, stokes_q, stokes_u, stokes_v, a
 		pa_weight_strength=args.pa_weight_strength,
 		pa_fit_post_peak_only=args.pa_fit_post_peak_only,
 		nonshrine_kc_smooth=args.nonshrine_kc_smooth,
-		nonshrine_shrine_like_errors=args.nonshrine_shrine_like_errors,
-		nonshrine_kc_minimise_uncertainty=args.nonshrine_kc_minimise_uncertainty,
 		nonshrine_kc=args.nonshrine_kc,
 		shrine_kc=args.shrine_kc,
 		sync_kc=args.sync_kc,
@@ -202,36 +200,26 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--nonshrine-kc-smooth", "--nonshrine-smooth",
 		action="store_true",
-		help="Apply SHRINE-style kc low-pass smoothing to PA/LI methods",
-	)
-	parser.add_argument(
-		"--nonshrine-shrine-like-errors", "--nonshrine-errors",
-		action="store_true",
-		help="Use SHRINE-style relative-uncertainty error bars for non-SHRINE PA/LI methods without requiring kc smoothing",
+		help="Apply SHRINE-II's kc low-pass smoothing to PA/LI methods",
 	)
 	parser.add_argument(
 		"--nonshrine-kc",
 		nargs='*',
 		type=int,
 		default=None,
-		help="Fixed kc value(s) for non-SHRINE smoothing, one per segment (default: auto per segment)",
+		help="Fixed kc value(s) for non-SHRINE smoothing, one per segment (default: SHRINE-II's automatic kc per segment)",
 	)
 	parser.add_argument(
 		"--shrine-kc",
 		nargs='*',
 		type=int,
 		default=None,
-		help="Fixed kc value(s) for SHRINE structure/S/N methods, one per segment (default: auto per segment)",
+		help="Fixed kc value(s) for the SHRINE-II structure/S/N methods, one per segment (default: SHRINE-II's automatic kc per segment)",
 	)
 	parser.add_argument(
 		"--sync-kc",
 		action="store_true",
-		help="Set non-SHRINE kc to match SHRINE kc (overrides --nonshrine-kc)",
-	)
-	parser.add_argument(
-		"--nonshrine-kc-minimise-uncertainty", "--nonshrine-min-uncert",
-		action="store_true",
-		help="Find non-SHRINE kc by running SHRINE minimise_uncertainty.py (writes/reads kc.txt in run dir)",
+		help="Set non-SHRINE kc to match the SHRINE-II kc (overrides --nonshrine-kc)",
 	)
 	parser.add_argument(
 		"--li-sig",
@@ -242,14 +230,14 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--methods",
 		nargs="+",
-		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "pa", "pa-shrine", "li"],
 		default=None,
-		help="Methods to run (default: all). Choices: structure, structure-l, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li",
+		help="Methods to run (default: all). Choices: structure, structure-l, snr, pa, pa-shrine, li",
 	)
 	parser.add_argument(
 		"--single-method",
 		type=str,
-		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Run only this one method and produce a single-method segment comparison plot "
 		"(max-range overview row + one row per segment). Overrides --methods.",
@@ -257,18 +245,18 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--exclude-methods",
 		nargs="+",
-		choices=["structure", "structure-l", "snr", "min-uncertainty", "minimise-uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Methods to exclude from run/plots/analysis",
 	)
 	parser.add_argument(
 		"--disable-method-errors", "--no-method-err",
 		nargs="+",
-		choices=["structure", "structure-l", "snr", "min_uncertainty", "minimise_uncertainty", "pa", "pa-shrine", "li"],
+		choices=["structure", "structure-l", "snr", "pa", "pa-shrine", "li"],
 		default=None,
 		help="Exclude specified methods from component DM/dn_e comparison plots and disable "
 		"their uncertainty overlays in per-segment comparison plots "
-		"(aliases: structure, snr, min-uncertainty, minimise-uncertainty, pa, pa-shrine, li)",
+		"(aliases: structure, structure-l, snr, pa, pa-shrine, li)",
 	)
 	parser.add_argument(
 		"--label",
@@ -397,7 +385,6 @@ def main():
 	print(f"  - PA fit post-peak only: {args.pa_fit_post_peak_only}")
 	print(f"  - PA min run: {args.pa_min_run}")
 	print(f"  - Non-SHRINE kc smoothing: {args.nonshrine_kc_smooth}")
-	print(f"  - Non-SHRINE SHRINE-like errors: {args.nonshrine_shrine_like_errors}")
 	if args.sync_kc:
 		if args.shrine_kc is not None:
 			if args.nonshrine_kc is not None:
@@ -410,7 +397,6 @@ def main():
 		print(f"  - Non-SHRINE kc value: {args.nonshrine_kc}")
 	if args.shrine_kc is not None:
 		print(f"  - SHRINE structure/S/N kc value: {args.shrine_kc}")
-	print(f"  - Non-SHRINE kc via minimise_uncertainty: {args.nonshrine_kc_minimise_uncertainty}")
 	print(f"  - L/I sigma cutoff: {args.li_sig}")
 	if args.methods is not None:
 		print(f"  - Included methods (CLI): {', '.join(args.methods)}")
@@ -545,13 +531,11 @@ def main():
 		'structure': 'structure',
 		'structure-l': 'structure_L',
 		'snr': 'snr',
-		'min-uncertainty': 'min_uncertainty',
-		'minimise-uncertainty': 'min_uncertainty',
 		'pa': 'pa_slope',
 		'pa-shrine': 'pa_slope_shrine',
 		'li': 'l_i_mean',
 	}
-	default_method_order = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
+	default_method_order = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 	if args.single_method is not None:
 		single_method_key = method_alias_to_key[args.single_method]
 		selected_method_keys = [single_method_key]
@@ -588,7 +572,6 @@ def main():
 		'structure': 'structure',
 		'structure_L': 'structure-l',
 		'snr': 'snr',
-		'min_uncertainty': 'min-uncertainty',
 		'pa_slope': 'pa',
 		'pa_slope_shrine': 'pa-shrine',
 		'l_i_mean': 'li',

@@ -47,7 +47,7 @@ class ComparisonMixin:
 		_shrine_kc = self.shrine_kc[segment_index] if self.shrine_kc is not None else None
 		_nonshrine_kc = self.nonshrine_kc[segment_index] if self.nonshrine_kc is not None else None
 		results: Dict[str, Dict] = {}
-		all_method_keys = ['structure', 'snr', 'min_uncertainty', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
+		all_method_keys = ['structure', 'snr', 'pa_slope', 'pa_slope_shrine', 'l_i_mean', 'structure_L']
 		if selected_methods is None:
 			selected = set(all_method_keys)
 		else:
@@ -58,7 +58,6 @@ class ComparisonMixin:
 
 		run_structure = 'structure' in selected
 		run_snr = 'snr' in selected
-		run_min_uncertainty = 'min_uncertainty' in selected
 		run_pa = 'pa_slope' in selected
 		run_pa_shrine = 'pa_slope_shrine' in selected
 		run_li_mean = 'l_i_mean' in selected
@@ -72,14 +71,13 @@ class ComparisonMixin:
 			run_qu_methods = False
 			run_structure_L = False
 
-		if not (run_structure or run_snr or run_min_uncertainty or run_qu_methods or run_structure_L):
+		if not (run_structure or run_snr or run_qu_methods or run_structure_L):
 			print("  - No methods selected after filtering; returning empty results.")
 			return results
 
 		# Shared DM sweep for all methods.
 		dm_values = self._build_dm_values(dm_range, n_points=n_points, dm_step=dm_step)
 		output_size = self._max_output_size_for_dm_range(data, dm_range)
-		i_data = np.zeros((len(dm_values), output_size), dtype=float)
 
 		pa_values = np.zeros(len(dm_values), dtype=float) if run_pa else None
 		pa_errors = np.zeros(len(dm_values), dtype=float) if run_pa else None
@@ -102,31 +100,25 @@ class ComparisonMixin:
 					print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc} (synced from SHRINE kc)")
 					self._nonshrine_kc_printed = True
 			else:
-				print(f"  - Pre-computing I(DM, t) for kc sync ({len(dm_values)} trials)...")
-				_i_for_kc = np.zeros((len(dm_values), output_size), dtype=float)
-				for j, dm in enumerate(dm_values):
-					if j % 25 == 0:
-						print(f"\r    Progress: {j}/{len(dm_values)}", end='', flush=True)
-					_ded = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-					_i_for_kc[j] = np.nansum(_ded, axis=0)
-				print(f"\r    Progress: {len(dm_values)}/{len(dm_values)}", flush=True)
-				self.resolve_nonshrine_kc(_i_for_kc)
-				_nonshrine_kc = self._nonshrine_resolved_kc
+				# SHRINE-II's automatic k_c, on the profiles its structure and S/N methods use.
+				print(f"  - Finding the SHRINE-II kc for kc sync ({len(dm_values)} trials)...")
+				_i_for_kc = self.shrine2_profiles(data, dm_values)[0]
+				_nonshrine_kc = self._shrine2_kc(_i_for_kc)[0]
+				self._nonshrine_resolved_kc = _nonshrine_kc
+				print(f"\nNon-SHRINE kc: {self._nonshrine_resolved_kc} (synced from SHRINE-II kc)")
+				self._nonshrine_kc_printed = True
 
 		dt = float(np.median(np.diff(self.time_ms))) if len(self.time_ms) > 1 else 1.0
 		time_axis = self.time_ms[0] + np.arange(output_size) * dt
 		if run_qu_methods:
 			self._maybe_prepare_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
 
-		print(f"  - Shared DM sweep for all methods ({len(dm_values)} trials)...")
-		for i, dm in enumerate(dm_values):
-			if i % 25 == 0:
-				print(f"\r    Progress: {i}/{len(dm_values)}", end='', flush=True)
-
-			dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
-			i_data[i] = np.nansum(dedisp_i, axis=0)
-
-			if run_qu_methods:
+		if run_qu_methods:
+			print(f"  - Shared DM sweep for the PA/LI methods ({len(dm_values)} trials)...")
+			for i, dm in enumerate(dm_values):
+				if i % 25 == 0:
+					print(f"\r    Progress: {i}/{len(dm_values)}", end='', flush=True)
+				dedisp_i = self.dedisperse(data, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_q = self.dedisperse(data_q, dm, output_size=output_size, mode=self.dedisp_mode)
 				dedisp_u = self.dedisperse(data_u, dm, output_size=output_size, mode=self.dedisp_mode)
 				sm_i, sm_q, sm_u = self.maybe_kc_smooth_nonshrine(dedisp_i, dedisp_q, dedisp_u)
@@ -136,54 +128,45 @@ class ComparisonMixin:
 					pa_shrine_values[i], pa_shrine_errors[i] = self._pa_slope_metric_shrine(sm_q, sm_u, time_axis, sm_i, return_error=True)
 				if li_mean_values is not None:
 					li_mean_values[i], li_mean_errors[i] = self.linear_to_stokes_i_metric(
-					sm_q, sm_u, sm_i, mode='mean', use_fwhm_window=True, return_error=True,
-				)
-		print(f"\r    Progress: {len(dm_values)}/{len(dm_values)}", flush=True)
+						sm_q, sm_u, sm_i, mode='mean', use_fwhm_window=True, return_error=True,
+					)
+			print(f"\r    Progress: {len(dm_values)}/{len(dm_values)}", flush=True)
 
+		shrine2_I = None
+		shrine2_kc = _shrine_kc
 		if run_structure:
-			print("  - Testing Structure Maximising (SHRINE)...")
+			print("  - Testing Structure Maximising (SHRINE-II)...")
 			run_prefix_structure = f"{label}_{segment_tag}_structure"
-			run_dir_structure = self.run_shrine_method(
-				script_name="maximise_structure.py",
+			structure_run = self.run_shrine2_structure(
 				run_prefix=run_prefix_structure,
 				dm_values=dm_values,
-				i_data=i_data,
-				include_input_dm=True,
-				save_all=True,
+				data=data,
 				force_kc=_shrine_kc,
+				save_all=True,
 			)
-			structure_values = np.loadtxt(run_dir_structure / f"{run_prefix_structure}_SPs.dat")
-			summary_path = run_dir_structure / f"{run_prefix_structure}_structure_summaryfile.txt"
-			kc = _shrine_kc
-			if kc is None and summary_path.exists():
-				with open(summary_path, "r") as f:
-					for line in f:
-						if line.strip().startswith("kc:"):
-							try:
-								kc = int(line.split(":", 1)[1].strip())
-							except Exception:
-								kc = None
-							break
-			max_idx_structure = int(np.argmax(structure_values))
-			optimal_dm_structure = float(dm_values[max_idx_structure])
+			res = structure_run["res"]
+			shrine2_I = structure_run["I"]
+			shrine2_kc = structure_run["kc"]
+			optimal_dm_structure = structure_run["dm_best"]
+			if res["ok"]:
+				structure_uncertainty = self._uncertainty_from_sigma_dm(optimal_dm_structure, float(res["sig_DM"]))
+			else:
+				structure_uncertainty = self._uncertainty_from_sigma_dm(optimal_dm_structure, None, why=res["why"])
 			dedispersed_structure = self.dedisperse(data, optimal_dm_structure, mode=self.dedisp_mode)
-			metric_structure = float(structure_values[max_idx_structure])
-			structure_uncertainty = self._structure_uncertainty_from_shrine_outputs(
-				dm_values=dm_values,
-				structure_values=structure_values,
-				run_dir=run_dir_structure,
-				run_prefix=run_prefix_structure,
-				best_idx=max_idx_structure,
-			)
 			results['structure'] = {
 				'dm': optimal_dm_structure,
-				'metric': metric_structure,
+				'metric': float(res["Sp_max"]),
 				'dedispersed': dedispersed_structure,
-				'method': 'Structure Maximising (SHRINE)',
-				'kc': kc,
-				'run_dir': str(run_dir_structure),
+				'method': 'Structure Maximising (SHRINE-II)',
+				'kc': structure_run["kc"],
+				'run_dir': str(structure_run["run_dir"]),
 				'dm_values': dm_values.copy(),
-				'metric_values': np.asarray(structure_values, dtype=float).copy(),
+				'metric_values': np.asarray(res["Sp"], dtype=float).copy(),
+				'sigma_dm': float(res["sig_DM"]) if res["ok"] else None,
+				'sigma_S': float(res["sig_S"]),
+				'c2_err': float(res["c2_err"]) if res["ok"] else None,
+				'e_ratio': float(res["e_ratio"]),
+				'shrine2_warnings': list(structure_run["warnings"]),
 				**structure_uncertainty,
 			}
 			if has_qu:
@@ -191,43 +174,38 @@ class ComparisonMixin:
 				results['structure']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
 				results['structure']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
 			if data_v is not None:
-				if 'dedispersed' in results['structure']:
-					n_time_out = results['structure']['dedispersed'].shape[1]
-				else:
-					n_time_out = None
+				n_time_out = results['structure']['dedispersed'].shape[1]
 				results['structure']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_structure, output_size=n_time_out, mode=self.dedisp_mode)
 
 		if run_snr:
-			print("  - Testing S/N Maximising (SHRINE)...")
+			print("  - Testing S/N Maximising (SHRINE-II)...")
 			run_prefix_snr = f"{label}_{segment_tag}_snr"
-			run_dir_snr = self.run_shrine_method(
-				script_name="maximise_sn.py",
+			# The profiles and k_c of the structure method, if it ran; otherwise made here.
+			if shrine2_I is None:
+				shrine2_I = self.shrine2_profiles(data, dm_values)[0]
+			if shrine2_kc is None:
+				shrine2_kc = self._shrine2_kc(shrine2_I)[0]
+			sn = self.run_shrine2_sn(
 				run_prefix=run_prefix_snr,
 				dm_values=dm_values,
-				i_data=i_data,
-				include_input_dm=False,
+				I=shrine2_I,
+				kc=shrine2_kc,
 				save_all=True,
-				force_kc=_shrine_kc,
 			)
-			sn_path = run_dir_snr / f"{run_prefix_snr}_SNs.dat"
-			if not sn_path.exists():
-				raise FileNotFoundError(f"Expected SHRINE S/N output not found: {sn_path}")
-			snr_values = np.loadtxt(sn_path)
-			max_idx_snr = int(np.argmax(snr_values))
-			optimal_dm_snr = float(dm_values[max_idx_snr])
+			optimal_dm_snr = sn["dm_best"]
+			snr_values = np.asarray(sn["SN"], dtype=float)
 			dedispersed_snr = self.dedisperse(data, optimal_dm_snr, mode=self.dedisp_mode)
-			metric_snr = float(snr_values[max_idx_snr])
-			snr_uncertainty = self._uncertainty_from_snr_drop(dm_values, snr_values, max_idx_snr, drop=1.0)
-			snr_kc = _shrine_kc
+			snr_uncertainty = self._uncertainty_dict(optimal_dm_snr, sn["dm_low"], sn["dm_high"],
+													 "S/N drop = 1 (SHRINE-II)")
 			results['snr'] = {
 				'dm': optimal_dm_snr,
-				'metric': metric_snr,
+				'metric': float(sn["SN_max"]),
 				'dedispersed': dedispersed_snr,
-				'method': 'S/N Maximising (SHRINE)',
-				'kc': snr_kc,
-				'run_dir': str(run_dir_snr),
+				'method': 'S/N Maximising (SHRINE-II)',
+				'kc': int(sn["kc"]),
+				'run_dir': str(sn["run_dir"]),
 				'dm_values': dm_values.copy(),
-				'metric_values': np.asarray(snr_values, dtype=float).copy(),
+				'metric_values': snr_values.copy(),
 				**snr_uncertainty,
 			}
 			if has_qu:
@@ -238,77 +216,11 @@ class ComparisonMixin:
 				n_time_out = results['snr']['dedispersed'].shape[1]
 				results['snr']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_snr, output_size=n_time_out, mode=self.dedisp_mode)
 
-		if run_min_uncertainty:
-			print("  - Testing Minimise Uncertainty (SHRINE)...")
-			run_prefix_unc = f"{label}_{segment_tag}_min_uncertainty"
-			run_dir_unc = self.run_shrine_method(
-				script_name="minimise_uncertainty.py",
-				run_prefix=run_prefix_unc,
-				dm_values=dm_values,
-				i_data=i_data,
-				include_input_dm=False,
-				save_all=True,
-			)
-			unc_path = run_dir_unc / f"{run_prefix_unc}_uncertainly_kc.dat"
-			if not unc_path.exists():
-				raise FileNotFoundError(f"Expected SHRINE uncertainty output not found: {unc_path}")
-			unc_table = np.loadtxt(unc_path)
-			if unc_table.ndim == 1:
-				unc_table = unc_table[np.newaxis, :]
-			if unc_table.shape[1] < 4:
-				raise ValueError(
-					"Unexpected minimise_uncertainty output format; expected 4 columns (kc, low, dm, high)"
-				)
-			kc_vals = np.asarray(unc_table[:, 0], dtype=float)
-			low_dm = np.asarray(unc_table[:, 1], dtype=float)
-			best_dm = np.asarray(unc_table[:, 2], dtype=float)
-			high_dm = np.asarray(unc_table[:, 3], dtype=float)
-			unc_ranges = high_dm - low_dm
-			finite_mask = np.isfinite(unc_ranges)
-			if not np.any(finite_mask):
-				raise ValueError("No finite uncertainty ranges returned by minimise_uncertainty")
-			min_unc = float(np.nanmin(unc_ranges))
-			min_indices = np.where(np.isclose(unc_ranges, min_unc))[0]
-			if min_indices.size == 0:
-				min_indices = np.array([int(np.nanargmin(unc_ranges))])
-			best_idx = int(min_indices[len(min_indices) // 2])
-			optimal_dm_unc = float(best_dm[best_idx])
-			unc_low_dm = float(low_dm[best_idx])
-			unc_high_dm = float(high_dm[best_idx])
-			unc_minus = max(0.0, optimal_dm_unc - unc_low_dm)
-			unc_plus = max(0.0, unc_high_dm - optimal_dm_unc)
-			dedispersed_unc = self.dedisperse(data, optimal_dm_unc, mode=self.dedisp_mode)
-			results['min_uncertainty'] = {
-				'dm': optimal_dm_unc,
-				'metric': float(unc_ranges[best_idx]),
-				'dedispersed': dedispersed_unc,
-				'method': 'Minimise Uncertainty (SHRINE)',
-				'kc': int(round(float(kc_vals[best_idx]))),
-				'run_dir': str(run_dir_unc),
-				'uncertainty_method': 'minimise_uncertainty',
-				'uncertainty_low_dm': unc_low_dm,
-				'uncertainty_high_dm': unc_high_dm,
-				'uncertainty_minus': unc_minus,
-				'uncertainty_plus': unc_plus,
-				'dm_values': np.asarray(best_dm, dtype=float).copy(),
-				'metric_values': np.asarray(unc_ranges, dtype=float).copy(),
-				'kc_values': np.asarray(kc_vals, dtype=float).copy(),
-				'kc_uncertainty_low': np.asarray(low_dm, dtype=float).copy(),
-				'kc_uncertainty_high': np.asarray(high_dm, dtype=float).copy(),
-				'kc_optimal_idx': best_idx,
-			}
-			if has_qu:
-				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
-				results['min_uncertainty']['dedispersed_q'] = self.dedisperse(data_q, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
-				results['min_uncertainty']['dedispersed_u'] = self.dedisperse(data_u, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
-			if data_v is not None:
-				n_time_out = results['min_uncertainty']['dedispersed'].shape[1]
-				results['min_uncertainty']['dedispersed_v'] = self.dedisperse(data_v, optimal_dm_unc, output_size=n_time_out, mode=self.dedisp_mode)
-
-		if not run_qu_methods:
+		if not (run_qu_methods or run_structure_L):
 			return results
 
-		print("  - Testing selected PA slope/L/I methods from shared sweep...")
+		if run_qu_methods:
+			print("  - Testing selected PA slope/L/I methods from shared sweep...")
 
 		# PA slope (raw masked PA)
 		if run_pa and pa_values is not None:
@@ -322,14 +234,9 @@ class ComparisonMixin:
 			best_pa_smooth, best_fit_line, best_time_axis = self._get_pa_smoothed_and_fit(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa, time_axis)
 			best_pa_deg = self._pa_series_deg(best_sm_q_pa, best_sm_u_pa, best_sm_i_pa)
 			metric_pa = float(pa_values[max_idx_pa])
-			if pa_errors is not None and not self.use_nonshrine_shrine_like_uncertainty:
-				pa_uncertainty = self._uncertainty_from_metric_errors(
-					dm_values, pa_values, pa_errors, max_idx_pa,
-				)
-			else:
-				pa_uncertainty = self._uncertainty_from_polarisation_L_dm(
-					dm_values, pa_values, kc=self._nonshrine_resolved_kc,
-				)
+			pa_uncertainty = self._uncertainty_from_metric_errors(
+				dm_values, pa_values, pa_errors, max_idx_pa,
+			)
 			run_prefix_pa = f"{label}_{segment_tag}_pa_slope"
 			run_dir_pa = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pa,
@@ -380,14 +287,9 @@ class ComparisonMixin:
 			)
 			best_pa_shrine_deg = self._pa_series_deg(best_sm_q_pas, best_sm_u_pas, best_sm_i_pas)
 			metric_pas = float(pa_shrine_values[max_idx_pas])
-			if pa_shrine_errors is not None and not self.use_nonshrine_shrine_like_uncertainty:
-				pa_shrine_uncertainty = self._uncertainty_from_metric_errors(
-					dm_values, pa_shrine_values, pa_shrine_errors, max_idx_pas,
-				)
-			else:
-				pa_shrine_uncertainty = self._uncertainty_from_polarisation_L_dm(
-					dm_values, pa_shrine_values, kc=self._nonshrine_resolved_kc,
-				)
+			pa_shrine_uncertainty = self._uncertainty_from_metric_errors(
+				dm_values, pa_shrine_values, pa_shrine_errors, max_idx_pas,
+			)
 			run_prefix_pas = f"{label}_{segment_tag}_pa_slope_shrine"
 			run_dir_pas = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_pas,
@@ -426,14 +328,9 @@ class ComparisonMixin:
 			optimal_dm_li_mean = float(dm_values[max_idx_li_mean])
 			dedispersed_li_mean = self.dedisperse(data, optimal_dm_li_mean, output_size=output_size, mode=self.dedisp_mode)
 			metric_li_mean = float(li_mean_values[max_idx_li_mean])
-			if not self.use_nonshrine_shrine_like_uncertainty and li_mean_errors is not None:
-				li_mean_uncertainty = self._uncertainty_from_metric_errors(
-					dm_values, li_mean_values, li_mean_errors, max_idx_li_mean,
-				)
-			else:
-				li_mean_uncertainty = self._uncertainty_from_polarisation_L_dm(
-					dm_values, li_mean_values, kc=self._nonshrine_resolved_kc,
-				)
+			li_mean_uncertainty = self._uncertainty_from_metric_errors(
+				dm_values, li_mean_values, li_mean_errors, max_idx_li_mean,
+			)
 			run_prefix_li_mean = f"{label}_{segment_tag}_l_i_mean"
 			run_dir_li_mean = self.save_nonshrine_run_outputs(
 				run_prefix=run_prefix_li_mean,
@@ -466,37 +363,24 @@ class ComparisonMixin:
 			print("  - Testing Structure Maximising on L polarisation...")
 			l_dm_data = self.build_nonshrine_L_dm_reference(dm_values, data_q, data_u, output_size)
 			run_prefix_structure_L = f"{label}_{segment_tag}_structure_L"
-			run_dir_structure_L = self.run_shrine_method(
-				script_name="maximise_structure.py",
+			kc_L_force = _nonshrine_kc if _nonshrine_kc is not None else self._nonshrine_resolved_kc
+			scan_L = self.structure_parameter_scan(
 				run_prefix=run_prefix_structure_L,
 				dm_values=dm_values,
-				i_data=l_dm_data,
-				include_input_dm=True,
+				profiles=l_dm_data,
+				kc=kc_L_force,
 				save_all=True,
-				force_kc=_nonshrine_kc if _nonshrine_kc is not None else self._nonshrine_resolved_kc,
 			)
-			structure_L_values = np.loadtxt(run_dir_structure_L / f"{run_prefix_structure_L}_SPs.dat")
-			summary_path = run_dir_structure_L / f"{run_prefix_structure_L}_structure_summaryfile.txt"
-			kc_L = None
-			if summary_path.exists():
-				with open(summary_path, "r") as f:
-					for line in f:
-						if line.strip().startswith("kc:"):
-							try:
-								kc_L = int(line.split(":", 1)[1].strip())
-							except Exception:
-								kc_L = None
-							break
-			max_idx_structure_L = int(np.argmax(structure_L_values))
+			structure_L_values = scan_L["Sp"]
+			kc_L = scan_L["kc"]
+			run_dir_structure_L = scan_L["run_dir"]
+			max_idx_structure_L = scan_L["j_max"]
 			optimal_dm_structure_L = float(dm_values[max_idx_structure_L])
 			dedispersed_L_i = self.dedisperse(data, optimal_dm_structure_L, mode=self.dedisp_mode)
 			metric_structure_L = float(structure_L_values[max_idx_structure_L])
-			structure_L_uncertainty = self._structure_uncertainty_from_shrine_outputs(
-				dm_values=dm_values,
-				structure_values=structure_L_values,
-				run_dir=run_dir_structure_L,
-				run_prefix=run_prefix_structure_L,
-				best_idx=max_idx_structure_L,
+			# No sigma_DM: the noise of L is not the zero-mean noise it assumes.
+			structure_L_uncertainty = self._uncertainty_dict(
+				optimal_dm_structure_L, None, None, "none (sigma_DM does not apply to L)",
 			)
 			results['structure_L'] = {
 				'dm': optimal_dm_structure_L,

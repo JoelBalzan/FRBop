@@ -12,11 +12,15 @@ timescale is converted as:
 
 	tau_host = tau_obs / (1 + z)**3
 
-A high SPICE-RACS neighbour scatter does NOT cause a source to be discarded.
-Instead, the Galactic RM correction falls back to the Hutschenreuter et al.
-(2022) all-sky reconstruction. The original SPICE-RACS neighbour scatter is
-retained as metadata so the quality of the foreground estimate remains
-visible in the final table.
+The Hutschenreuter et al. (2022) all-sky reconstruction is used only where
+SPICE-RACS DR2 has no usable coverage. It is a model prediction, so a direct
+measurement is preferred over it everywhere else, however noisy the local
+neighbourhood happens to be.
+
+A high SPICE-RACS neighbour scatter does NOT cause a source to be discarded
+and does NOT trigger the fallback. It is reported as a note, the measured
+SPICE-RACS value is kept, and the original scatter is retained as metadata so
+the quality of the foreground estimate remains visible in the final table.
 
 Expected sky map files:
 
@@ -254,11 +258,18 @@ class SpiceRacsSkymaps:
 		"""
 		Query the Galactic RM foreground.
 
-		SPICE-RACS is used when its pixel is usable and the local neighbour
-		scatter is below the supplied threshold.
+		SPICE-RACS DR2 is used wherever its pixel is usable. The
+		Hutschenreuter et al. (2022) all-sky reconstruction is a fallback
+		for missing coverage only: it is a model prediction, and a direct
+		measurement is preferred over it however noisy the local
+		neighbourhood happens to be.
 
-		If there is no usable SPICE-RACS coverage, or the local scatter is
-		above the threshold, Hutschenreuter et al. (2022) is used instead.
+		A high neighbour scatter therefore does NOT trigger a fallback.
+		It is reported as a note and the measured SPICE-RACS value is
+		retained, with the scatter preserved as metadata so the quality
+		of the foreground estimate stays visible. Callers needing a
+		high-quality subset can filter on
+		DEFAULT_SCATTER_WARN_THRESHOLD themselves.
 
 		Returns:
 			rm_galactic,
@@ -309,40 +320,14 @@ class SpiceRacsSkymaps:
 			and rm_scatter > scatter_warn_threshold
 		):
 			print(
-				f"SPICE-RACS DR2 has high Galactic RM scatter "
+				f"NOTE: SPICE-RACS DR2 neighbour scatter is high at "
+				f"RA={ra_deg:.3f}, Dec={dec_deg:.3f} "
 				f"(nn_rm_mad_std={rm_scatter:.1f} rad/m^2 > "
-				f"{scatter_warn_threshold:.1f} rad/m^2 threshold) "
-				"-- foreground subtraction is not reliable here; "
-				"falling back to Hutschenreuter et al. (2022)."
-			)
-
-			try:
-				fallback_rm, fallback_err = (
-					query_hutschenreuter2022(
-						ra_deg,
-						dec_deg,
-					)
-				)
-			except Exception as exc:
-				raise RuntimeError(
-					"Hutschenreuter et al. (2022) fallback failed "
-					"after a high SPICE-RACS neighbour-scatter flag."
-				) from exc
-
-			if (
-				fallback_rm is None
-				or fallback_err is None
-			):
-				raise RuntimeError(
-					"Hutschenreuter et al. (2022) returned no usable "
-					"Galactic RM after the high-scatter SPICE-RACS flag."
-				)
-
-			return (
-				fallback_rm,
-				fallback_err,
-				rm_scatter,
-				"Hutschenreuter 2022",
+				f"{scatter_warn_threshold:.1f} rad/m^2). Keeping the "
+				f"measured RM: a direct measurement is preferred over "
+				f"the Hutschenreuter et al. (2022) reconstruction, which "
+				f"is used only for missing coverage. Treat this source's "
+				f"corrected RM as low quality."
 			)
 
 		return (
@@ -493,9 +478,10 @@ def host_frame_correct_source(
 
 		tau_host = tau_obs / (1 + z)^3
 
-	A high SPICE-RACS neighbour scatter does not reject the source.
-	query_galactic_rm() falls back to Hutschenreuter et al. (2022) and
-	preserves the original SPICE-RACS scatter as metadata.
+	A high SPICE-RACS neighbour scatter does not reject the source and
+	does not trigger the Hutschenreuter et al. (2022) fallback, which is
+	reserved for missing coverage. The measured SPICE-RACS value is kept
+	and the original neighbour scatter is preserved as metadata.
 	"""
 	name = src.get("name", "?")
 
@@ -835,7 +821,9 @@ def main() -> None:
 		default=DEFAULT_SCATTER_WARN_THRESHOLD,
 		help=(
 			"nn_rm_mad_std above which the SPICE-RACS Galactic RM "
-			"estimate triggers the Hutschenreuter fallback"
+			"estimate is reported as a high-scatter note. The measured "
+			"value is still used; the Hutschenreuter fallback is "
+			"reserved for missing coverage"
 		),
 	)
 
@@ -877,8 +865,12 @@ def main() -> None:
 			"at this position."
 		)
 		print(
-			"The Galactic RM value used for the correction was obtained "
-			"from the Hutschenreuter et al. (2022) fallback."
+			"The foreground varies strongly across this pixel, so the "
+			"measured Galactic RM is uncertain at roughly that level. "
+			"The SPICE-RACS DR2 measurement is used anyway, in preference "
+			"to the Hutschenreuter et al. (2022) model reconstruction, "
+			"which is reserved for missing coverage. Treat the corrected "
+			"RM_host with care."
 		)
 
 
