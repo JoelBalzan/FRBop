@@ -10,7 +10,11 @@ converting to the FRB host-galaxy rest frame:
 The same (1+z)**2 scaling is applied to sigma_RM, while the scattering
 timescale is converted as:
 
-	tau_host = tau_obs / (1 + z)**3
+	tau_host = tau_obs * (1 + z)**3
+
+A host screen scatters at nu*(1+z) and its delay is time-dilated by (1+z),
+so for tau ~ nu^-4, tau_obs(nu) = (1+z)^-3 tau_host(nu) at a fixed reference
+frequency nu (for a general index alpha the factor is (1+z)^(alpha-1)).
 
 The Hutschenreuter et al. (2022) all-sky reconstruction is used only where
 SPICE-RACS DR2 has no usable coverage. It is a model prediction, so a direct
@@ -476,7 +480,7 @@ def host_frame_correct_source(
 
 		sigma_RM_upper,host = sigma_RM_upper,obs * (1 + z)^2
 
-		tau_host = tau_obs / (1 + z)^3
+		tau_host = tau_obs * (1 + z)^3
 
 	A high SPICE-RACS neighbour scatter does not reject the source and
 	does not trigger the Hutschenreuter et al. (2022) fallback, which is
@@ -625,14 +629,14 @@ def host_frame_correct_source(
 		out["tau"] = (
 			sign
 			* abs(tau_obs)
-			/ zp1**3
+			* zp1**3
 		)
 
 		tau_err = src.get("tau_err")
 
 		if tau_err is not None:
 			out["tau_err"] = (
-				tau_err / zp1**3
+				tau_err * zp1**3
 			)
 		else:
 			out["tau_err"] = None

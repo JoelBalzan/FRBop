@@ -1404,7 +1404,7 @@ def _print_host_frame_table(sample: List[Dict]) -> None:
 	print(
 		"RM_host = (RM_obs − RM_Gal) × (1+z)^2    "
 		"sigmaRM_host = sigmaRM_obs × (1+z)^2    "
-		"tau_host = tau_obs / (1+z)^3"
+		"tau_host = tau_obs * (1+z)^3"
 	)
 	print(
 		"RM host sig = |RM_host| / (Galactic RM error scaled to the host "
@@ -2139,7 +2139,7 @@ def plot_rm_tau_correlation_host_frame(
 
 	RM_host = (RM_obs - RM_galactic) * (1 + z)^2
 	sigma_RM_host = sigma_RM_obs * (1 + z)^2
-	tau_host = tau_obs / (1 + z)^3
+	tau_host = tau_obs * (1 + z)^3
 
 	Sources without the required coordinates/redshift/RM are skipped.
 	The Hutschenreuter et al. (2022) reconstruction is used only where
