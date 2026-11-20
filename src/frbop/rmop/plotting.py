@@ -3065,7 +3065,19 @@ def plot_rm_corrected_time_series(time_array: np.ndarray,
 			pa_c = tscrunch_array(pa_corr_u, pa_scrunch)
 			pa_c_sq = tscrunch_array(pa_corr_u**2, pa_scrunch)
 			pa_ce = np.sqrt(np.clip(pa_c_sq - pa_c**2, 0.0, None)) / np.sqrt(pa_scrunch)
-			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce) & (pa_ce <= 20.0)
+			# Add the RM-uncertainty term of the RM bin each scrunched point falls in.
+			# It is common to all points in a bin (fully correlated), not independent.
+			pa_rm_err = rm_results.get('pa_corr_rm_err_deg')
+			if pa_rm_err is not None and tbin_start is not None and tbin_end is not None:
+				bin_lo = frt[np.asarray(tbin_start, dtype=int)] * 1e3
+				bin_hi = frt[np.maximum(np.asarray(tbin_end, dtype=int) - 1, 0)] * 1e3
+				rm_term = np.zeros_like(pa_ce)
+				for j in range(len(bin_lo)):
+					inbin = (bc_c >= bin_lo[j]) & (bc_c <= bin_hi[j])
+					if np.isfinite(pa_rm_err[j]):
+						rm_term[inbin] = pa_rm_err[j]
+				pa_ce = np.hypot(pa_ce, rm_term)
+			ok_c = np.isfinite(bc_c) & np.isfinite(pa_c) & np.isfinite(pa_ce)
 			if np.any(ok_c):
 				ax_pa.errorbar(bc_c[ok_c], pa_c[ok_c], yerr=pa_ce[ok_c], fmt='o',
 							   color='red', ecolor='gray',

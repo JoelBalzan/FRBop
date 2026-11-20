@@ -427,7 +427,8 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
                        n_time_bins: Optional[int] = None,
                        noise_fraction: float = 0.1,
                        offpulse_std: Optional[np.ndarray] = None,
-                       exclude_edge_bins: int = 0) -> Dict:
+                       exclude_edge_bins: int = 0,
+                       jackknife_k: int = 0) -> Dict:
     """
     Fit RM for time-series data (multiple time samples).
 
@@ -455,6 +456,13 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     exclude_edge_bins : int
         Number of frequency bins to exclude from each spectrum edge before
         fitting (default: 0)
+    jackknife_k : int
+        If > 1 (rm_synthesis only), replace the RM, PA and derotated-PA
+        uncertainties in each time bin by delete-one jackknife estimates over
+        ``jackknife_k`` interleaved subsets of the bin's time samples (subset g
+        holds samples g, g+k, g+2k, ...). For each subset the RM is refitted
+        and the data derotated by that subset's RM, so the RM--PA covariance
+        is included. sigma^2 = (k-1)/k * sum_g (theta_g - mean)^2.
 
     Returns:
     --------
@@ -589,6 +597,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
 
     pa_corr_deg = np.full(n_bins_actual, np.nan)
     pa_corr_err_deg = np.full(n_bins_actual, np.nan)
+    pa_corr_err_radiometer_deg = np.full(n_bins_actual, np.nan)
+    pa_corr_rm_err_deg = np.full(n_bins_actual, np.nan)
+    pa_corr_dpsi_drm_deg = np.full(n_bins_actual, np.nan)
     l_corr_frac = np.full(n_bins_actual, np.nan)
     q_corr_bin = np.full(n_bins_actual, np.nan)
     u_corr_bin = np.full(n_bins_actual, np.nan)
@@ -766,12 +777,66 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
             l_corr = np.sqrt(q_corr_mn**2 + u_corr_mn**2)
             l_corr_frac[i] = l_corr / (i_val + 1e-10)
             pa_corr_deg[i] = np.degrees(0.5 * np.arctan2(u_corr_mn, q_corr_mn))
-            pa_corr_err_deg[i] = np.degrees(
+            pa_corr_err_radiometer_deg[i] = np.degrees(
                 0.5 * np.sqrt(
                     (u_corr_mn**2 * noise_q_bin**2 + q_corr_mn**2 * noise_u_bin**2)
                     / max(q_corr_mn**2 + u_corr_mn**2, 1e-20)
                 )
             )
+
+            # The derotated PA is referenced to lambda = 0 and depends on the fitted
+            # RM through dpsi/dRM ~ -<lambda^2> (L-weighted), so the RM uncertainty
+            # propagates into it and dominates at high S/N. Include it.
+            h_rm = 0.05
+            def _psi_corr(rm_trial):
+                return 0.5 * np.angle(np.nanmean(P_obs * np.exp(-2j * rm_trial * lambda_sq_bin)))
+            dpsi = 0.5 * np.angle(np.exp(2j * (_psi_corr(rm_array[i] + h_rm)
+                                               - _psi_corr(rm_array[i] - h_rm)))) / (2 * h_rm)
+            pa_corr_dpsi_drm_deg[i] = np.degrees(dpsi)
+            rm_err_i = rm_err_array[i] if np.isfinite(rm_err_array[i]) else 0.0
+            pa_corr_rm_err_deg[i] = abs(np.degrees(dpsi)) * rm_err_i
+            pa_corr_err_deg[i] = np.hypot(pa_corr_err_radiometer_deg[i], pa_corr_rm_err_deg[i])
+
+            # Delete-one jackknife over interleaved subsets of this bin
+            if (jackknife_k and jackknife_k > 1 and method in ('simple', 'rm_synthesis')
+                    and n_time_in_bin >= jackknife_k):
+                jk = []
+                offs = np.arange(n_time_in_bin)
+                for g in range(int(jackknife_k)):
+                    keep = bin_start + offs[(offs % jackknife_k) != g]
+                    if time_axis == 0:
+                        si = np.nanmean(time_series_data['I'][keep, :], axis=0)
+                        sq = np.nanmean(time_series_data['Q'][keep, :], axis=0)
+                        su = np.nanmean(time_series_data['U'][keep, :], axis=0)
+                    else:
+                        si = np.nanmean(time_series_data['I'][:, keep], axis=1)
+                        sq = np.nanmean(time_series_data['Q'][:, keep], axis=1)
+                        su = np.nanmean(time_series_data['U'][:, keep], axis=1)
+                    if n_edge > 0:
+                        si, sq, su = si[n_edge:-n_edge], sq[n_edge:-n_edge], su[n_edge:-n_edge]
+                    r_g = RMFitter(freq_fit, si, sq, su, None)._fit_rm_with_rmtools(
+                        rm_range=rm_range, n_rm=n_rm,
+                        noise_i=noise_i_perchan / np.sqrt(len(keep)),
+                        noise_q=noise_q_perchan / np.sqrt(len(keep)),
+                        noise_u=noise_u_perchan / np.sqrt(len(keep)),
+                    )
+                    rm_g = r_g.get('rm_clean_peak', r_g.get('rm_peak', np.nan))
+                    Pg = sq + 1j * su
+                    jk.append((rm_g,
+                               0.5 * np.angle(np.nanmean(Pg)),
+                               0.5 * np.angle(np.nanmean(Pg * np.exp(-2j * rm_g * lambda_sq_bin)))))
+                jk = np.array(jk)
+                if np.all(np.isfinite(jk)):
+                    kk = len(jk)
+                    def _jk_sigma(x, angle=False):
+                        if angle:
+                            x = 0.5 * np.unwrap(2 * x)
+                        return np.sqrt((kk - 1) / kk * np.sum((x - x.mean()) ** 2))
+                    rm_err_array[i] = _jk_sigma(jk[:, 0])
+                    if L_det:
+                        pa_err_array[i] = np.degrees(_jk_sigma(jk[:, 1], angle=True))
+                    pa_corr_err_deg[i] = np.degrees(_jk_sigma(jk[:, 2], angle=True))
+                    pa_corr_rm_err_deg[i] = abs(np.degrees(dpsi)) * rm_err_array[i]
 
             # Re-run RM synthesis on the derotated Q/U to check correction
             try:
@@ -825,6 +890,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
     snr_array[~valid_bins] = np.nan
     pa_corr_deg[~valid_bins] = np.nan
     pa_corr_err_deg[~valid_bins] = np.nan
+    pa_corr_err_radiometer_deg[~valid_bins] = np.nan
+    pa_corr_rm_err_deg[~valid_bins] = np.nan
+    pa_corr_dpsi_drm_deg[~valid_bins] = np.nan
     l_corr_frac[~valid_bins] = np.nan
     q_corr_bin[~valid_bins] = np.nan
     u_corr_bin[~valid_bins] = np.nan
@@ -859,6 +927,9 @@ def fit_rm_time_series(freq_hz: np.ndarray, time_series_data: Dict,
         'sigma_l': sigma_L_bins,
         'pa_corr_deg': pa_corr_deg,
         'pa_corr_err_deg': pa_corr_err_deg,
+        'pa_corr_err_radiometer_deg': pa_corr_err_radiometer_deg,
+        'pa_corr_rm_err_deg': pa_corr_rm_err_deg,
+        'pa_corr_dpsi_drm_deg': pa_corr_dpsi_drm_deg,
         'l_corr_frac': l_corr_frac,
         'q_corr_bin': q_corr_bin,
         'u_corr_bin': u_corr_bin,

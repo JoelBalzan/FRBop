@@ -6,8 +6,10 @@ from scipy.optimize import curve_fit
 
 from frbop.scop.gating import find_burst_window, select_peaks_manual
 from frbop.scop.models import scattered_gaussian
-from frbop.scop.plotting import (plot_pa_summary, plot_subband_diagnostic,
-                                 plot_subband_diagnostic_pa, plot_subband_pa)
+from frbop.scop.plotting import (plot_pa_joint_fit, plot_pa_summary,
+                                 plot_subband_diagnostic,
+                                 plot_subband_diagnostic_pa, plot_subband_pa,
+                                 subband_pa_joint_fit)
 from frbop.scop.scattering_index import fit_scattering_index_from_frequencies
 from frbop.utils.peaks import (parse_peak_index_pairs,
                                split_frequency_bands_equal,
@@ -65,6 +67,9 @@ def main():
     parser.add_argument("--fallback-window", "--fallback", type=int, default=200, help="Fallback half-window size if detection fails")
     parser.add_argument("--output", default=None, help="Optional output filename for plot (PNG)")
     parser.add_argument('--pub-col', type=float, default=2, help='Publication figure column count (1, 2, 3, ...). Default: 2')
+    parser.add_argument("--pa-joint-fit", action="store_true", help="Also fit PA_k(t) = psi0(t) + RM(t) lambda_k^2 across subbands (unsmoothed) and plot psi0(t), RM(t)")
+    parser.add_argument("--pa-decimate", type=int, default=4, help="Time decimation for --pa-joint-fit (default: 4)")
+    parser.add_argument("--pa-snr-min", type=float, default=8.0, help="Minimum per-subband L S/N for --pa-joint-fit samples (default: 8)")
 
     args = parser.parse_args()
 
@@ -287,6 +292,12 @@ def main():
                 ds_u_full=ds_u_full,
             )
             plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
+            if args.pa_joint_fit:
+                plot_pa_joint_fit(
+                    subband_pa_joint_fit(sorted_bands, burst_ds_q, burst_ds_u, t_burst_plot, freq,
+                                         ds_q_full, ds_u_full, ntime,
+                                         decimate=args.pa_decimate, snr_min=args.pa_snr_min),
+                    fig_width, args.output)
         elif band_regions is not None and fit_details is not None and len(fit_details['freq']) > 0:
             plot_subband_diagnostic(
                 fit_details, t_burst_plot, args.output,
@@ -304,6 +315,12 @@ def main():
                 ds_u_full=ds_u_full,
             )
             plot_pa_summary(pa_band_info, t_burst_plot, fig_width, args.output)
+            if args.pa_joint_fit:
+                plot_pa_joint_fit(
+                    subband_pa_joint_fit(sorted_bands, burst_ds_q, burst_ds_u, t_burst_plot, freq,
+                                         ds_q_full, ds_u_full, ntime,
+                                         decimate=args.pa_decimate, snr_min=args.pa_snr_min),
+                    fig_width, args.output)
 
     # Frequency-integrated pulse profile and scattered-Gaussian fit for t_scatt
     pulse_profile = np.nanmean(burst_ds, axis=0)

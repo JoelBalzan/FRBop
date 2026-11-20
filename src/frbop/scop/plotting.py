@@ -1233,3 +1233,140 @@ def plot_modulation_index(t_mod, t_profile, mod_index, mod_err, i_profile,
     else:
         plt.show()
     plt.close(fig)
+
+
+def subband_pa_joint_fit(sorted_bands, burst_ds_q, burst_ds_u, t_burst, freq_mhz,
+                         ds_q_full, ds_u_full, ntime, decimate=4, snr_min=8.0):
+    """
+    Fit PA_k(t) = psi0(t) + RM(t) lambda_k^2 across frequency subbands.
+
+    Uses unsmoothed band-averaged Q/U, decimated in time by ``decimate``; PA errors from
+    the off-pulse scatter of the band-averaged Q/U (first ntime//10 samples), as in
+    plot_subband_pa. Samples are kept only where L S/N >= snr_min in every subband.
+
+    Over the tail (PA maximum onwards) each subband PA is fitted with a straight line;
+    the slopes are tested for equality and fitted as dPA_k/dt = dpsi0/dt + (dRM/dt) lambda_k^2.
+    Slope errors are inflated by sqrt(reduced chi^2) when it exceeds 1.
+
+    The quoted rates dpsi0/dt and dRM/dt (``panel_*``) are straight-line fits to the
+    per-sample psi0(t) and RM(t) over the tail window, and the band-centre PA change
+    is decomposed with them.
+
+    Returns a dict with per-sample PAs, the per-sample (psi0, RM) fit and the tail summary.
+    """
+    from scipy import stats
+    c = 299792458.0
+    bands = sorted([b for b in sorted_bands if b[2] > b[1]], key=lambda b: -b[0])
+    nb = len(bands)
+    nt = (len(t_burst) // decimate) * decimate
+    tc = np.asarray(t_burst[:nt], float).reshape(-1, decimate).mean(1)
+    psi = np.full((len(tc), nb), np.nan); spsi = np.full_like(psi, np.nan); l2k = np.zeros(nb)
+    off_n = max(1, ntime // 10)
+    for j, (fv, lo, hi) in enumerate(bands):
+        l2k[j] = np.nanmean((c / (freq_mhz[lo:hi] * 1e6)) ** 2)
+        q = np.nanmean(burst_ds_q[lo:hi, :nt], 0).reshape(-1, decimate).mean(1)
+        u = np.nanmean(burst_ds_u[lo:hi, :nt], 0).reshape(-1, decimate).mean(1)
+        sq = np.nanstd(np.nanmean(ds_q_full[lo:hi, :off_n], 0)) / np.sqrt(decimate)
+        su = np.nanstd(np.nanmean(ds_u_full[lo:hi, :off_n], 0)) / np.sqrt(decimate)
+        L2 = q * q + u * u
+        ok = np.sqrt(L2) / np.hypot(sq, su) * np.sqrt(2) >= snr_min
+        psi[ok, j] = 0.5 * np.arctan2(u[ok], q[ok])
+        spsi[ok, j] = 0.5 * np.sqrt(u[ok] ** 2 * sq ** 2 + q[ok] ** 2 * su ** 2) / L2[ok]
+    good = np.all(np.isfinite(psi), 1)
+    tc, psi, spsi = tc[good], psi[good], spsi[good]
+    if len(tc) < 4:
+        return None
+    med = np.median(psi)
+    psi = np.angle(np.exp(2j * (psi - med))) / 2 + med
+
+    X = np.vstack([np.ones(nb), l2k]).T
+    p0 = np.zeros(len(tc)); rm = np.zeros(len(tc)); sp0 = np.zeros(len(tc)); srm = np.zeros(len(tc))
+    for i in range(len(tc)):
+        W = np.diag(1 / spsi[i] ** 2); cov = np.linalg.inv(X.T @ W @ X); beta = cov @ X.T @ W @ psi[i]
+        p0[i], rm[i] = beta; sp0[i], srm[i] = np.sqrt(np.diag(cov))
+
+    ipk = int(np.argmax(np.mean(psi, 1))); m = tc >= tc[ipk]
+    b = np.zeros(nb); sb = np.zeros(nb)
+    for j in range(nb):
+        A = np.vstack([np.ones(m.sum()), tc[m]]).T; W = np.diag(1 / spsi[m, j] ** 2)
+        cov = np.linalg.inv(A.T @ W @ A); beta = cov @ A.T @ W @ psi[m, j]
+        chi_r = np.sum((psi[m, j] - A @ beta) ** 2 / spsi[m, j] ** 2) / max(m.sum() - 2, 1)
+        b[j] = beta[1]; sb[j] = np.sqrt(cov[1, 1] * max(chi_r, 1.0))
+    wbar = np.sum(b / sb ** 2) / np.sum(1 / sb ** 2)
+    chi_eq = float(np.sum((b - wbar) ** 2 / sb ** 2)); p_eq = float(stats.chi2.sf(chi_eq, nb - 1))
+    W = np.diag(1 / sb ** 2); cov = np.linalg.inv(X.T @ W @ X); beta = cov @ X.T @ W @ b
+    chi_lin = float(np.sum((b - X @ beta) ** 2 / sb ** 2))
+    dt_w = float(tc[m].max() - tc[m].min()); lam0 = float(np.mean(l2k))
+
+    # Straight-line fits to the per-sample psi0(t) and RM(t) over the tail window
+    # (the middle and bottom panels of the plot); these give the quoted rates.
+    def _line(y, e):
+        A = np.vstack([np.ones(m.sum()), tc[m]]).T; Wl = np.diag(1 / e[m] ** 2)
+        cl = np.linalg.inv(A.T @ Wl @ A); bl = cl @ A.T @ Wl @ y[m]
+        chi_r = np.sum((y[m] - A @ bl) ** 2 / e[m] ** 2) / max(m.sum() - 2, 1)
+        return bl[1], np.sqrt(cl[1, 1] * max(chi_r, 1.0))
+    p_psi0, p_psi0_err = _line(p0, sp0)          # rad / ms
+    p_rm, p_rm_err = _line(rm, srm)              # rad m^-2 / ms
+    return dict(
+        t=tc, freq=np.array([bb[0] for bb in bands]), lambda_sq=l2k,
+        pa_deg=np.degrees(psi), pa_err_deg=np.degrees(spsi),
+        psi0_deg=np.degrees(p0), psi0_err_deg=np.degrees(sp0), rm=rm, rm_err=srm,
+        tail_start=float(tc[ipk]), tail_end=float(tc[m].max()),
+        slopes_deg_per_ms=np.degrees(b), slopes_err_deg_per_ms=np.degrees(sb),
+        equal_slope_chi2=chi_eq, equal_slope_dof=nb - 1, equal_slope_p=p_eq,
+        dpsi0_dt_deg_per_ms=float(np.degrees(beta[0])), dpsi0_dt_err=float(np.degrees(np.sqrt(cov[0, 0]))),
+        drm_dt=float(beta[1]), drm_dt_err=float(np.sqrt(cov[1, 1])),
+        lambda_sq_linear_chi2=chi_lin, lambda_sq_linear_dof=nb - 2,
+        window_ms=dt_w, lambda0_sq=lam0,
+        panel_dpsi0_dt_deg_per_ms=float(np.degrees(p_psi0)), panel_dpsi0_dt_err=float(np.degrees(p_psi0_err)),
+        panel_drm_dt=float(p_rm), panel_drm_dt_err=float(p_rm_err),
+        dpa_band_deg=float(np.degrees(p_psi0 + p_rm * lam0) * dt_w),
+        dpa_intrinsic_deg=float(np.degrees(p_psi0) * dt_w),
+        dpa_intrinsic_err_deg=float(np.degrees(p_psi0_err) * dt_w),
+        dpa_faraday_deg=float(np.degrees(p_rm * lam0) * dt_w),
+        dpa_faraday_err_deg=float(np.degrees(p_rm_err * lam0) * dt_w),
+    )
+
+
+def plot_pa_joint_fit(res, fig_width, output):
+    """Subband PA (unsmoothed, decimated) with the per-sample psi0(t) and RM(t) joint fit."""
+    if not res:
+        print("PA joint fit: too few samples above the L S/N threshold")
+        return
+    fig = plt.figure(figsize=(fig_width, fig_width * 1.35))
+    gs = plt.GridSpec(3, 1, height_ratios=[1.3, 1, 1], hspace=0)
+    ax0 = fig.add_subplot(gs[0]); ax1 = fig.add_subplot(gs[1], sharex=ax0); ax2 = fig.add_subplot(gs[2], sharex=ax0)
+    cols = _band_colours(len(res["freq"]))
+    t = res["t"]
+    for j, fv in enumerate(res["freq"]):
+        y, e = res["pa_deg"][:, j], res["pa_err_deg"][:, j]
+        ax0.plot(t, y, color=cols[j], linewidth=1.0, label=f"{fv:.1f} MHz")
+        ax0.fill_between(t, y - e, y + e, color=cols[j], alpha=0.25, linewidth=0)
+    for ax, y, e in ((ax1, res["psi0_deg"], res["psi0_err_deg"]), (ax2, res["rm"], res["rm_err"])):
+        ax.plot(t, y, color="k", linewidth=1.0)
+        ax.fill_between(t, y - e, y + e, color="k", alpha=0.2, linewidth=0)
+    for ax in (ax0, ax1, ax2):
+        ax.axvspan(res["tail_start"], res["tail_end"], color="0.5", alpha=0.08, lw=0)
+        ax.grid(True, alpha=0.3)
+    ax0.set_ylabel("PA [deg.]"); ax1.set_ylabel(r"$\psi_0$ [deg.]")
+    ax2.set_ylabel(r"RM [rad m$^{-2}$]"); ax2.set_xlabel("Time [ms]")
+    ax0.legend(loc="best", ncol=2, fontsize=7)
+    for ax in (ax0, ax1):
+        ax.tick_params(labelbottom=False)
+    if output:
+        base, ext = os.path.splitext(output)
+        out = base + "_pa_joint_fit" + (ext if ext else ".pdf")
+        savefig(out, dpi=600, fig=fig)
+        print(f"PA joint-fit plot saved to {out}")
+        with open(base + "_pa_joint_fit.txt", "w") as fh:
+            for k in ("tail_start", "tail_end", "equal_slope_chi2", "equal_slope_dof", "equal_slope_p",
+                      "dpsi0_dt_deg_per_ms", "dpsi0_dt_err", "drm_dt", "drm_dt_err",
+                      "lambda_sq_linear_chi2", "lambda_sq_linear_dof",
+                      "panel_dpsi0_dt_deg_per_ms", "panel_dpsi0_dt_err", "panel_drm_dt", "panel_drm_dt_err",
+                      "window_ms", "lambda0_sq",
+                      "dpa_band_deg", "dpa_intrinsic_deg", "dpa_intrinsic_err_deg",
+                      "dpa_faraday_deg", "dpa_faraday_err_deg"):
+                fh.write(f"{k} = {res[k]}\n")
+            for fv, s, e in zip(res["freq"], res["slopes_deg_per_ms"], res["slopes_err_deg_per_ms"]):
+                fh.write(f"slope {fv:.1f} MHz = {s:.3f} +/- {e:.3f} deg/ms\n")
+    plt.close(fig)

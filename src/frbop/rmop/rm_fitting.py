@@ -373,6 +373,11 @@ def main() -> None:
 
     # Binning and noise
     parser.add_argument(
+        "--jackknife", type=int, default=0, metavar="K",
+        help="Time-series mode: delete-one jackknife uncertainties for RM, PA and derotated PA "
+             "over K interleaved subsets of each time bin (default: 0 = off)",
+    )
+    parser.add_argument(
         "--time-bins",
         type=int,
         default=None,
@@ -1635,6 +1640,7 @@ def main() -> None:
                 exclude_edge_bins=0,
                 noise_fraction=args.offpulse,
                 offpulse_std=off_std,
+                jackknife_k=args.jackknife,
             )
 
             l_weights_region = None
@@ -1669,7 +1675,8 @@ def main() -> None:
                         'pol_angle_ref', 'P_frac_bin', 'L_frac_bin',
                         'V_frac_bin', 'q_bin', 'u_bin', 'v_bin',
                         'time_bin_start', 'time_bin_end',
-                        'pa_corr_deg', 'pa_corr_err_deg', 'l_corr_frac',
+                        'pa_corr_deg', 'pa_corr_err_deg', 'pa_corr_err_radiometer_deg',
+                        'pa_corr_rm_err_deg', 'pa_corr_dpsi_drm_deg', 'l_corr_frac',
                         'q_corr_bin', 'u_corr_bin',
                         'pa_corr_full', 'l_corr_full', 'rm_corr', 'rm_corr_err', 'time_full']
         for key in _concat_keys:
