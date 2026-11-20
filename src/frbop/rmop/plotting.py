@@ -3596,6 +3596,19 @@ def plot_burns_law_fits(fitter: RMFitter,
 	p0_guess = min(max(p0_guess, 1e-6), 1.0)
 	sigma_guess = 10.0
 
+	def _wfit(model, xd, yd, ed, **kw):
+		"""Weighted least squares when per-point errors exist (falls back to unweighted).
+		Parameter errors use the given errors and are inflated by sqrt(chi2_r) when chi2_r > 1."""
+		if ed is not None and np.all(np.isfinite(ed)) and np.all(ed > 0):
+			popt, pcov = curve_fit(model, xd, yd, sigma=ed, absolute_sigma=True, **kw)
+			dof = max(len(yd) - len(popt), 1)
+			chi2_r = float(np.sum(((yd - model(xd, *popt)) / ed) ** 2) / dof)
+			pcov = pcov * max(chi2_r, 1.0)
+			return popt, pcov, chi2_r
+		popt, pcov = curve_fit(model, xd, yd, **kw)
+		return popt, pcov, np.nan
+	burn_chi2r = mod_chi2r = const_chi2r = np.nan
+
 	burn_popt = burn_perr = mod_popt = mod_perr = None
 	const_popt = const_perr = None
 	circ_const_popt = circ_const_perr = None
@@ -3603,14 +3616,14 @@ def plot_burns_law_fits(fitter: RMFitter,
 	circ_sin_popt = circ_sin_perr = None
 
 	try:
-		burn_popt, burn_pcov = curve_fit(burn_model, x, y, p0=[sigma_guess],
+		burn_popt, burn_pcov, burn_chi2r = _wfit(burn_model, x, y, yerr, p0=[sigma_guess],
 										 bounds=([0.0], [1e5]), maxfev=20000)
 		burn_perr = np.sqrt(np.diag(burn_pcov))
 	except Exception:
 		burn_popt = None
 
 	try:
-		mod_popt, mod_pcov = curve_fit(modified_burn_model, x, y,
+		mod_popt, mod_pcov, mod_chi2r = _wfit(modified_burn_model, x, y, yerr,
 										p0=[p0_guess, sigma_guess],
 										bounds=([0.0, 0.0], [1.02, 1e5]), maxfev=30000)
 		mod_perr = np.sqrt(np.diag(mod_pcov))
@@ -3618,7 +3631,7 @@ def plot_burns_law_fits(fitter: RMFitter,
 		mod_popt = None
 
 	try:
-		const_popt, const_pcov = curve_fit(constant_model, x, y, p0=[p0_guess],
+		const_popt, const_pcov, const_chi2r = _wfit(constant_model, x, y, yerr, p0=[p0_guess],
 											bounds=([0.0], [1.02]), maxfev=10000)
 		const_perr = np.sqrt(np.diag(const_pcov))
 	except Exception:
@@ -3650,14 +3663,14 @@ def plot_burns_law_fits(fitter: RMFitter,
 			beta_guess = 100.0
 
 			try:
-				circ_const_popt, circ_const_pcov = curve_fit(circ_const_model, x_c, y_c,
+				circ_const_popt, circ_const_pcov, _ = _wfit(circ_const_model, x_c, y_c, yerr_c,
 															  p0=[c0_guess], bounds=([-1.0], [1.0]), maxfev=20000)
 				circ_const_perr = np.sqrt(np.diag(circ_const_pcov))
 			except Exception:
 				circ_const_popt = None
 
 			try:
-				circ_lin_popt, circ_lin_pcov = curve_fit(circ_linear_model, x_c, y_c,
+				circ_lin_popt, circ_lin_pcov, _ = _wfit(circ_linear_model, x_c, y_c, yerr_c,
 														  p0=[c0_guess, 0.0],
 														  bounds=([-1.0, -1e5], [1.0, 1e5]), maxfev=30000)
 				circ_lin_perr = np.sqrt(np.diag(circ_lin_pcov))
@@ -3666,8 +3679,8 @@ def plot_burns_law_fits(fitter: RMFitter,
 
 			if np.nansum(np.isfinite(y_c)) >= 8:
 				try:
-					circ_sin_popt, circ_sin_pcov = curve_fit(
-						circ_sine_model, x_c, y_c,
+					circ_sin_popt, circ_sin_pcov, _ = _wfit(
+						circ_sine_model, x_c, y_c, yerr_c,
 						p0=[c0_guess, amp_guess, 0.0, beta_guess],
 						bounds=([-1.0, 0.0, -np.pi, -1e5], [1.0, 1.0, np.pi, 1e5]), maxfev=60000)
 					circ_sin_perr = np.sqrt(np.diag(circ_sin_pcov))
@@ -3691,7 +3704,8 @@ def plot_burns_law_fits(fitter: RMFitter,
 
 	if burn_popt is not None:
 		if burn_perr is not None and burn_perr.size == 1:
-			_print_and_store(f"  P_Burn: sigma_RM = {burn_popt[0]:.6f} ± {burn_perr[0]:.6f} rad/m^2")
+			_print_and_store(f"  P_Burn: sigma_RM = {burn_popt[0]:.6f} ± {burn_perr[0]:.6f} rad/m^2"
+							  + ("" if not np.isfinite(burn_chi2r) else f"  (weighted; chi2_r = {burn_chi2r:.2f})"))
 		else:
 			_print_and_store(f"  P_Burn: sigma_RM = {burn_popt[0]:.6f} rad/m^2")
 	else:
@@ -3728,14 +3742,14 @@ def plot_burns_law_fits(fitter: RMFitter,
 						  f"threshold={sigma_rm_thresh:.6f} rad/m^2, "
 						  f"fitted={burn_popt[0]:.6f} -> {'measurable' if burn_measurable else 'not measurable'}")
 
-	#if mod_popt is not None:
-	#	if mod_perr is not None and mod_perr.size == 2:
-	#		_print_and_store(f"  P_mod-Burn: P_i = {mod_popt[0]:.6f} ± {mod_perr[0]:.6f}, "
-	#						  f"sigma_RM' = {mod_popt[1]:.6f} ± {mod_perr[1]:.6f} rad/m^2")
-	#	else:
-	#		_print_and_store(f"  P_mod-Burn: P_i = {mod_popt[0]:.6f}, sigma_RM' = {mod_popt[1]:.6f} rad/m^2")
-	#else:
-	#	_print_and_store("  P_mod-Burn: fit failed")
+	if mod_popt is not None:
+		if mod_perr is not None and mod_perr.size == 2:
+			_print_and_store(f"  P_mod-Burn: P_i = {mod_popt[0]:.6f} ± {mod_perr[0]:.6f}, "
+							  f"sigma_RM' = {mod_popt[1]:.6f} ± {mod_perr[1]:.6f} rad/m^2")
+		else:
+			_print_and_store(f"  P_mod-Burn: P_i = {mod_popt[0]:.6f}, sigma_RM' = {mod_popt[1]:.6f} rad/m^2")
+	else:
+		_print_and_store("  P_mod-Burn: fit failed")
 
 	if mod_popt is not None:
 		try:
